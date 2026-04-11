@@ -1,0 +1,4 @@
+-- Initial roles and super admin. Replace emails and run after schema migrations.
+-- Example:
+-- insert into public.roles (key, label) values ('super_admin', 'Super admin');
+-- insert into auth.users ... (use Supabase dashboard or invite flow for real users);

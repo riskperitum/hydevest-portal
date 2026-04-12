@@ -3,7 +3,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, CheckCircle2, Clock, PlayCircle, Plus, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft, Loader2, CheckCircle2, Clock, PlayCircle,
+  Plus, Trash2, ChevronDown, Pencil, Check, X,
+  TrendingUp, Package, DollarSign, Activity, Zap
+} from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 
@@ -57,20 +61,20 @@ interface Supplier { id: string; name: string }
 interface ClearingAgent { id: string; name: string }
 
 const STATUS_OPTIONS = [
-  { value: 'not_started', label: 'Not started', icon: <Clock size={14} />, color: 'bg-gray-100 text-gray-600' },
-  { value: 'in_progress', label: 'In progress', icon: <PlayCircle size={14} />, color: 'bg-blue-50 text-blue-700' },
-  { value: 'completed',   label: 'Completed',   icon: <CheckCircle2 size={14} />, color: 'bg-green-50 text-green-700' },
+  { value: 'not_started', label: 'Not started', icon: <Clock size={13} />, color: 'bg-gray-100 text-gray-600 border-gray-200' },
+  { value: 'in_progress', label: 'In progress', icon: <PlayCircle size={13} />, color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { value: 'completed',   label: 'Completed',   icon: <CheckCircle2 size={13} />, color: 'bg-green-50 text-green-700 border-green-200' },
 ]
 
 const CONTAINER_STATUS = [
-  { value: 'ordered',   label: 'Ordered',   color: 'bg-gray-100 text-gray-600' },
+  { value: 'ordered',    label: 'Ordered',    color: 'bg-gray-100 text-gray-600' },
   { value: 'in_transit', label: 'In transit', color: 'bg-blue-50 text-blue-700' },
-  { value: 'arrived',   label: 'Arrived',   color: 'bg-green-50 text-green-700' },
-  { value: 'cleared',   label: 'Cleared',   color: 'bg-brand-50 text-brand-700' },
+  { value: 'arrived',    label: 'Arrived',    color: 'bg-green-50 text-green-700' },
+  { value: 'cleared',    label: 'Cleared',    color: 'bg-brand-50 text-brand-700' },
 ]
 
 const blankExpense = { category: 'general', amount: '', currency: 'NGN', exchange_rate: '1', description: '', expense_date: new Date().toISOString().split('T')[0] }
-const blankContainer = { container_number: '', description: '', weight_kg: '', quantity: '', unit_price: '', currency: 'USD', exchange_rate: '', status: 'ordered' }
+const blankContainer = { container_number: '', description: '' }
 
 export default function TripDetailPage() {
   const params = useParams()
@@ -84,16 +88,16 @@ export default function TripDetailPage() {
   const [activeTab, setActiveTab] = useState('expenses')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [clearingAgents, setClearingAgents] = useState<ClearingAgent[]>([])
-
   const [expenseOpen, setExpenseOpen] = useState(false)
   const [containerOpen, setContainerOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expenseForm, setExpenseForm] = useState(blankExpense)
   const [containerForm, setContainerForm] = useState(blankContainer)
-
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
-  const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -128,10 +132,9 @@ export default function TripDetailPage() {
   }
 
   async function updateStatus(status: string) {
-    setUpdatingStatus(true)
     const supabase = createClient()
     await supabase.from('trips').update({ status }).eq('id', tripId)
-    setUpdatingStatus(false)
+    setStatusOpen(false)
     load()
   }
 
@@ -141,6 +144,13 @@ export default function TripDetailPage() {
     const supabase = createClient()
     await supabase.from('trips').update({ approval_status: newStatus }).eq('id', tripId)
     load()
+  }
+
+  async function handleDelete() {
+    setDeleting(true)
+    const supabase = createClient()
+    await supabase.from('trips').delete().eq('id', tripId)
+    router.push('/portal/purchase/trips')
   }
 
   async function handleExpense(e: React.FormEvent) {
@@ -172,20 +182,10 @@ export default function TripDetailPage() {
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    const qty = parseInt(containerForm.quantity)
-    const price = parseFloat(containerForm.unit_price)
-    const rate = parseFloat(containerForm.exchange_rate)
     await supabase.from('containers').insert({
       trip_id: tripId,
       container_number: containerForm.container_number || null,
       description: containerForm.description || null,
-      weight_kg: containerForm.weight_kg ? parseFloat(containerForm.weight_kg) : null,
-      quantity: containerForm.quantity ? qty : null,
-      unit_price: containerForm.unit_price ? price : null,
-      currency: containerForm.currency,
-      exchange_rate: rate || 1,
-      total_cost_ngn: (qty && price && rate) ? qty * price * rate : null,
-      status: containerForm.status,
       created_by: user?.id,
     })
     setContainerOpen(false)
@@ -208,9 +208,23 @@ export default function TripDetailPage() {
     load()
   }
 
-  const fmt = (n: number) => `₦${Number(n).toLocaleString()}`
+  const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
   const containerStatusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
+
+  const containerPaymentUSD = containers.filter(c => c.currency === 'USD').reduce((s, c) => s + (Number(c.unit_price ?? 0) * Number(c.quantity ?? 1)), 0)
+  const containerPaymentNGN = containers.reduce((s, c) => s + Number(c.total_cost_ngn ?? 0), 0)
+  const otherExpenses = expenses.reduce((s, e) => s + Number(e.amount_ngn), 0)
+  const totalLanding = containerPaymentNGN + otherExpenses
+  const avgFx = containers.length > 0 ? containers.reduce((s, c) => s + Number(c.exchange_rate ?? 0), 0) / containers.length : 0
+
+  const metrics = [
+    { label: 'Total landing amount (₦)', value: fmt(totalLanding), icon: <TrendingUp size={16} />, color: 'text-brand-600 bg-brand-50' },
+    { label: 'Total container payment ($)', value: `$${containerPaymentUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <DollarSign size={16} />, color: 'text-green-600 bg-green-50' },
+    { label: 'Total container payment (₦)', value: fmt(containerPaymentNGN), icon: <Package size={16} />, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Other expenses', value: otherExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <Activity size={16} />, color: 'text-amber-600 bg-amber-50' },
+    { label: 'Average FX rate', value: avgFx > 0 ? avgFx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—', icon: <Zap size={16} />, color: 'text-purple-600 bg-purple-50' },
+  ]
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -223,94 +237,220 @@ export default function TripDetailPage() {
   )
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      {/* Back + header */}
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-5 max-w-6xl">
+
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <Link href="/portal/purchase/trips" className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+          <Link href="/portal/purchase/trips"
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
             <ArrowLeft size={18} />
           </Link>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{trip.trip_id}</span>
-              <span className="text-xs text-gray-400">Created by {trip.created_by_profile?.full_name ?? trip.created_by_profile?.email ?? '—'}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
+              <span className="text-xs text-gray-400">
+                Created by <span className="text-gray-600">{trip.created_by_profile?.full_name ?? trip.created_by_profile?.email ?? '—'}</span>
+              </span>
               <span className="text-xs text-gray-400">on {new Date(trip.created_at).toLocaleDateString()}</span>
             </div>
-            <h1 className="text-xl font-semibold text-gray-900 mt-1">{trip.title}</h1>
+            <h1 className="text-lg font-semibold text-gray-900 mt-0.5">{trip.title}</h1>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Status dropdown */}
-          <div className="relative group">
-            <button className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${statusInfo(trip.status).color}`}>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status */}
+          <div className="relative">
+            <button onClick={() => setStatusOpen(v => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border ${statusInfo(trip.status).color}`}>
               {statusInfo(trip.status).icon}
               {statusInfo(trip.status).label}
+              <ChevronDown size={13} />
             </button>
-            <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-lg border border-gray-100 shadow-lg z-10 py-1 hidden group-hover:block">
-              {STATUS_OPTIONS.map(s => (
-                <button key={s.value} onClick={() => updateStatus(s.value)}
-                  className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                  {s.icon} {s.label}
-                </button>
-              ))}
-            </div>
+            {statusOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setStatusOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg border border-gray-100 shadow-lg z-20 py-1">
+                  {STATUS_OPTIONS.map(s => (
+                    <button key={s.value} onClick={() => updateStatus(s.value)}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors
+                        ${trip.status === s.value ? 'font-medium text-brand-600' : 'text-gray-700'}`}>
+                      {s.icon} {s.label}
+                      {trip.status === s.value && <Check size={12} className="ml-auto" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-          {/* Approval button */}
+
+          {/* Approval */}
           <button onClick={toggleApproval}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${trip.approval_status === 'approved' ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
-            {trip.approval_status === 'approved' ? '✓ Approved' : 'Not approved'}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
+              ${trip.approval_status === 'approved'
+                ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+            {trip.approval_status === 'approved' ? <span className="flex items-center gap-1"><CheckCircle2 size={13} /> Approved</span> : 'Not approved'}
+          </button>
+
+          {/* Delete */}
+          <button onClick={() => setDeleteOpen(true)}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-1.5">
+            <Trash2 size={13} /> Delete trip
           </button>
         </div>
       </div>
 
-      {/* Trip details — editable fields */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-        <div className="grid grid-cols-2 gap-6">
-          {[
-            { key: 'title', label: 'Title', value: trip.title },
-            { key: 'description', label: 'Description', value: trip.description ?? '' },
-            { key: 'source_location', label: 'Source location', value: trip.source_location ?? '' },
-            { key: 'start_date', label: 'Start date', value: trip.start_date ?? '', type: 'date' },
-            { key: 'end_date', label: 'End date', value: trip.end_date ?? '', type: 'date' },
-          ].map(field => (
-            <div key={field.key}>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{field.label}</label>
-              {editField === field.key ? (
-                <div className="flex gap-2">
-                  <input
-                    type={field.type ?? 'text'}
-                    value={fieldValue}
-                    onChange={e => setFieldValue(e.target.value)}
-                    className="flex-1 px-3 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    autoFocus
-                  />
-                  <button onClick={() => updateField(field.key, fieldValue)}
-                    className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700">Save</button>
-                  <button onClick={() => setEditField(null)}
-                    className="px-3 py-1.5 border border-gray-200 text-sm rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setEditField(field.key); setFieldValue(field.value) }}
-                  className="w-full text-left px-3 py-2 text-sm text-gray-900 bg-gray-50 rounded-lg hover:bg-brand-50 hover:text-brand-700 transition-colors border border-transparent hover:border-brand-200"
-                >
-                  {field.value || <span className="text-gray-400">Click to edit</span>}
-                </button>
-              )}
+      {/* Metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {metrics.map(m => (
+          <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <div className={`inline-flex p-1.5 rounded-lg ${m.color} mb-2`}>
+              {m.icon}
             </div>
-          ))}
+            <p className="text-xs text-gray-500 mb-1 truncate">{m.label}</p>
+            <p className="text-base font-semibold text-gray-900 truncate">{m.value}</p>
+          </div>
+        ))}
+      </div>
 
-          {/* Supplier display */}
-          <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Supplier</label>
-            <div className="px-3 py-2 text-sm text-gray-900 bg-gray-50 rounded-lg">{trip.supplier?.name ?? '—'}</div>
+      {/* Trip details */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">Trip information</h2>
+          <span className="text-xs text-gray-400">Click any field to edit</span>
+        </div>
+
+        {/* Compact grid — 3 columns for short fields */}
+        <div className="divide-y divide-gray-50">
+
+          {/* Row 1: Title + Source Location + Status readonly */}
+          <div className="grid grid-cols-3 divide-x divide-gray-50">
+            {[
+              { key: 'title', label: 'Title', value: trip.title },
+              { key: 'source_location', label: 'Source location', value: trip.source_location ?? '' },
+            ].map(field => (
+              <div key={field.key} className="px-4 py-3">
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{field.label}</p>
+                {editField === field.key ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={fieldValue}
+                      onChange={e => setFieldValue(e.target.value)}
+                      className="flex-1 px-2 py-1 text-sm border border-brand-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
+                      autoFocus
+                    />
+                    <button onClick={() => updateField(field.key, fieldValue)}
+                      className="p-1.5 bg-brand-600 text-white rounded-md hover:bg-brand-700 transition-colors shrink-0">
+                      <Check size={12} />
+                    </button>
+                    <button onClick={() => setEditField(null)}
+                      className="p-1.5 border border-gray-200 text-gray-500 rounded-md hover:bg-gray-50 transition-colors shrink-0">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditField(field.key); setFieldValue(field.value) }}
+                    className="group w-full text-left flex items-center justify-between gap-2">
+                    <span className={`text-sm truncate ${field.value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+                      {field.value || 'Not set'}
+                    </span>
+                    <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {/* Supplier — read only */}
+            <div className="px-4 py-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Supplier</p>
+              <p className="text-sm font-medium text-gray-900 truncate">{trip.supplier?.name ?? <span className="text-gray-400 italic font-normal">Not set</span>}</p>
+            </div>
           </div>
 
-          {/* Clearing agent display */}
-          <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Clearing agent</label>
-            <div className="px-3 py-2 text-sm text-gray-900 bg-gray-50 rounded-lg">{trip.clearing_agent?.name ?? '—'}</div>
+          {/* Row 2: Start Date + End Date + Clearing Agent */}
+          <div className="grid grid-cols-3 divide-x divide-gray-50">
+            {[
+              { key: 'start_date', label: 'Start date', value: trip.start_date ?? '', type: 'date' },
+              { key: 'end_date', label: 'End date', value: trip.end_date ?? '', type: 'date' },
+            ].map(field => (
+              <div key={field.key} className="px-4 py-3">
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{field.label}</p>
+                {editField === field.key ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="date"
+                      value={fieldValue}
+                      onChange={e => setFieldValue(e.target.value)}
+                      className="flex-1 px-2 py-1 text-sm border border-brand-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
+                      autoFocus
+                    />
+                    <button onClick={() => updateField(field.key, fieldValue)}
+                      className="p-1.5 bg-brand-600 text-white rounded-md hover:bg-brand-700 transition-colors shrink-0">
+                      <Check size={12} />
+                    </button>
+                    <button onClick={() => setEditField(null)}
+                      className="p-1.5 border border-gray-200 text-gray-500 rounded-md hover:bg-gray-50 transition-colors shrink-0">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditField(field.key); setFieldValue(field.value) }}
+                    className="group w-full text-left flex items-center justify-between gap-2">
+                    <span className={`text-sm truncate ${field.value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+                      {field.value ? new Date(field.value).toLocaleDateString() : 'Not set'}
+                    </span>
+                    <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {/* Clearing agent — read only */}
+            <div className="px-4 py-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Clearing agent</p>
+              <p className="text-sm font-medium text-gray-900 truncate">{trip.clearing_agent?.name ?? <span className="text-gray-400 italic font-normal">Not set</span>}</p>
+            </div>
           </div>
+
+          {/* Row 3: Description — full width */}
+          <div className="px-4 py-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Description</p>
+            {editField === 'description' ? (
+              <div className="flex gap-1.5">
+                <textarea
+                  rows={2}
+                  value={fieldValue}
+                  onChange={e => setFieldValue(e.target.value)}
+                  className="flex-1 px-2 py-1 text-sm border border-brand-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                  autoFocus
+                />
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  <button onClick={() => updateField('description', fieldValue)}
+                    className="p-1.5 bg-brand-600 text-white rounded-md hover:bg-brand-700 transition-colors">
+                    <Check size={12} />
+                  </button>
+                  <button onClick={() => setEditField(null)}
+                    className="p-1.5 border border-gray-200 text-gray-500 rounded-md hover:bg-gray-50 transition-colors">
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setEditField('description'); setFieldValue(trip.description ?? '') }}
+                className="group w-full text-left flex items-center justify-between gap-2">
+                <span className={`text-sm ${trip.description ? 'text-gray-700' : 'text-gray-400 italic'}`}>
+                  {trip.description || 'No description — click to add'}
+                </span>
+                <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
+              </button>
+            )}
+          </div>
+
         </div>
       </div>
 
@@ -318,77 +458,86 @@ export default function TripDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100">
           {[
-            { key: 'expenses', label: 'Trip Expense' },
-            { key: 'containers', label: 'Containers' },
-            { key: 'documents', label: 'Trip Document' },
+            { key: 'expenses', label: 'Trip Expense', count: expenses.length },
+            { key: 'containers', label: 'Containers', count: containers.length },
+            { key: 'documents', label: 'Trip Document', count: 0 },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`px-6 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
-                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              className={`px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px flex items-center gap-2
+                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
               {tab.label}
+              {tab.count > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
+                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {tab.count}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
         <div className="p-5">
-          {/* EXPENSES TAB */}
+
+          {/* EXPENSES */}
           {activeTab === 'expenses' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="text-sm text-gray-500">
-                  Total: <span className="font-semibold text-gray-900">{fmt(expenses.reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                    General: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'general').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
+                  </span>
+                  <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                    Container: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'container').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
+                  </span>
                 </div>
                 <button onClick={() => setExpenseOpen(true)}
                   className="inline-flex items-center gap-2 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
                   <Plus size={14} /> Record expense
                 </button>
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Currency</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount (₦)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created by</th>
-                    <th className="px-4 py-3 w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.length === 0 ? (
-                    <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-400">No expenses recorded yet.</td></tr>
-                  ) : expenses.map(exp => (
-                    <tr key={exp.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-4 py-3"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span></td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
-                          {exp.category === 'container' ? 'Container' : 'General'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-medium">{Number(exp.amount).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-gray-500">{exp.currency}</td>
-                      <td className="px-4 py-3 text-gray-500">{exp.exchange_rate}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{fmt(exp.amount_ngn)}</td>
-                      <td className="px-4 py-3 text-gray-500">{exp.description ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{new Date(exp.expense_date).toLocaleDateString()}</td>
-                      <td className="px-4 py-3 text-gray-500">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteExpense(exp.id)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
+
+              <div className="overflow-x-auto rounded-lg border border-gray-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['ID', 'Category', 'Amount', 'Currency', 'Rate', 'Amount (₦)', 'Description', 'Date', 'Created by', ''].map(h => (
+                        <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {expenses.length === 0 ? (
+                      <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">No expenses recorded yet.</td></tr>
+                    ) : expenses.map(exp => (
+                      <tr key={exp.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                        <td className="px-3 py-3"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span></td>
+                        <td className="px-3 py-3">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap
+                            ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {exp.category === 'container' ? 'Container' : 'General'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{Number(exp.amount).toLocaleString()}</td>
+                        <td className="px-3 py-3 text-gray-500">{exp.currency}</td>
+                        <td className="px-3 py-3 text-gray-500">{exp.exchange_rate}</td>
+                        <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(exp.amount_ngn)}</td>
+                        <td className="px-3 py-3 text-gray-500 max-w-[180px] truncate">{exp.description ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(exp.expense_date).toLocaleDateString()}</td>
+                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
+                        <td className="px-3 py-3">
+                          <button onClick={() => deleteExpense(exp.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          {/* CONTAINERS TAB */}
+          {/* CONTAINERS */}
           {activeTab === 'containers' && (
             <div className="space-y-4">
               <div className="flex justify-end">
@@ -397,60 +546,59 @@ export default function TripDetailPage() {
                   <Plus size={14} /> Add container
                 </button>
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Container No.</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit price</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Currency</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total (₦)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-4 py-3 w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {containers.length === 0 ? (
-                    <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-400">No containers added yet.</td></tr>
-                  ) : containers.map(con => (
-                    <tr key={con.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-4 py-3"><span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span></td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{con.container_number ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{con.description ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{con.quantity ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{con.unit_price ? Number(con.unit_price).toLocaleString() : '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{con.currency}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{con.total_cost_ngn ? fmt(con.total_cost_ngn) : '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${containerStatusInfo(con.status).color}`}>
-                          {containerStatusInfo(con.status).label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteContainer(con.id)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
+              <div className="overflow-x-auto rounded-lg border border-gray-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['ID', 'Title / Label', 'Tracking number', 'Status', ''].map(h => (
+                        <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {containers.length === 0 ? (
+                      <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">No containers added yet.</td></tr>
+                    ) : containers.map(con => (
+                      <tr key={con.id}
+                        onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
+                        className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group">
+                        <td className="px-3 py-3"><span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span></td>
+                        <td className="px-3 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{con.container_number ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-500">{con.description ?? '—'}</td>
+                        <td className="px-3 py-3">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${containerStatusInfo(con.status).color}`}>
+                            {containerStatusInfo(con.status).label}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <button onClick={(e) => { e.stopPropagation(); deleteContainer(con.id) }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          {/* DOCUMENTS TAB */}
+          {/* DOCUMENTS */}
           {activeTab === 'documents' && (
-            <div className="flex items-center justify-center py-16 text-sm text-gray-400">
-              Document upload coming soon.
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+                <Package size={20} className="text-gray-400" />
+              </div>
+              <p className="text-sm text-gray-500 font-medium">No documents yet</p>
+              <p className="text-xs text-gray-400">Document upload will be available soon</p>
             </div>
           )}
         </div>
       </div>
 
       {/* Expense modal */}
-      <Modal open={expenseOpen} onClose={() => setExpenseOpen(false)} title="Record expense" size="md">
+      <Modal open={expenseOpen} onClose={() => setExpenseOpen(false)} title="Record expense" description="Add an expense to this trip" size="md">
         <form onSubmit={handleExpense} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -463,7 +611,8 @@ export default function TripDetailPage() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Amount <span className="text-red-400">*</span></label>
-              <input required type="number" step="0.01" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))}
+              <input required type="number" step="0.01" value={expenseForm.amount}
+                onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="0.00" />
             </div>
@@ -479,7 +628,8 @@ export default function TripDetailPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Exchange rate</label>
-              <input type="number" step="0.0001" value={expenseForm.exchange_rate} onChange={e => setExpenseForm(f => ({ ...f, exchange_rate: e.target.value }))}
+              <input type="number" step="0.0001" value={expenseForm.exchange_rate}
+                onChange={e => setExpenseForm(f => ({ ...f, exchange_rate: e.target.value }))}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="1.0" />
             </div>
@@ -492,14 +642,15 @@ export default function TripDetailPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Expense date</label>
-            <input type="date" value={expenseForm.expense_date} onChange={e => setExpenseForm(f => ({ ...f, expense_date: e.target.value }))}
+            <input type="date" value={expenseForm.expense_date}
+              onChange={e => setExpenseForm(f => ({ ...f, expense_date: e.target.value }))}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setExpenseOpen(false)}
-              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
             <button type="submit" disabled={saving}
-              className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Record expense'}
             </button>
           </div>
@@ -507,75 +658,58 @@ export default function TripDetailPage() {
       </Modal>
 
       {/* Container modal */}
-      <Modal open={containerOpen} onClose={() => setContainerOpen(false)} title="Add container" size="md">
+      <Modal open={containerOpen} onClose={() => setContainerOpen(false)} title="Create container" description="Enter the details of the new container" size="md">
         <form onSubmit={handleContainer} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Container number</label>
-              <input value={containerForm.container_number} onChange={e => setContainerForm(f => ({ ...f, container_number: e.target.value }))}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Title / Label</label>
+              <input
+                value={containerForm.container_number}
+                onChange={e => setContainerForm(f => ({ ...f, container_number: e.target.value }))}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="e.g. MSCU1234567" />
+                placeholder="Enter title" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select value={containerForm.status} onChange={e => setContainerForm(f => ({ ...f, status: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                {CONTAINER_STATUS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <input value={containerForm.description} onChange={e => setContainerForm(f => ({ ...f, description: e.target.value }))}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder="Container contents or notes" />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-              <input type="number" value={containerForm.quantity} onChange={e => setContainerForm(f => ({ ...f, quantity: e.target.value }))}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Container tracking number</label>
+              <input
+                value={containerForm.description}
+                onChange={e => setContainerForm(f => ({ ...f, description: e.target.value }))}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit price</label>
-              <input type="number" step="0.01" value={containerForm.unit_price} onChange={e => setContainerForm(f => ({ ...f, unit_price: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="0.00" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Weight (kg)</label>
-              <input type="number" step="0.01" value={containerForm.weight_kg} onChange={e => setContainerForm(f => ({ ...f, weight_kg: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="0.00" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
-              <select value={containerForm.currency} onChange={e => setContainerForm(f => ({ ...f, currency: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="USD">USD</option>
-                <option value="NGN">NGN</option>
-                <option value="EUR">EUR</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Exchange rate (to ₦)</label>
-              <input type="number" step="0.0001" value={containerForm.exchange_rate} onChange={e => setContainerForm(f => ({ ...f, exchange_rate: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="e.g. 1580" />
+                placeholder="Enter tracking number" />
             </div>
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setContainerOpen(false)}
-              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+              Cancel
+            </button>
             <button type="submit" disabled={saving}
-              className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Add container'}
+              className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : 'Create'}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete confirmation modal */}
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete trip" description="This action cannot be undone" size="sm">
+        <div className="space-y-4">
+          <div className="p-4 bg-red-50 rounded-lg border border-red-100">
+            <p className="text-sm text-red-700">
+              You are about to permanently delete <span className="font-semibold">{trip.title}</span> ({trip.trip_id}) along with all its expenses, containers and documents.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => setDeleteOpen(false)}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={handleDelete} disabled={deleting}
+              className="flex-1 px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+              {deleting ? <><Loader2 size={14} className="animate-spin" /> Deleting…</> : 'Delete trip'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

@@ -8,6 +8,7 @@ import SuppliersTab from './tabs/SuppliersTab'
 import PartnersTab from './tabs/PartnersTab'
 import BdcAgentsTab from './tabs/BdcAgentsTab'
 import ClearingAgentsTab from './tabs/ClearingAgentsTab'
+import EntityTab from './tabs/EntityTab'
 
 const TABS = [
   { key: 'employees',       label: 'Employees',      icon: <Users size={16} /> },
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'partners',        label: 'Partners',        icon: <Handshake size={16} /> },
   { key: 'bdc-agents',      label: 'BDC Agents',      icon: <Building2 size={16} /> },
   { key: 'clearing-agents', label: 'Clearing Agents', icon: <Ship size={16} /> },
+  { key: 'entities', label: 'Entities', icon: <Building2 size={16} /> },
 ]
 
 export default function AccountsPage() {
@@ -44,6 +46,7 @@ export default function AccountsPage() {
           {activeTab === 'partners'        && <PartnersTab />}
           {activeTab === 'bdc-agents'      && <BdcAgentsTab />}
           {activeTab === 'clearing-agents' && <ClearingAgentsTab />}
+          {activeTab === 'entities'        && <EntityTab />}
         </div>
       </div>
     </div>

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Search, Filter, Download, ChevronDown, Eye } from 'lucide-react'
-import Link from 'next/link'
+import { Plus, Search, Download, Eye, Trash2, CheckCircle2, Clock } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import Modal from '@/components/ui/Modal'
 import { Loader2 } from 'lucide-react'
 
@@ -39,6 +39,7 @@ const blank = {
 }
 
 export default function TripsPage() {
+  const router = useRouter()
   const [trips, setTrips] = useState<Trip[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -48,6 +49,8 @@ export default function TripsPage() {
   const [clearingAgents, setClearingAgents] = useState<ClearingAgent[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -92,6 +95,26 @@ export default function TripsPage() {
     setOpen(false)
     setForm(blank)
     setSaving(false)
+    load()
+  }
+
+  async function handleDelete(e: React.MouseEvent, trip: Trip) {
+    e.stopPropagation()
+    if (!confirm(`Delete "${trip.title}" (${trip.trip_id})? This cannot be undone.`)) return
+    setDeletingId(trip.id)
+    const supabase = createClient()
+    await supabase.from('trips').delete().eq('id', trip.id)
+    setDeletingId(null)
+    load()
+  }
+
+  async function handleToggleApproval(e: React.MouseEvent, trip: Trip) {
+    e.stopPropagation()
+    setApprovingId(trip.id)
+    const supabase = createClient()
+    const newStatus = trip.approval_status === 'approved' ? 'not_approved' : 'approved'
+    await supabase.from('trips').update({ approval_status: newStatus }).eq('id', trip.id)
+    setApprovingId(null)
     load()
   }
 
@@ -170,7 +193,7 @@ export default function TripsPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">End</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Approval</th>
-                <th className="px-4 py-3 w-10"></th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -192,31 +215,66 @@ export default function TripsPage() {
                 </tr>
               ) : (
                 filtered.map(trip => (
-                  <tr key={trip.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                  <tr
+                    key={trip.id}
+                    onClick={() => router.push(`/portal/purchase/trips/${trip.id}`)}
+                    className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group"
+                  >
                     <td className="px-4 py-3">
-                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{trip.trip_id}</span>
+                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{trip.title}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{trip.title}</td>
                     <td className="px-4 py-3 text-gray-500">{trip.source_location ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{trip.supplier?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{trip.clearing_agent?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-500">{trip.start_date ? new Date(trip.start_date).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-3 text-gray-500">{trip.end_date ? new Date(trip.end_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{trip.start_date ? new Date(trip.start_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{trip.end_date ? new Date(trip.end_date).toLocaleDateString() : '—'}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo(trip.status).color}`}>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${statusInfo(trip.status).color}`}>
                         {statusInfo(trip.status).label}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${trip.approval_status === 'approved' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap
+                        ${trip.approval_status === 'approved' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
                         {trip.approval_status === 'approved' ? 'Approved' : 'Not approved'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Link href={`/portal/purchase/trips/${trip.id}`}
-                        className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors inline-flex">
-                        <Eye size={15} />
-                      </Link>
+                      <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                        {/* View */}
+                        <button
+                          onClick={() => router.push(`/portal/purchase/trips/${trip.id}`)}
+                          title="View trip"
+                          className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                          <Eye size={15} />
+                        </button>
+
+                        {/* Approve / Unapprove */}
+                        <button
+                          onClick={(e) => handleToggleApproval(e, trip)}
+                          disabled={approvingId === trip.id}
+                          title={trip.approval_status === 'approved' ? 'Unapprove' : 'Approve'}
+                          className={`p-1.5 rounded-lg transition-colors
+                            ${trip.approval_status === 'approved'
+                              ? 'hover:bg-green-50 text-green-500 hover:text-green-700'
+                              : 'hover:bg-amber-50 text-gray-400 hover:text-amber-600'}`}>
+                          {approvingId === trip.id
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <CheckCircle2 size={15} />}
+                        </button>
+
+                        {/* Delete */}
+                        <button
+                          onClick={(e) => handleDelete(e, trip)}
+                          disabled={deletingId === trip.id}
+                          title="Delete trip"
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                          {deletingId === trip.id
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <Trash2 size={15} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

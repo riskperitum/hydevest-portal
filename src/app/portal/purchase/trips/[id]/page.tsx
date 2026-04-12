@@ -5,8 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, CheckCircle2, Clock, PlayCircle,
-  Plus, Trash2, ChevronDown, Pencil, Check, X, Eye,
-  TrendingUp, Package, DollarSign, Activity, Zap
+  Plus, Trash2, ChevronDown, Pencil, Check, X,
+  TrendingUp, Package, DollarSign, Activity, Zap, Eye, RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
@@ -109,6 +109,54 @@ export default function TripDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  const recalculateLandingCosts = useCallback(async (
+    currentContainers: Container[],
+    currentExpenses: TripExpense[]
+  ) => {
+    if (currentContainers.length === 0) return
+
+    const supabase = createClient()
+
+    // WAER = Total NGN container payments ÷ Total USD container purchase subtotal
+    const containerExpensesNGN = currentExpenses
+      .filter(e => e.category === 'container')
+      .reduce((s, e) => s + Number(e.amount_ngn), 0)
+
+    const containersTotalUSD = currentContainers.reduce((s, c) => {
+      const purchaseAmt = (c.unit_price_usd && c.pieces_purchased)
+        ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+        : 0
+      return s + purchaseAmt + Number(c.shipping_amount_usd ?? 0)
+    }, 0)
+
+    const waer = containersTotalUSD > 0 ? containerExpensesNGN / containersTotalUSD : 0
+
+    // General expenses split equally across containers
+    const generalExpensesNGN = currentExpenses
+      .filter(e => e.category === 'general')
+      .reduce((s, e) => s + Number(e.amount_ngn), 0)
+    const generalPerContainer = currentContainers.length > 0
+      ? generalExpensesNGN / currentContainers.length
+      : 0
+
+    // Calculate and save landing cost for each container
+    for (const con of currentContainers) {
+      const purchaseAmt = (con.unit_price_usd && con.pieces_purchased)
+        ? Number(con.unit_price_usd) * Number(con.pieces_purchased)
+        : 0
+      const containerUSD = purchaseAmt + Number(con.shipping_amount_usd ?? 0)
+      const containerNGN = waer > 0 ? containerUSD * waer : 0
+      const landingCost = containerNGN + generalPerContainer
+
+      if (landingCost > 0) {
+        await supabase
+          .from('containers')
+          .update({ estimated_landing_cost: Math.round(landingCost * 100) / 100 })
+          .eq('id', con.id)
+      }
+    }
+  }, [tripId])
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: t }, { data: exp }, { data: con }] = await Promise.all([
@@ -120,7 +168,17 @@ export default function TripDetailPage() {
     setExpenses(exp ?? [])
     setContainers(con ?? [])
     setLoading(false)
-  }, [tripId])
+
+    if ((con ?? []).length > 0 && (exp ?? []).length > 0) {
+      await recalculateLandingCosts(con ?? [], exp ?? [])
+      const { data: conFresh } = await supabase
+        .from('containers')
+        .select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)')
+        .eq('trip_id', tripId)
+        .order('created_at', { ascending: false })
+      setContainers(conFresh ?? [])
+    }
+  }, [tripId, recalculateLandingCosts])
 
   const loadActivity = useCallback(async () => {
     const supabase = createClient()
@@ -156,7 +214,11 @@ export default function TripDetailPage() {
     loadActivity()
   }
 
-  useEffect(() => { load(); loadDropdowns(); loadActivity() }, [load, loadDropdowns, loadActivity])
+  useEffect(() => {
+    load()
+    loadDropdowns()
+    loadActivity()
+  }, [load, loadDropdowns, loadActivity])
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
@@ -214,7 +276,7 @@ export default function TripDetailPage() {
     setExpenseForm(blankExpense)
     setSaving(false)
     await logTripActivity('Expense recorded', 'expenses', '', `${expenseForm.category} — ${expenseForm.amount} ${expenseForm.currency}`)
-    load()
+    await load()
   }
 
   async function handleContainer(e: React.FormEvent) {
@@ -239,7 +301,7 @@ export default function TripDetailPage() {
     if (!confirm('Delete this expense?')) return
     const supabase = createClient()
     await supabase.from('trip_expenses').delete().eq('id', id)
-    load()
+    await load()
   }
 
   async function deleteContainer(id: string) {
@@ -253,18 +315,42 @@ export default function TripDetailPage() {
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
   const containerStatusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
 
-  const containerPaymentUSD = containers.reduce((s, c) => s + Number(c.unit_price_usd ?? 0) * Number(c.pieces_purchased ?? 0), 0)
-  const containerPaymentNGN = containers.reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
-  const otherExpenses = expenses.reduce((s, e) => s + Number(e.amount_ngn), 0)
+  // Step 1: Total NGN paid for container expenses (category = 'container')
+  const containerExpensesNGN = expenses
+    .filter(e => e.category === 'container')
+    .reduce((s, e) => s + Number(e.amount_ngn), 0)
+
+  // Step 2: Total USD purchase subtotal across all containers (unit price × pieces + shipping)
+  const containersTotalUSD = containers.reduce((s, c) => {
+    const purchaseAmt = (c.unit_price_usd && c.pieces_purchased)
+      ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+      : 0
+    return s + purchaseAmt + Number(c.shipping_amount_usd ?? 0)
+  }, 0)
+
+  // Step 3: WAER = Total NGN container payments ÷ Total USD
+  const waer = containersTotalUSD > 0 ? containerExpensesNGN / containersTotalUSD : 0
+
+  // General expenses (NGN + USD converted) split equally across containers
+  const generalExpensesNGN = expenses
+    .filter(e => e.category === 'general')
+    .reduce((s, e) => s + Number(e.amount_ngn), 0)
+  const generalPerContainer = containers.length > 0 ? generalExpensesNGN / containers.length : 0
+
+  // Total landing = all container expenses NGN + all general expenses NGN
+  const containerPaymentNGN = containerExpensesNGN
+  const otherExpenses = generalExpensesNGN
   const totalLanding = containerPaymentNGN + otherExpenses
-  const avgFx = containerPaymentUSD > 0 ? containerPaymentNGN / containerPaymentUSD : 0
+
+  // Total USD = sum of all container purchase subtotals
+  const containerPaymentUSD = containersTotalUSD
 
   const metrics = [
     { label: 'Total landing amount (₦)', value: fmt(totalLanding), icon: <TrendingUp size={16} />, color: 'text-brand-600 bg-brand-50' },
     { label: 'Total container payment ($)', value: `$${containerPaymentUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <DollarSign size={16} />, color: 'text-green-600 bg-green-50' },
     { label: 'Total container payment (₦)', value: fmt(containerPaymentNGN), icon: <Package size={16} />, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Other expenses', value: otherExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <Activity size={16} />, color: 'text-amber-600 bg-amber-50' },
-    { label: 'Average FX rate', value: avgFx > 0 ? avgFx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—', icon: <Zap size={16} />, color: 'text-purple-600 bg-purple-50' },
+    { label: 'General expenses (₦)', value: fmt(generalExpensesNGN), icon: <Activity size={16} />, color: 'text-amber-600 bg-amber-50' },
+    { label: 'WAER', value: waer > 0 ? waer.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—', icon: <Zap size={16} />, color: 'text-purple-600 bg-purple-50' },
   ]
 
   if (loading) return (
@@ -343,7 +429,23 @@ export default function TripDetailPage() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            WAER: <span className="font-semibold text-gray-700">
+              {waer > 0 ? waer.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '—'}
+            </span>
+            {containers.length > 0 && waer > 0 && (
+              <span className="ml-2 text-gray-300">· General share per container: {fmt(generalPerContainer)}</span>
+            )}
+          </p>
+          <button
+            onClick={() => recalculateLandingCosts(containers, expenses)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs text-brand-600 border border-brand-200 bg-brand-50 rounded-lg hover:bg-brand-100 transition-colors">
+            <RefreshCw size={11} /> Recalculate landing costs
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {metrics.map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className={`inline-flex p-1.5 rounded-lg ${m.color} mb-2`}>
@@ -353,6 +455,7 @@ export default function TripDetailPage() {
             <p className="text-base font-semibold text-gray-900 truncate">{m.value}</p>
           </div>
         ))}
+        </div>
       </div>
 
       {/* Trip details */}

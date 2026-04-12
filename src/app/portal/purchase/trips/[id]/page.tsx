@@ -46,6 +46,7 @@ interface Container {
   id: string
   container_id: string
   container_number: string | null
+  tracking_number: string | null
   description: string | null
   weight_kg: number | null
   quantity: number | null
@@ -74,7 +75,7 @@ const CONTAINER_STATUS = [
 ]
 
 const blankExpense = { category: 'general', amount: '', currency: 'NGN', exchange_rate: '1', description: '', expense_date: new Date().toISOString().split('T')[0] }
-const blankContainer = { container_number: '', description: '' }
+const blankContainer = { container_number: '', tracking_number: '' }
 
 export default function TripDetailPage() {
   const params = useParams()
@@ -85,7 +86,7 @@ export default function TripDetailPage() {
   const [expenses, setExpenses] = useState<TripExpense[]>([])
   const [containers, setContainers] = useState<Container[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('expenses')
+  const [activeTab, setActiveTab] = useState('containers')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [clearingAgents, setClearingAgents] = useState<ClearingAgent[]>([])
   const [expenseOpen, setExpenseOpen] = useState(false)
@@ -96,6 +97,8 @@ export default function TripDetailPage() {
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
   const [statusOpen, setStatusOpen] = useState(false)
+  const [activityLogs, setActivityLogs] = useState<{ id: string; action: string; field_name: string | null; old_value: string | null; new_value: string | null; created_at: string; performer: { full_name: string | null; email: string } | null }[]>([])
+  const [activeBottomTab, setActiveBottomTab] = useState('containers')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -112,6 +115,16 @@ export default function TripDetailPage() {
     setLoading(false)
   }, [tripId])
 
+  const loadActivity = useCallback(async () => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('trip_activity_log')
+      .select('*, performer:profiles!trip_activity_log_performed_by_fkey(full_name, email)')
+      .eq('trip_id', tripId)
+      .order('created_at', { ascending: false })
+    setActivityLogs(data ?? [])
+  }, [tripId])
+
   const loadDropdowns = useCallback(async () => {
     const supabase = createClient()
     const [{ data: sup }, { data: clr }] = await Promise.all([
@@ -122,11 +135,27 @@ export default function TripDetailPage() {
     setClearingAgents(clr ?? [])
   }, [])
 
-  useEffect(() => { load(); loadDropdowns() }, [load, loadDropdowns])
+  async function logTripActivity(action: string, fieldName?: string, oldValue?: string, newValue?: string) {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('trip_activity_log').insert({
+      trip_id: tripId,
+      action,
+      field_name: fieldName ?? null,
+      old_value: oldValue ?? null,
+      new_value: newValue ?? null,
+      performed_by: user?.id,
+    })
+    loadActivity()
+  }
+
+  useEffect(() => { load(); loadDropdowns(); loadActivity() }, [load, loadDropdowns, loadActivity])
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
+    const oldValue = String((trip as unknown as Record<string, unknown>)[field] ?? '')
     await supabase.from('trips').update({ [field]: value || null }).eq('id', tripId)
+    await logTripActivity('Updated field', field, oldValue, value)
     setEditField(null)
     load()
   }
@@ -134,6 +163,7 @@ export default function TripDetailPage() {
   async function updateStatus(status: string) {
     const supabase = createClient()
     await supabase.from('trips').update({ status }).eq('id', tripId)
+    await logTripActivity('Status changed', 'status', trip?.status, status)
     setStatusOpen(false)
     load()
   }
@@ -143,12 +173,14 @@ export default function TripDetailPage() {
     const newStatus = trip.approval_status === 'approved' ? 'not_approved' : 'approved'
     const supabase = createClient()
     await supabase.from('trips').update({ approval_status: newStatus }).eq('id', tripId)
+    await logTripActivity('Approval status changed', 'approval_status', trip.approval_status, newStatus)
     load()
   }
 
   async function handleDelete() {
     setDeleting(true)
     const supabase = createClient()
+    await logTripActivity('Trip deleted', 'trip', trip?.title, '')
     await supabase.from('trips').delete().eq('id', tripId)
     router.push('/portal/purchase/trips')
   }
@@ -174,6 +206,7 @@ export default function TripDetailPage() {
     setExpenseOpen(false)
     setExpenseForm(blankExpense)
     setSaving(false)
+    await logTripActivity('Expense recorded', 'expenses', '', `${expenseForm.category} — ${expenseForm.amount} ${expenseForm.currency}`)
     load()
   }
 
@@ -185,12 +218,13 @@ export default function TripDetailPage() {
     await supabase.from('containers').insert({
       trip_id: tripId,
       container_number: containerForm.container_number || null,
-      description: containerForm.description || null,
+      tracking_number: containerForm.tracking_number || null,
       created_by: user?.id,
     })
     setContainerOpen(false)
     setContainerForm(blankContainer)
     setSaving(false)
+    await logTripActivity('Container added', 'containers', '', containerForm.container_number || 'New container')
     load()
   }
 
@@ -456,46 +490,54 @@ export default function TripDetailPage() {
 
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex border-b border-gray-100">
-          {[
-            { key: 'expenses', label: 'Trip Expense', count: expenses.length },
-            { key: 'containers', label: 'Containers', count: containers.length },
-            { key: 'documents', label: 'Trip Document', count: 0 },
-          ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px flex items-center gap-2
-                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
-              {tab.label}
-              {tab.count > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
+        <div className="flex items-center border-b border-gray-100">
+          <div className="flex flex-1">
+            {[
+              { key: 'expenses', label: 'Trip Expense', count: expenses.length },
+              { key: 'containers', label: 'Containers', count: containers.length },
+              { key: 'documents', label: 'Trip Document', count: 0 },
+              { key: 'activity', label: 'Activity log', count: activityLogs.length },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={`px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px flex items-center gap-2
+                  ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
+                    ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="px-4 pb-1">
+            {activeTab === 'expenses' && (
+              <button onClick={() => setExpenseOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+                <Plus size={14} /> Record expense
+              </button>
+            )}
+            {activeTab === 'containers' && (
+              <button onClick={() => setContainerOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+                <Plus size={14} /> Add container
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="p-5">
-
-          {/* EXPENSES */}
           {activeTab === 'expenses' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-                    General: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'general').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
-                  </span>
-                  <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-                    Container: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'container').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
-                  </span>
-                </div>
-                <button onClick={() => setExpenseOpen(true)}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
-                  <Plus size={14} /> Record expense
-                </button>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                  General: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'general').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
+                </span>
+                <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                  Container: <span className="font-medium text-gray-900">{fmt(expenses.filter(e => e.category === 'container').reduce((s, e) => s + Number(e.amount_ngn), 0))}</span>
+                </span>
               </div>
-
               <div className="overflow-x-auto rounded-lg border border-gray-100">
                 <table className="w-full text-sm">
                   <thead>
@@ -512,8 +554,7 @@ export default function TripDetailPage() {
                       <tr key={exp.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                         <td className="px-3 py-3"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span></td>
                         <td className="px-3 py-3">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap
-                            ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
                             {exp.category === 'container' ? 'Container' : 'General'}
                           </span>
                         </td>
@@ -537,54 +578,44 @@ export default function TripDetailPage() {
             </div>
           )}
 
-          {/* CONTAINERS */}
           {activeTab === 'containers' && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <button onClick={() => setContainerOpen(true)}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
-                  <Plus size={14} /> Add container
-                </button>
-              </div>
-              <div className="overflow-x-auto rounded-lg border border-gray-100">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      {['ID', 'Title / Label', 'Tracking number', 'Status', ''].map(h => (
-                        <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {containers.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">No containers added yet.</td></tr>
-                    ) : containers.map(con => (
-                      <tr key={con.id}
-                        onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
-                        className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group">
-                        <td className="px-3 py-3"><span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span></td>
-                        <td className="px-3 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{con.container_number ?? '—'}</td>
-                        <td className="px-3 py-3 text-gray-500">{con.description ?? '—'}</td>
-                        <td className="px-3 py-3">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${containerStatusInfo(con.status).color}`}>
-                            {containerStatusInfo(con.status).label}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <button onClick={(e) => { e.stopPropagation(); deleteContainer(con.id) }}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
+            <div className="overflow-x-auto rounded-lg border border-gray-100">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    {['ID', 'Title / Label', 'Tracking number', 'Status', ''].map(h => (
+                      <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tr>
+                </thead>
+                <tbody>
+                  {containers.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">No containers added yet.</td></tr>
+                  ) : containers.map(con => (
+                    <tr key={con.id}
+                      onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
+                      className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group">
+                      <td className="px-3 py-3"><span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span></td>
+                      <td className="px-3 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{con.container_number ?? '—'}</td>
+                      <td className="px-3 py-3 text-gray-500">{con.tracking_number ?? '—'}</td>
+                      <td className="px-3 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${containerStatusInfo(con.status).color}`}>
+                          {containerStatusInfo(con.status).label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button onClick={(e) => { e.stopPropagation(); deleteContainer(con.id) }}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
-          {/* DOCUMENTS */}
           {activeTab === 'documents' && (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
@@ -592,6 +623,54 @@ export default function TripDetailPage() {
               </div>
               <p className="text-sm text-gray-500 font-medium">No documents yet</p>
               <p className="text-xs text-gray-400">Document upload will be available soon</p>
+            </div>
+          )}
+
+          {activeTab === 'activity' && (
+            <div className="space-y-1">
+              {activityLogs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <p className="text-sm text-gray-400">No activity recorded yet.</p>
+                  <p className="text-xs text-gray-300">Actions like edits, status changes and approvals will appear here.</p>
+                </div>
+              ) : (
+                activityLogs.map(log => (
+                  <div key={log.id} className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
+                    <div className="w-7 h-7 rounded-full bg-brand-50 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className="text-brand-600 text-xs font-semibold">
+                        {(log.performer?.full_name ?? log.performer?.email ?? 'S')[0].toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-700">
+                        <span className="font-medium text-gray-900">
+                          {log.performer?.full_name ?? log.performer?.email ?? 'System'}
+                        </span>
+                        {' '}<span className="text-gray-500">{log.action}</span>
+                        {log.field_name && (
+                          <span className="text-xs text-gray-400 ml-1">· {log.field_name}</span>
+                        )}
+                      </p>
+                      {(log.old_value || log.new_value) && (
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {log.old_value && (
+                            <span className="text-xs bg-red-50 text-red-500 px-1.5 py-0.5 rounded line-through">{log.old_value}</span>
+                          )}
+                          {log.old_value && log.new_value && (
+                            <span className="text-xs text-gray-400">→</span>
+                          )}
+                          {log.new_value && (
+                            <span className="text-xs bg-green-50 text-green-600 px-1.5 py-0.5 rounded">{log.new_value}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400 shrink-0 whitespace-nowrap">
+                      {new Date(log.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
@@ -672,8 +751,8 @@ export default function TripDetailPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Container tracking number</label>
               <input
-                value={containerForm.description}
-                onChange={e => setContainerForm(f => ({ ...f, description: e.target.value }))}
+                value={containerForm.tracking_number}
+                onChange={e => setContainerForm(f => ({ ...f, tracking_number: e.target.value }))}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="Enter tracking number" />
             </div>

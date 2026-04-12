@@ -161,6 +161,8 @@ export default function ContainerDetailPage() {
     loadDropdowns()
   }, [load, loadComments, loadActivity, loadDropdowns])
 
+  const totalPct = funders.reduce((s, f) => s + Number(f.percentage), 0)
+
   async function logActivity(action: string, fieldName?: string, oldValue?: string, newValue?: string) {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -195,19 +197,46 @@ export default function ContainerDetailPage() {
 
   async function saveFunder(e: React.FormEvent) {
     e.preventDefault()
+    const newPct = parseFloat(funderForm.percentage)
+
+    if (newPct <= 0) {
+      alert('Percentage must be greater than 0.')
+      return
+    }
+
+    const existingFunder = funders.find(f => f.funder_id === funderForm.funder_id)
+    const otherFundersTotal = funders
+      .filter(f => f.funder_id !== funderForm.funder_id)
+      .reduce((s, f) => s + Number(f.percentage), 0)
+    const remaining = 100 - otherFundersTotal
+
+    if (newPct > remaining) {
+      alert(`Cannot allocate ${newPct}%. Only ${remaining.toFixed(1)}% available after other funders.`)
+      return
+    }
+
     setSavingFunder(true)
     const supabase = createClient()
     const funderName = funderForm.funder_type === 'entity'
       ? entities.find(e => e.id === funderForm.funder_id)?.name ?? ''
       : partners.find(p => p.id === funderForm.funder_id)?.name ?? ''
-    await supabase.from('container_funders').insert({
-      container_id: containerId,
-      funder_type: funderForm.funder_type,
-      funder_id: funderForm.funder_id,
-      funder_name: funderName,
-      percentage: parseFloat(funderForm.percentage),
-    })
-    await logActivity('Funder added', 'funders', '', `${funderName} (${funderForm.percentage}%)`)
+
+    if (existingFunder) {
+      await supabase.from('container_funders')
+        .update({ percentage: newPct })
+        .eq('id', existingFunder.id)
+      await logActivity('Funder percentage updated', 'funders', `${funderName} ${existingFunder.percentage}%`, `${funderName} ${newPct}%`)
+    } else {
+      await supabase.from('container_funders').insert({
+        container_id: containerId,
+        funder_type: funderForm.funder_type,
+        funder_id: funderForm.funder_id,
+        funder_name: funderName,
+        percentage: newPct,
+      })
+      await logActivity('Funder added', 'funders', '', `${funderName} (${newPct}%)`)
+    }
+
     setSavingFunder(false)
     setFunderOpen(false)
     setFunderForm({ funder_type: 'entity', funder_id: '', percentage: '' })
@@ -284,7 +313,6 @@ export default function ContainerDetailPage() {
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const statusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
-  const totalPct = funders.reduce((s, f) => s + Number(f.percentage), 0)
   const isPartner = container?.funding_type === 'partner'
 
   if (loading) return (
@@ -454,9 +482,11 @@ export default function ContainerDetailPage() {
                 <option value="partner">Partner</option>
               </select>
             </div>
-            <button onClick={() => setFunderOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors">
-              <Plus size={13} /> Add funder
+            <button
+              onClick={() => setFunderOpen(true)}
+              disabled={totalPct >= 100}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              <Plus size={13} /> {totalPct >= 100 ? 'Fully allocated' : 'Add funder'}
             </button>
           </div>
         </div>
@@ -739,16 +769,25 @@ export default function ContainerDetailPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Percentage (%) <span className="text-red-400">*</span>
             </label>
-            <input required type="number" min="0.01" max="100" step="0.01"
+            <input
+              required
+              type="number"
+              min="0.01"
+              max={100 - totalPct}
+              step="0.01"
               value={funderForm.percentage}
               onChange={e => setFunderForm(f => ({ ...f, percentage: e.target.value }))}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder="e.g. 50" />
-            {funders.length > 0 && (
-              <p className="text-xs text-gray-400 mt-1">
-                {(100 - totalPct).toFixed(1)}% remaining to allocate
+              placeholder={`Max ${(100 - totalPct).toFixed(1)}%`}
+            />
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-xs text-gray-400">
+                {totalPct > 0 ? `${(100 - totalPct).toFixed(1)}% remaining to allocate` : 'Total must equal 100%'}
               </p>
-            )}
+              {totalPct >= 100 && (
+                <p className="text-xs text-green-600 font-medium">Fully allocated ✓</p>
+              )}
+            </div>
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setFunderOpen(false)}

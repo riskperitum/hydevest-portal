@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Loader2, CheckCircle2, Clock, PlayCircle,
   Plus, Trash2, ChevronDown, Pencil, Check, X,
@@ -227,6 +227,8 @@ export default function TripDetailPage() {
   const params = useParams()
   const router = useRouter()
   const tripId = params.id as string
+  const searchParams = useSearchParams()
+  const taskId = searchParams.get('task')
 
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<TripExpense[]>([])
@@ -252,6 +254,16 @@ export default function TripDetailPage() {
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
+  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
+  const [reviewTask, setReviewTask] = useState<{
+    id: string; task_id: string; type: string; title: string;
+    description: string | null; changes_summary: string | null;
+    requested_by: string | null;
+    requested_by_profile: { full_name: string | null; email: string } | null
+  } | null>(null)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewBannerOpen, setReviewBannerOpen] = useState(true)
+  const [submittingReview, setSubmittingReview] = useState(false)
 
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
@@ -334,6 +346,17 @@ export default function TripDetailPage() {
     setActivityLogs(data ?? [])
   }, [tripId])
 
+  const loadReviewTask = useCallback(async () => {
+    if (!taskId) return
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('tasks')
+      .select('*, requested_by_profile:profiles!tasks_requested_by_fkey(full_name, email)')
+      .eq('id', taskId)
+      .single()
+    if (data?.status === 'pending') setReviewTask(data)
+  }, [taskId])
+
   const loadDropdowns = useCallback(async () => {
     const supabase = createClient()
     const [{ data: sup }, { data: clr }, { data: emp }] = await Promise.all([
@@ -364,7 +387,10 @@ export default function TripDetailPage() {
     load()
     loadDropdowns()
     loadActivity()
-  }, [load, loadDropdowns, loadActivity])
+    loadReviewTask()
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user))
+  }, [load, loadDropdowns, loadActivity, loadReviewTask])
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
@@ -451,6 +477,61 @@ export default function TripDetailPage() {
     setWorkflowNote('')
     setAssignee('')
     load()
+  }
+
+  async function handleReviewAction(action: 'approved' | 'rejected') {
+    if (!reviewTask || !trip) return
+    setSubmittingReview(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    await supabase.from('tasks').update({
+      status: action,
+      reviewed_by: user?.id,
+      reviewed_at: new Date().toISOString(),
+      review_note: reviewNote || null,
+    }).eq('id', reviewTask.id)
+
+    if (action === 'approved') {
+      if (reviewTask.type === 'delete_approval') {
+        await logTripActivity('Trip deletion approved', 'workflow', '', user?.id)
+        await supabase.from('trips').delete().eq('id', tripId)
+        router.push('/portal/purchase/trips')
+        return
+      }
+      if (reviewTask.type === 'completion_approval') {
+        await supabase.from('trips').update({ status: 'completed' }).eq('id', tripId)
+        await logTripActivity('Trip completion approved', 'workflow', '', 'completed')
+      }
+      if (reviewTask.type === 'review_request') {
+        await supabase.from('trips').update({ approval_status: 'reviewed' }).eq('id', tripId)
+        await logTripActivity('Trip review approved', 'workflow', '', 'reviewed')
+      }
+    } else {
+      await logTripActivity(`${reviewTask.type} rejected`, 'workflow', '', reviewNote || 'No reason given')
+    }
+
+    if (reviewTask.requested_by) {
+      await supabase.from('notifications').insert({
+        user_id: reviewTask.requested_by,
+        type: action === 'approved' ? 'task_approved' : 'task_rejected',
+        title: action === 'approved'
+          ? `${reviewTask.title} — Approved`
+          : `${reviewTask.title} — Rejected`,
+        message: reviewNote || (action === 'approved' ? 'Your request has been approved.' : 'Your request has been rejected.'),
+        task_id: reviewTask.id,
+        record_id: tripId,
+        record_ref: trip.trip_id,
+        module: 'trips',
+      })
+    }
+
+    setSubmittingReview(false)
+    setReviewTask(null)
+    setReviewNote('')
+    router.replace(`/portal/purchase/trips/${tripId}`)
+    load()
+    loadActivity()
   }
 
   async function handleExpense(e: React.FormEvent) {
@@ -564,6 +645,77 @@ export default function TripDetailPage() {
 
   return (
     <div className="space-y-5 max-w-6xl">
+
+      {/* Review banner */}
+      {reviewTask && reviewBannerOpen && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+          <div className="px-5 py-3 flex items-center justify-between border-b border-amber-200">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                <Eye size={15} className="text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  You are reviewing this trip
+                </p>
+                <p className="text-xs text-amber-600">
+                  Requested by {reviewTask.requested_by_profile?.full_name ?? reviewTask.requested_by_profile?.email ?? 'Unknown'}
+                  {' · '}{reviewTask.task_id}
+                  {' · '}{reviewTask.type === 'delete_approval' ? 'Delete approval' : reviewTask.type === 'completion_approval' ? 'Completion approval' : 'Review request'}
+                </p>
+              </div>
+            </div>
+            <button onClick={() => setReviewBannerOpen(false)}
+              className="p-1 text-amber-400 hover:text-amber-600 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+
+          {reviewTask.changes_summary && (
+            <div className="px-5 py-2.5 border-b border-amber-200 bg-amber-50">
+              <p className="text-xs font-medium text-amber-700 mb-1">Changes since last review</p>
+              <p className="text-xs text-amber-600">{reviewTask.changes_summary}</p>
+            </div>
+          )}
+
+          {reviewTask.type === 'delete_approval' && (
+            <div className="px-5 py-2.5 border-b border-amber-200 bg-red-50">
+              <p className="text-xs font-medium text-red-700">
+                ⚠️ Approving this will permanently delete this trip and all its data. This cannot be undone.
+              </p>
+            </div>
+          )}
+
+          <div className="px-5 py-3 flex items-center gap-3 flex-wrap">
+            <textarea
+              rows={1}
+              value={reviewNote}
+              onChange={e => setReviewNote(e.target.value)}
+              placeholder="Add a review note (optional)..."
+              className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white resize-none"
+            />
+            <button
+              onClick={() => handleReviewAction('rejected')}
+              disabled={submittingReview}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors">
+              {submittingReview ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+              Reject
+            </button>
+            <button
+              onClick={() => handleReviewAction('approved')}
+              disabled={submittingReview}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors
+                ${reviewTask.type === 'delete_approval'
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
+              {submittingReview ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+              {reviewTask.type === 'delete_approval' ? 'Approve deletion' :
+               reviewTask.type === 'completion_approval' ? 'Approve completion' :
+               'Approve review'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1321,11 +1473,13 @@ export default function TripDetailPage() {
             <select required value={assignee} onChange={e => setAssignee(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
               <option value="">Select user...</option>
-              {employees.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.full_name ?? e.email}
-                </option>
-              ))}
+              {employees
+                .filter(e => e.id !== currentUser?.id)
+                .map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.full_name ?? e.email}
+                  </option>
+                ))}
             </select>
           </div>
           <div>

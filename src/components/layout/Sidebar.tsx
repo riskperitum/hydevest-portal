@@ -11,6 +11,7 @@ interface NavItem { label: string; href?: string; icon: React.ReactNode; childre
 
 const NAV: NavItem[] = [
   { label: 'Overview', href: '/portal/overview', icon: <LayoutDashboard size={18} /> },
+  { label: 'Tasks', href: '/portal/tasks', icon: <ClipboardList size={18} /> },
   { label: 'Purchase', icon: <ShoppingCart size={18} />, children: [
     { label: 'Trips', href: '/portal/purchase/trips' },
     { label: 'Containers', href: '/portal/purchase/containers' },
@@ -27,7 +28,6 @@ const NAV: NavItem[] = [
   { label: 'Reports', href: '/portal/reports', icon: <BarChart2 size={18} /> },
   { label: 'Requestbox', href: '/portal/requestbox', icon: <Inbox size={18} /> },
   { label: 'Accounts', href: '/portal/accounts', icon: <Users size={18} /> },
-  { label: 'Tasks', href: '/portal/tasks', icon: <ClipboardList size={18} /> },
 ]
 
 export default function Sidebar({ isSuperAdmin }: { roles: string[]; isSuperAdmin: boolean }) {

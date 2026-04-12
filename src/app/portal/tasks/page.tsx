@@ -139,7 +139,7 @@ export default function TasksPage() {
 
   function navigateToRecord(task: Task) {
     if (task.module === 'trips' && task.record_id) {
-      router.push(`/portal/purchase/trips/${task.record_id}`)
+      router.push(`/portal/purchase/trips/${task.record_id}?task=${task.id}`)
     }
   }
 
@@ -251,9 +251,9 @@ export default function TasksPage() {
                     </button>
                   )}
                   {tab === 'assigned' && task.status === 'pending' && (
-                    <button onClick={() => { setSelectedTask(task); setReviewNote('') }}
+                    <button onClick={() => navigateToRecord(task)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors">
-                      Take action
+                      <Eye size={13} /> Review & action
                     </button>
                   )}
                 </div>

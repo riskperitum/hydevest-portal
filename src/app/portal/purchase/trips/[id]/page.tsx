@@ -514,6 +514,15 @@ export default function TripDetailPage() {
         }).eq('id', tripId)
         await logTripActivity('Trip review approved', 'workflow', '', 'reviewed')
       }
+      if (reviewTask.type === 'approval_request') {
+        await supabase.from('trips').update({
+          approval_status: 'approved',
+          needs_review: false,
+          last_reviewed_by: user?.id,
+          last_reviewed_at: new Date().toISOString(),
+        }).eq('id', tripId)
+        await logTripActivity('Trip approved', 'workflow', '', 'approved')
+      }
     } else {
       await logTripActivity(`${reviewTask.type} rejected`, 'workflow', '', reviewNote || 'No reason given')
     }
@@ -721,6 +730,7 @@ export default function TripDetailPage() {
               {submittingReview ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {reviewTask.type === 'delete_approval' ? 'Approve deletion' :
                reviewTask.type === 'completion_approval' ? 'Approve completion' :
+               reviewTask.type === 'approval_request' ? 'Approve trip' :
                'Approve review'}
             </button>
           </div>

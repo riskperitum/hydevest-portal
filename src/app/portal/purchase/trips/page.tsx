@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Search, Download, Eye, Trash2, CheckCircle2, Loader2 } from 'lucide-react'
+import { Plus, Search, Download, Eye, ClipboardCheck, CheckCircle2, Trash2, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { ModifiedIndicator } from '@/components/trips/ModifiedIndicator'
 import Modal from '@/components/ui/Modal'
 
 interface Trip {
@@ -20,6 +21,10 @@ interface Trip {
   supplier: { name: string } | null
   clearing_agent: { name: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
+  review_status?: string
+  review_requested_at?: string | null
+  last_reviewed_at?: string | null
+  modified_since_last_review?: boolean
 }
 
 interface Supplier { id: string; name: string }
@@ -50,7 +55,7 @@ export default function TripsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [workflowTrip, setWorkflowTrip] = useState<Trip | null>(null)
-  const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | null>(null)
+  const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | 'approval' | null>(null)
   const [workflowNote, setWorkflowNote] = useState('')
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
@@ -108,12 +113,6 @@ export default function TripsPage() {
     load()
   }
 
-  async function handleDelete(e: React.MouseEvent, trip: Trip) {
-    e.stopPropagation()
-    setWorkflowTrip(trip)
-    setWorkflowType('delete')
-  }
-
   async function submitWorkflow() {
     if (!assignee || !workflowType || !workflowTrip) return
     setSubmittingWorkflow(true)
@@ -124,11 +123,13 @@ export default function TripsPage() {
       delete: 'delete_approval',
       review: 'review_request',
       completion: 'completion_approval',
+      approval: 'approval_request',
     }
     const typeLabels = {
       delete: 'Delete approval',
       review: 'Review request',
       completion: 'Completion approval',
+      approval: 'Approval request',
     }
 
     const { data: task } = await supabase.from('tasks').insert({
@@ -267,7 +268,14 @@ export default function TripsPage() {
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{trip.title}</td>
+                    <td className="px-4 py-3">
+                      <span className="flex items-center font-medium text-gray-900 group-hover:text-brand-700 transition-colors">
+                        {trip.title}
+                        {trip.modified_since_last_review && (
+                          <ModifiedIndicator lastReviewedAt={trip.last_reviewed_at} />
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{trip.source_location ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{trip.supplier?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{trip.clearing_agent?.name ?? '—'}</td>
@@ -302,12 +310,23 @@ export default function TripsPage() {
                             ${trip.approval_status === 'reviewed'
                               ? 'text-green-500 hover:bg-green-50'
                               : 'text-gray-400 hover:bg-brand-50 hover:text-brand-600'}`}>
+                          <ClipboardCheck size={15} />
+                        </button>
+
+                        {/* Request approval */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setWorkflowTrip(trip); setWorkflowType('approval') }}
+                          title="Request approval"
+                          className={`p-1.5 rounded-lg transition-colors
+                            ${trip.approval_status === 'approved'
+                              ? 'text-green-500 hover:bg-green-50'
+                              : 'text-gray-400 hover:bg-amber-50 hover:text-amber-600'}`}>
                           <CheckCircle2 size={15} />
                         </button>
 
                         {/* Request delete */}
                         <button
-                          onClick={(e) => handleDelete(e, trip)}
+                          onClick={(e) => { e.stopPropagation(); setWorkflowTrip(trip); setWorkflowType('delete') }}
                           disabled={deletingId === trip.id}
                           title="Request deletion"
                           className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
@@ -398,6 +417,7 @@ export default function TripsPage() {
         title={
           workflowType === 'delete' ? 'Request trip deletion' :
           workflowType === 'review' ? 'Request trip review' :
+          workflowType === 'approval' ? 'Request trip approval' :
           'Request trip completion'
         }
         description="Select a user to assign this task to"
@@ -414,7 +434,14 @@ export default function TripsPage() {
           {workflowType === 'review' && (
             <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
               <p className="text-xs text-brand-700 font-medium">
-                Send a review request for <span className="font-semibold">{workflowTrip?.trip_id}</span>. The reviewer will be able to approve or reject from the trip page.
+                Send a review request for <span className="font-semibold">{workflowTrip?.trip_id}</span>. The reviewer will be able to review all sections and approve or reject from the trip page.
+              </p>
+            </div>
+          )}
+          {workflowType === 'approval' && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <p className="text-xs text-amber-700 font-medium">
+                Send an approval request for <span className="font-semibold">{workflowTrip?.trip_id}</span>. The approver will mark the trip as approved after review.
               </p>
             </div>
           )}
@@ -449,6 +476,8 @@ export default function TripsPage() {
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete'
                   ? 'bg-red-600 text-white hover:bg-red-700'
+                  : workflowType === 'approval'
+                  ? 'bg-amber-600 text-white hover:bg-amber-700'
                   : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
               {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
             </button>

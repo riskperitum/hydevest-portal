@@ -44,6 +44,7 @@ const TYPE_LABELS: Record<string, string> = {
   delete_approval:     'Delete approval',
   review_request:      'Review request',
   completion_approval: 'Completion approval',
+  approval_request:    'Approval request',
 }
 
 export default function TasksPage() {
@@ -115,6 +116,11 @@ export default function TasksPage() {
       if (selectedTask.type === 'review_request' && action === 'approved') {
         if (selectedTask.module === 'trips') {
           await supabase.from('trips').update({ approval_status: 'reviewed' }).eq('id', selectedTask.record_id)
+        }
+      }
+      if (selectedTask.type === 'approval_request' && action === 'approved') {
+        if (selectedTask.module === 'trips') {
+          await supabase.from('trips').update({ approval_status: 'approved' }).eq('id', selectedTask.record_id)
         }
       }
     }

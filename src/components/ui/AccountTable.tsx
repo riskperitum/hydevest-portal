@@ -9,7 +9,7 @@ export interface Column<T> {
   render?: (row: T) => React.ReactNode
 }
 
-interface AccountTableProps<T extends Record<string, unknown>> {
+interface AccountTableProps<T> {
   title: string
   description: string
   columns: Column<T>[]
@@ -22,7 +22,7 @@ interface AccountTableProps<T extends Record<string, unknown>> {
   rowActions?: (row: T) => { label: string; onClick: () => void; danger?: boolean }[]
 }
 
-export default function AccountTable<T extends Record<string, unknown>>({
+export default function AccountTable<T>({
   columns, data, loading, onAdd, addLabel,
   searchPlaceholder = 'Search...', emptyMessage = 'No records found.', rowActions,
 }: AccountTableProps<T>) {
@@ -32,7 +32,7 @@ export default function AccountTable<T extends Record<string, unknown>>({
   const PER_PAGE = 10
 
   const filtered = data.filter(row =>
-    Object.values(row).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase()))
+    Object.values(row as Record<string, unknown>).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase()))
   )
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
   const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
@@ -85,7 +85,7 @@ export default function AccountTable<T extends Record<string, unknown>>({
                 <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   {columns.map(col => (
                     <td key={col.key} className="px-4 py-3 text-gray-700">
-                      {col.render ? col.render(row) : String(row[col.key] ?? '—')}
+                      {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '—')}
                     </td>
                   ))}
                   {rowActions && (

@@ -37,10 +37,11 @@ export default function EmployeesTab() {
 
     const roleMap: Record<string, string[]> = {}
     for (const ur of userRoles ?? []) {
-      const role = ur.role as { name: string } | null
-      if (!role) continue
+      const r = ur.role as { name: string } | { name: string }[] | null | undefined
+      if (!r) continue
+      const names = Array.isArray(r) ? r.map(x => x.name) : [r.name]
       if (!roleMap[ur.user_id]) roleMap[ur.user_id] = []
-      roleMap[ur.user_id].push(role.name)
+      roleMap[ur.user_id].push(...names)
     }
 
     setData((profiles ?? []).map(p => ({
@@ -150,4 +151,35 @@ export default function EmployeesTab() {
               placeholder="john@hydevest.com" />
           </div>
           <div>
-            <label className="block
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input
+              required
+              type="password"
+              value={form.password}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="••••••••"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            >
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : 'Add employee'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  )
+}

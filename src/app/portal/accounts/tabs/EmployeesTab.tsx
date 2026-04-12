@@ -16,13 +16,16 @@ interface Employee {
   roles: string
 }
 
+const blank = { full_name: '', email: '', password: '', phone: '' }
+
 export default function EmployeesTab() {
   const [data, setData] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', phone: '' })
+  const [editRow, setEditRow] = useState<Employee | null>(null)
+  const [form, setForm] = useState(blank)
 
   async function load() {
     const supabase = createClient()
@@ -53,31 +56,59 @@ export default function EmployeesTab() {
 
   useEffect(() => { load() }, [])
 
-  async function handleCreate(e: React.FormEvent) {
+  function openAdd() {
+    setEditRow(null)
+    setForm(blank)
+    setError(null)
+    setOpen(true)
+  }
+
+  function openEdit(row: Employee) {
+    setEditRow(row)
+    setForm({
+      full_name: row.full_name ?? '',
+      email: row.email,
+      password: '',
+      phone: row.phone ?? '',
+    })
+    setOpen(true)
+    setError(null)
+  }
+
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
     setError(null)
 
-    const supabase = createClient()
-    const { data: authData, error: signUpError } = await supabase.auth.admin.createUser({
-      email: form.email,
-      password: form.password,
-      user_metadata: { full_name: form.full_name },
-      email_confirm: true,
-    })
-
-    if (signUpError) {
-      setError(signUpError.message)
-      setSaving(false)
-      return
-    }
-
-    if (authData.user && form.phone) {
-      await supabase.from('profiles').update({ phone: form.phone, full_name: form.full_name }).eq('id', authData.user.id)
+    if (!editRow) {
+      const res = await fetch('/api/employees/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          full_name: form.full_name,
+          phone: form.phone,
+        }),
+      })
+      const result = await res.json()
+      if (result.error) {
+        setError(result.error)
+        setSaving(false)
+        return
+      }
+    } else {
+      const supabase = createClient()
+      await supabase.from('profiles').update({
+        full_name: form.full_name,
+        phone: form.phone || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editRow.id)
     }
 
     setOpen(false)
-    setForm({ full_name: '', email: '', password: '', phone: '' })
+    setForm(blank)
+    setEditRow(null)
     load()
     setSaving(false)
   }
@@ -121,19 +152,28 @@ export default function EmployeesTab() {
       <AccountTable
         title="Employees" description="Portal user accounts"
         columns={columns} data={data} loading={loading}
-        onAdd={() => setOpen(true)} addLabel="Add employee"
+        onAdd={openAdd} addLabel="Add employee"
         searchPlaceholder="Search employees..."
         emptyMessage="No employees yet. Add your first team member."
-        rowActions={() => [
-          { label: 'Edit', onClick: () => {} },
+        rowActions={row => [
+          { label: 'Edit', onClick: () => openEdit(row) },
           { label: 'Manage roles', onClick: () => {} },
           { label: 'Deactivate', onClick: () => {}, danger: true },
         ]}
       />
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Creates a new portal login account">
-        <form onSubmit={handleCreate} className="space-y-4">
-          {error && <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">{error}</div>}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={editRow ? 'Edit employee' : 'Add employee'}
+        description={editRow ? 'Update profile details' : 'Creates a new portal login account'}
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          {error && (
+            <div className="p-3 bg-red-50 rounded-lg border border-red-100 text-sm text-red-600">
+              {error}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">First name <span className="text-red-400">*</span></label>
@@ -169,22 +209,30 @@ export default function EmployeesTab() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
-            <input required type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder="john@hydevest.com" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
             <input
               required
-              type="password"
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder="••••••••"
-              autoComplete="new-password"
+              type="email"
+              value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              readOnly={!!editRow}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 read-only:bg-gray-50 read-only:text-gray-600"
+              placeholder="john@hydevest.com"
             />
           </div>
+          {!editRow && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                required
+                type="password"
+                value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -198,7 +246,7 @@ export default function EmployeesTab() {
               disabled={saving}
               className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
             >
-              {saving ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : 'Add employee'}
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editRow ? 'Save changes' : 'Add employee'}
             </button>
           </div>
         </form>

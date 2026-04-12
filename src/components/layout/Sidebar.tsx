@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ShoppingCart, TrendingUp, Package, Receipt, DollarSign, Users, BarChart2, Inbox, Settings, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, TrendingUp, Package, Receipt, DollarSign, Users, BarChart2, Inbox, Settings, ChevronDown, ChevronRight, ChevronLeft, ClipboardList } from 'lucide-react'
 import { BrandLogo } from '@/components/brand/BrandLogo'
 
 interface NavChild { label: string; href: string }
@@ -27,6 +27,7 @@ const NAV: NavItem[] = [
   { label: 'Reports', href: '/portal/reports', icon: <BarChart2 size={18} /> },
   { label: 'Requestbox', href: '/portal/requestbox', icon: <Inbox size={18} /> },
   { label: 'Accounts', href: '/portal/accounts', icon: <Users size={18} /> },
+  { label: 'Tasks', href: '/portal/tasks', icon: <ClipboardList size={18} /> },
 ]
 
 export default function Sidebar({ isSuperAdmin }: { roles: string[]; isSuperAdmin: boolean }) {

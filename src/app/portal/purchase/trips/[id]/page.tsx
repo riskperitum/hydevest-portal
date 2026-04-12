@@ -84,6 +84,145 @@ const CONTAINER_STATUS = [
 const blankExpense = { category: 'general', amount: '', currency: 'NGN', exchange_rate: '1', description: '', expense_date: new Date().toISOString().split('T')[0] }
 const blankContainer = { container_number: '', tracking_number: '' }
 
+function ExpenseRow({ exp, onDelete, onSave, fmt }: {
+  exp: TripExpense
+  onDelete: (id: string) => void
+  onSave: (id: string, updates: { category: string; amount: string; currency: string; exchange_rate: string; description: string; expense_date: string }) => Promise<void>
+  fmt: (n: number) => string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    category: exp.category,
+    amount: String(exp.amount),
+    currency: exp.currency,
+    exchange_rate: String(exp.exchange_rate),
+    description: exp.description ?? '',
+    expense_date: exp.expense_date.split('T')[0],
+  })
+
+  async function handleSave() {
+    setSaving(true)
+    await onSave(exp.id, form)
+    setSaving(false)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <tr className="border-b border-brand-100 bg-brand-50/30">
+        <td className="px-3 py-2">
+          <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span>
+        </td>
+        <td className="px-3 py-2">
+          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white">
+            <option value="general">General</option>
+            <option value="container">Container</option>
+          </select>
+        </td>
+        <td className="px-3 py-2">
+          <input type="number" step="0.01" value={form.amount}
+            onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+            className="w-24 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        </td>
+        <td className="px-3 py-2">
+          <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white">
+            <option value="NGN">NGN</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+          </select>
+        </td>
+        <td className="px-3 py-2">
+          <input type="number" step="0.0001" value={form.exchange_rate}
+            onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))}
+            className="w-20 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        </td>
+        <td className="px-3 py-2 text-xs font-semibold text-gray-700 whitespace-nowrap">
+          {fmt(parseFloat(form.amount || '0') * parseFloat(form.exchange_rate || '1'))}
+        </td>
+        <td className="px-3 py-2">
+          <input value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            placeholder="Description" />
+        </td>
+        <td className="px-3 py-2">
+          <input type="date" value={form.expense_date}
+            onChange={e => setForm(f => ({ ...f, expense_date: e.target.value }))}
+            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-400">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={handleSave} disabled={saving}
+              className="p-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors">
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            </button>
+            <button type="button" onClick={() => {
+              setForm({
+                category: exp.category,
+                amount: String(exp.amount),
+                currency: exp.currency,
+                exchange_rate: String(exp.exchange_rate),
+                description: exp.description ?? '',
+                expense_date: exp.expense_date.split('T')[0],
+              })
+              setEditing(false)
+            }}
+              className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">
+              <X size={12} />
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
+  return (
+    <tr className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
+      <td className="px-3 py-3"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span></td>
+      <td className="px-3 py-3">
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap
+          ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
+          {exp.category === 'container' ? 'Container' : 'General'}
+        </span>
+      </td>
+      <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{Number(exp.amount).toLocaleString()}</td>
+      <td className="px-3 py-3 text-gray-500">{exp.currency}</td>
+      <td className="px-3 py-3 text-gray-500">{exp.exchange_rate}</td>
+      <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(exp.amount_ngn)}</td>
+      <td className="px-3 py-3 text-gray-500 max-w-[180px] truncate">{exp.description ?? '—'}</td>
+      <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(exp.expense_date).toLocaleDateString()}</td>
+      <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
+      <td className="px-3 py-3">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button type="button" onClick={() => {
+            setForm({
+              category: exp.category,
+              amount: String(exp.amount),
+              currency: exp.currency,
+              exchange_rate: String(exp.exchange_rate),
+              description: exp.description ?? '',
+              expense_date: exp.expense_date.split('T')[0],
+            })
+            setEditing(true)
+          }}
+            className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+            <Pencil size={13} />
+          </button>
+          <button type="button" onClick={() => onDelete(exp.id)}
+            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 export default function TripDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -104,10 +243,15 @@ export default function TripDetailPage() {
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
   const [statusOpen, setStatusOpen] = useState(false)
+  const [tripInfoOpen, setTripInfoOpen] = useState(true)
   const [activityLogs, setActivityLogs] = useState<{ id: string; action: string; field_name: string | null; old_value: string | null; new_value: string | null; created_at: string; performer: { full_name: string | null; email: string } | null }[]>([])
   const [activeBottomTab, setActiveBottomTab] = useState('containers')
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [workflowOpen, setWorkflowOpen] = useState(false)
+  const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | null>(null)
+  const [workflowNote, setWorkflowNote] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
 
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
@@ -192,12 +336,14 @@ export default function TripDetailPage() {
 
   const loadDropdowns = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: sup }, { data: clr }] = await Promise.all([
+    const [{ data: sup }, { data: clr }, { data: emp }] = await Promise.all([
       supabase.from('suppliers').select('id, name').eq('is_active', true),
       supabase.from('clearing_agents').select('id, name').eq('is_active', true),
+      supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
     ])
     setSuppliers(sup ?? [])
     setClearingAgents(clr ?? [])
+    setEmployees(emp ?? [])
   }, [])
 
   async function logTripActivity(action: string, fieldName?: string, oldValue?: string, newValue?: string) {
@@ -237,21 +383,74 @@ export default function TripDetailPage() {
     load()
   }
 
-  async function toggleApproval() {
-    if (!trip) return
-    const newStatus = trip.approval_status === 'approved' ? 'not_approved' : 'approved'
+  async function submitWorkflow() {
+    if (!assignee || !workflowType || !trip) return
+    setSubmittingWorkflow(true)
     const supabase = createClient()
-    await supabase.from('trips').update({ approval_status: newStatus }).eq('id', tripId)
-    await logTripActivity('Approval status changed', 'approval_status', trip.approval_status, newStatus)
-    load()
-  }
+    const { data: { user } } = await supabase.auth.getUser()
 
-  async function handleDelete() {
-    setDeleting(true)
-    const supabase = createClient()
-    await logTripActivity('Trip deleted', 'trip', trip?.title, '')
-    await supabase.from('trips').delete().eq('id', tripId)
-    router.push('/portal/purchase/trips')
+    const typeLabels = {
+      delete: 'Delete approval',
+      review: 'Review request',
+      completion: 'Completion approval',
+    }
+
+    const typeKeys = {
+      delete: 'delete_approval',
+      review: 'review_request',
+      completion: 'completion_approval',
+    }
+
+    const descriptions = {
+      delete: `Request to permanently delete trip ${trip.trip_id} — ${trip.title}`,
+      review: `Request to review trip ${trip.trip_id} — ${trip.title}`,
+      completion: `Request to mark trip ${trip.trip_id} — ${trip.title} as completed`,
+    }
+
+    // Build changes summary for review requests
+    let changesSummary: string | null = null
+    if (workflowType === 'review') {
+      const recentLogs = activityLogs.slice(0, 5)
+      if (recentLogs.length > 0) {
+        changesSummary = recentLogs
+          .map(l => `${l.action}${l.field_name ? ` (${l.field_name})` : ''}`)
+          .join(' · ')
+      }
+    }
+
+    const { data: task } = await supabase.from('tasks').insert({
+      type: typeKeys[workflowType],
+      title: `${typeLabels[workflowType]}: ${trip.trip_id}`,
+      description: workflowNote || descriptions[workflowType],
+      module: 'trips',
+      record_id: tripId,
+      record_ref: trip.trip_id,
+      requested_by: user?.id,
+      assigned_to: assignee,
+      priority: workflowType === 'delete' ? 'high' : 'normal',
+      changes_summary: changesSummary,
+    }).select().single()
+
+    // Notify the assignee
+    await supabase.from('notifications').insert({
+      user_id: assignee,
+      type: `task_${typeKeys[workflowType]}`,
+      title: `New task: ${typeLabels[workflowType]}`,
+      message: `${trip.trip_id} — ${trip.title}`,
+      task_id: task?.id,
+      record_id: tripId,
+      record_ref: trip.trip_id,
+      module: 'trips',
+    })
+
+    await logTripActivity(`${typeLabels[workflowType]} requested`, 'workflow', '', assignee)
+
+    setSubmittingWorkflow(false)
+    setWorkflowOpen(false)
+    setWorkflowType(null)
+    setWorkflowNote('')
+    setAssignee('')
+    load()
   }
 
   async function handleExpense(e: React.FormEvent) {
@@ -386,7 +585,7 @@ export default function TripDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Status */}
+          {/* Status dropdown */}
           <div className="relative">
             <button onClick={() => setStatusOpen(v => !v)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border ${statusInfo(trip.status).color}`}>
@@ -398,7 +597,7 @@ export default function TripDetailPage() {
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setStatusOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg border border-gray-100 shadow-lg z-20 py-1">
-                  {STATUS_OPTIONS.map(s => (
+                  {STATUS_OPTIONS.filter(s => s.value !== 'completed').map(s => (
                     <button key={s.value} onClick={() => updateStatus(s.value)}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors
                         ${trip.status === s.value ? 'font-medium text-brand-600' : 'text-gray-700'}`}>
@@ -406,22 +605,31 @@ export default function TripDetailPage() {
                       {trip.status === s.value && <Check size={12} className="ml-auto" />}
                     </button>
                   ))}
+                  <div className="border-t border-gray-100 mt-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setStatusOpen(false); setWorkflowType('completion'); setWorkflowOpen(true) }}
+                      className="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-green-50 flex items-center gap-2 transition-colors">
+                      <CheckCircle2 size={13} /> Request completion
+                    </button>
+                  </div>
                 </div>
               </>
             )}
           </div>
 
-          {/* Approval */}
-          <button onClick={toggleApproval}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
-              ${trip.approval_status === 'approved'
-                ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
-                : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
-            {trip.approval_status === 'approved' ? <span className="flex items-center gap-1"><CheckCircle2 size={13} /> Approved</span> : 'Not approved'}
+          {/* Request review button */}
+          <button
+            type="button"
+            onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors flex items-center gap-1.5">
+            <Eye size={13} /> Request review
           </button>
 
-          {/* Delete */}
-          <button onClick={() => setDeleteOpen(true)}
+          {/* Delete request */}
+          <button
+            type="button"
+            onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
             className="px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-1.5">
             <Trash2 size={13} /> Delete trip
           </button>
@@ -460,10 +668,24 @@ export default function TripDetailPage() {
 
       {/* Trip details */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setTripInfoOpen(v => !v)}
+          className="w-full px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+        >
           <h2 className="text-sm font-semibold text-gray-700">Trip information</h2>
-          <span className="text-xs text-gray-400">Click any field to edit</span>
-        </div>
+          <div className="flex items-center gap-3">
+            {!tripInfoOpen && (
+              <span className="text-xs text-gray-400">
+                {trip.title} · {trip.source_location ?? ''} · {trip.start_date ? new Date(trip.start_date).toLocaleDateString() : ''}
+              </span>
+            )}
+            <ChevronDown size={16} className={`text-gray-400 transition-transform duration-200 ${tripInfoOpen ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        {tripInfoOpen && (
+          <div className="border-t border-gray-100">
 
         {/* Compact grid — 3 columns for short fields */}
         <div className="divide-y divide-gray-50">
@@ -638,6 +860,8 @@ export default function TripDetailPage() {
           </div>
 
         </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -703,26 +927,27 @@ export default function TripDetailPage() {
                     {expenses.length === 0 ? (
                       <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">No expenses recorded yet.</td></tr>
                     ) : expenses.map(exp => (
-                      <tr key={exp.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                        <td className="px-3 py-3"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{exp.expense_id}</span></td>
-                        <td className="px-3 py-3">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${exp.category === 'container' ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {exp.category === 'container' ? 'Container' : 'General'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{Number(exp.amount).toLocaleString()}</td>
-                        <td className="px-3 py-3 text-gray-500">{exp.currency}</td>
-                        <td className="px-3 py-3 text-gray-500">{exp.exchange_rate}</td>
-                        <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(exp.amount_ngn)}</td>
-                        <td className="px-3 py-3 text-gray-500 max-w-[180px] truncate">{exp.description ?? '—'}</td>
-                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(exp.expense_date).toLocaleDateString()}</td>
-                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
-                        <td className="px-3 py-3">
-                          <button onClick={() => deleteExpense(exp.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
+                      <ExpenseRow
+                        key={exp.id}
+                        exp={exp}
+                        onDelete={deleteExpense}
+                        onSave={async (id, updates) => {
+                          const supabase = createClient()
+                          const amount = parseFloat(updates.amount)
+                          const rate = parseFloat(updates.exchange_rate)
+                          await supabase.from('trip_expenses').update({
+                            category: updates.category,
+                            amount,
+                            currency: updates.currency,
+                            exchange_rate: rate,
+                            amount_ngn: amount * rate,
+                            description: updates.description || null,
+                            expense_date: updates.expense_date,
+                          }).eq('id', id)
+                          await load()
+                        }}
+                        fmt={fmt}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -738,9 +963,10 @@ export default function TripDetailPage() {
                     {[
                       'Container ID', 'Status', 'Title', 'Tracking No.',
                       'Pieces', 'Avg Weight', 'Unit Price ($)', 'Landing Cost (₦)',
-                      'Max Weight', 'Shipping ($)', 'Surcharge (₦)',
+                      'Max Weight', 'Shipping ($)',
                       'Purchase Amt ($)', 'Purchase Subtotal ($)',
                       'Quoted Price ($)', 'Quoted Amt ($)', 'Quoted Subtotal ($)',
+                      'Surcharge (₦)',
                       'Created', 'Created by', 'Actions'
                     ].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
@@ -781,7 +1007,6 @@ export default function TripDetailPage() {
                         <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.estimated_landing_cost ? fmt(con.estimated_landing_cost) : '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.max_weight ? `${con.max_weight} kg` : '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.shipping_amount_usd ? `$${Number(con.shipping_amount_usd).toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.surcharge_ngn ? fmt(con.surcharge_ngn) : '—'}</td>
                         <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{purchaseAmt ? `$${purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
                         <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
                           {purchaseAmt != null
@@ -799,6 +1024,7 @@ export default function TripDetailPage() {
                             ? `$${(quotedAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : '—'}
                         </td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.surcharge_ngn ? fmt(con.surcharge_ngn) : '—'}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(con.created_at).toLocaleDateString()}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.created_by_profile?.full_name ?? con.created_by_profile?.email ?? '—'}</td>
                         <td className="px-3 py-3 whitespace-nowrap">
@@ -848,9 +1074,6 @@ export default function TripDetailPage() {
                       ${containers.reduce((s, c) => s + Number(c.shipping_amount_usd ?? 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
-                      {fmt(containers.reduce((s, c) => s + Number(c.surcharge_ngn ?? 0), 0))}
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
                       ${containers.reduce((s, c) => {
                         const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
                         return s + pa
@@ -888,6 +1111,12 @@ export default function TripDetailPage() {
                           return s + qa + (qa > 0 ? Number(c.shipping_amount_usd ?? 0) : 0)
                         }, 0)
                         return `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      {(() => {
+                        const total = containers.reduce((s, c) => s + Number(c.surcharge_ngn ?? 0), 0)
+                        return total > 0 ? fmt(total) : '—'
                       })()}
                     </td>
                     <td colSpan={3} />
@@ -1051,22 +1280,71 @@ export default function TripDetailPage() {
         </form>
       </Modal>
 
-      {/* Delete confirmation modal */}
-      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete trip" description="This action cannot be undone" size="sm">
+      {/* Workflow modal */}
+      <Modal
+        open={workflowOpen}
+        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+        title={
+          workflowType === 'delete' ? 'Request trip deletion' :
+          workflowType === 'review' ? 'Request trip review' :
+          'Request trip completion'
+        }
+        description="Select a user to assign this task to"
+        size="sm"
+      >
         <div className="space-y-4">
-          <div className="p-4 bg-red-50 rounded-lg border border-red-100">
-            <p className="text-sm text-red-700">
-              You are about to permanently delete <span className="font-semibold">{trip.title}</span> ({trip.trip_id}) along with all its expenses, containers and documents.
-            </p>
+          {workflowType === 'delete' && (
+            <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+              <p className="text-xs text-red-700 font-medium">
+                This will send a delete approval request. The trip will only be deleted after the assigned user approves it.
+              </p>
+            </div>
+          )}
+          {workflowType === 'completion' && (
+            <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+              <p className="text-xs text-green-700 font-medium">
+                This will send a completion approval request. The trip status will only move to Completed after approval.
+              </p>
+            </div>
+          )}
+          {workflowType === 'review' && (
+            <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
+              <p className="text-xs text-brand-700 font-medium">
+                The reviewer will see a summary of all changes since the last review.
+              </p>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Assign to <span className="text-red-400">*</span>
+            </label>
+            <select required value={assignee} onChange={e => setAssignee(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+              <option value="">Select user...</option>
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.full_name ?? e.email}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="flex gap-3">
-            <button onClick={() => setDeleteOpen(false)}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+            <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              placeholder="Add context for the assignee..." />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
-            <button onClick={handleDelete} disabled={deleting}
-              className="flex-1 px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
-              {deleting ? <><Loader2 size={14} className="animate-spin" /> Deleting…</> : 'Delete trip'}
+            <button type="button" onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+              className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
+                ${workflowType === 'delete'
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
+              {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
             </button>
           </div>
         </div>

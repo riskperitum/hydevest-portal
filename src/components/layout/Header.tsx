@@ -154,7 +154,9 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
               {initials}
             </div>
             <div className="text-left hidden sm:block">
-              <p className="text-sm font-medium text-gray-800 leading-none">{profile?.full_name ?? profile?.email}</p>
+              <p className="text-sm font-medium text-gray-800 leading-none">
+                {profile?.full_name ? profile.full_name.split(' ')[0] + ' ' + (profile.full_name.split(' ')[1] ?? '') : profile?.email}
+              </p>
               {isSuperAdmin && <p className="text-xs text-brand-600 mt-0.5">Super admin</p>}
             </div>
             <ChevronDown size={14} className="text-gray-400" />

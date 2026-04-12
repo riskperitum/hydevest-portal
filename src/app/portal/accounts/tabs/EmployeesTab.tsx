@@ -84,12 +84,16 @@ export default function EmployeesTab() {
 
   const columns = [
     {
-      key: 'full_name', label: 'Name', render: (r: Employee) => (
+      key: 'name', label: 'Name',
+      render: (r: Employee) => (
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-xs font-semibold shrink-0">
-            {(r.full_name ?? r.email)[0].toUpperCase()}
+            {(r.full_name ?? r.email ?? 'U')[0].toUpperCase()}
           </div>
-          <span className="font-medium text-gray-900">{r.full_name ?? '—'}</span>
+          <div>
+            <p className="font-medium text-gray-900">{r.full_name ?? <span className="text-gray-400 italic">No name set</span>}</p>
+            <p className="text-xs text-gray-400">{r.email}</p>
+          </div>
         </div>
       )
     },
@@ -130,19 +134,38 @@ export default function EmployeesTab() {
       <Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Creates a new portal login account">
         <form onSubmit={handleCreate} className="space-y-4">
           {error && <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full name</label>
-              <input required value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
+              <label className="block text-sm font-medium text-gray-700 mb-1">First name <span className="text-red-400">*</span></label>
+              <input
+                required
+                value={form.full_name.split(' ')[0] ?? ''}
+                onChange={e => {
+                  const last = form.full_name.split(' ').slice(1).join(' ')
+                  setForm(f => ({ ...f, full_name: `${e.target.value}${last ? ' ' + last : ''}` }))
+                }}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="John Doe" />
+                placeholder="First name"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+              <input
+                value={form.full_name.split(' ').slice(1).join(' ') ?? ''}
+                onChange={e => {
+                  const first = form.full_name.split(' ')[0] ?? ''
+                  setForm(f => ({ ...f, full_name: `${first}${e.target.value ? ' ' + e.target.value : ''}` }))
+                }}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="+234 800 000 0000" />
+                placeholder="Last name"
+              />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="+234 800 000 0000" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>

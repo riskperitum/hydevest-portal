@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 
 interface Container {
   id: string
@@ -736,14 +737,14 @@ export default function ContainerDetailPage() {
                       <div className="bg-gray-50 rounded-xl px-4 py-3">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-semibold text-gray-800">
-                            {comment.author?.full_name ?? comment.author?.email ?? 'Unknown'}
+                            {fullDisplayName(comment.author)}
                           </span>
                           <span className="text-xs text-gray-400">{new Date(comment.created_at).toLocaleString()}</span>
                         </div>
                         <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.content}</p>
                       </div>
                       <button
-                        onClick={() => setReplyTo({ id: comment.id, author: comment.author?.full_name ?? comment.author?.email ?? 'Unknown' })}
+                        onClick={() => setReplyTo({ id: comment.id, author: fullDisplayName(comment.author) })}
                         className="text-xs text-gray-400 hover:text-brand-600 mt-1 ml-2 transition-colors">
                         Reply
                       </button>
@@ -816,7 +817,7 @@ export default function ContainerDetailPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-700">
-                        <span className="font-medium text-gray-900">{log.performer?.full_name ?? log.performer?.email ?? 'System'}</span>
+                        <span className="font-medium text-gray-900">{fullDisplayName(log.performer)}</span>
                         {' '}{log.action}
                         {log.field_name && <span className="text-gray-500"> · {log.field_name}</span>}
                       </p>

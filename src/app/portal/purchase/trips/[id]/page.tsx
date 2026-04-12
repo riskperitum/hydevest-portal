@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 
 interface Trip {
   id: string
@@ -154,7 +155,7 @@ function ExpenseRow({ exp, onDelete, onSave, fmt }: {
             onChange={e => setForm(f => ({ ...f, expense_date: e.target.value }))}
             className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
         </td>
-        <td className="px-3 py-2 text-xs text-gray-400">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
+        <td className="px-3 py-2 text-xs text-gray-400">{fullDisplayName(exp.created_by_profile)}</td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-1">
             <button type="button" onClick={handleSave} disabled={saving}
@@ -196,7 +197,7 @@ function ExpenseRow({ exp, onDelete, onSave, fmt }: {
       <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(exp.amount_ngn)}</td>
       <td className="px-3 py-3 text-gray-500 max-w-[180px] truncate">{exp.description ?? '—'}</td>
       <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(exp.expense_date).toLocaleDateString()}</td>
-      <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{exp.created_by_profile?.full_name ?? exp.created_by_profile?.email ?? '—'}</td>
+      <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{fullDisplayName(exp.created_by_profile)}</td>
       <td className="px-3 py-3">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button type="button" onClick={() => {
@@ -728,7 +729,7 @@ export default function TripDetailPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
               <span className="text-xs text-gray-400">
-                Created by <span className="text-gray-600">{trip.created_by_profile?.full_name ?? trip.created_by_profile?.email ?? '—'}</span>
+                Created by <span className="text-gray-600">{fullDisplayName(trip.created_by_profile)}</span>
               </span>
               <span className="text-xs text-gray-400">on {new Date(trip.created_at).toLocaleDateString()}</span>
             </div>
@@ -1306,7 +1307,7 @@ export default function TripDetailPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-700">
                         <span className="font-medium text-gray-900">
-                          {log.performer?.full_name ?? log.performer?.email ?? 'System'}
+                          {fullDisplayName(log.performer)}
                         </span>
                         {' '}<span className="text-gray-500">{log.action}</span>
                         {log.field_name && (

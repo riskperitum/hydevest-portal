@@ -79,13 +79,6 @@ const STATUS_OPTIONS = [
   { value: 'completed',   label: 'Completed',   icon: <CheckCircle2 size={13} />, color: 'bg-green-50 text-green-700 border-green-200' },
 ]
 
-const CONTAINER_STATUS = [
-  { value: 'ordered',    label: 'Ordered',    color: 'bg-gray-100 text-gray-600' },
-  { value: 'in_transit', label: 'In transit', color: 'bg-blue-50 text-blue-700' },
-  { value: 'arrived',    label: 'Arrived',    color: 'bg-green-50 text-green-700' },
-  { value: 'cleared',    label: 'Cleared',    color: 'bg-brand-50 text-brand-700' },
-]
-
 const blankExpense = { category: 'general', amount: '', currency: 'NGN', exchange_rate: '1', description: '', expense_date: new Date().toISOString().split('T')[0] }
 const blankContainer = { container_number: '', tracking_number: '' }
 
@@ -611,7 +604,6 @@ export default function TripDetailPage() {
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
-  const containerStatusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
 
   // Step 1: Total NGN paid for container expenses (category = 'container')
   const containerExpensesNGN = expenses
@@ -1148,7 +1140,7 @@ export default function TripDetailPage() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     {[
-                      'Container ID', 'Status', 'Title', 'Tracking No.',
+                      'Container ID', 'Title', 'Tracking No.',
                       'Pieces', 'Avg Weight', 'Unit Price ($)', 'Landing Cost (₦)',
                       'Max Weight', 'Shipping ($)',
                       'Purchase Amt ($)', 'Purchase Subtotal ($)',
@@ -1163,7 +1155,7 @@ export default function TripDetailPage() {
                 <tbody>
                   {containers.length === 0 ? (
                     <tr>
-                      <td colSpan={19} className="px-4 py-12 text-center text-sm text-gray-400">
+                      <td colSpan={18} className="px-4 py-12 text-center text-sm text-gray-400">
                         No containers added yet.
                       </td>
                     </tr>
@@ -1180,11 +1172,6 @@ export default function TripDetailPage() {
                         onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}>
                         <td className="px-3 py-3 whitespace-nowrap">
                           <span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span>
-                        </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${containerStatusInfo(con.status).color}`}>
-                            {containerStatusInfo(con.status).label}
-                          </span>
                         </td>
                         <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.container_number ?? '—'}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.tracking_number ?? '—'}</td>
@@ -1248,7 +1235,7 @@ export default function TripDetailPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={6} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Totals</td>
+                    <td colSpan={5} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Totals</td>
                     <td className="px-3 py-3 text-xs text-gray-400">—</td>
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
                       {(() => {

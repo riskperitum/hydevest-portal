@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Search, Download, Filter, Eye, ChevronDown } from 'lucide-react'
+import { Search, Download, Filter, Eye, FileText, Loader2 } from 'lucide-react'
 
 interface Container {
   id: string
@@ -29,10 +29,13 @@ interface Container {
 }
 
 const CONTAINER_STATUS = [
-  { value: 'ordered',    label: 'Ordered',    color: 'bg-gray-100 text-gray-600' },
-  { value: 'in_transit', label: 'In transit', color: 'bg-blue-50 text-blue-700' },
-  { value: 'arrived',    label: 'Arrived',    color: 'bg-green-50 text-green-700' },
-  { value: 'cleared',    label: 'Cleared',    color: 'bg-brand-50 text-brand-700' },
+  { value: 'ordered',      label: 'Ordered',      color: 'bg-gray-100 text-gray-600' },
+  { value: 'in_transit',   label: 'In transit',   color: 'bg-blue-50 text-blue-700' },
+  { value: 'arrived',      label: 'Arrived',      color: 'bg-green-50 text-green-700' },
+  { value: 'cleared',      label: 'Cleared',      color: 'bg-brand-50 text-brand-700' },
+  { value: 'not_started',  label: 'Not started',  color: 'bg-gray-100 text-gray-500' },
+  { value: 'in_progress',  label: 'In progress',  color: 'bg-blue-50 text-blue-700' },
+  { value: 'completed',    label: 'Completed',    color: 'bg-green-50 text-green-700' },
 ]
 
 const HIDE_TYPE_LABELS: Record<string, string> = {
@@ -50,6 +53,9 @@ export default function ContainersPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
+  const [generatingReport, setGeneratingReport] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -69,7 +75,10 @@ export default function ContainersPage() {
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const statusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
+  const statusInfo = (s: string) =>
+    CONTAINER_STATUS.find(o => o.value === s)
+    ?? CONTAINER_STATUS.find(o => o.value === 'not_started')
+    ?? CONTAINER_STATUS[0]
 
   const filtered = containers.filter(c => {
     const matchSearch = search === '' ||
@@ -78,7 +87,7 @@ export default function ContainersPage() {
       (c.tracking_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (c.trip?.title ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (c.trip?.trip_id ?? '').toLowerCase().includes(search.toLowerCase())
-    const matchStatus = statusFilter === '' || c.status === statusFilter
+    const matchStatus = statusFilter === '' || (c.trip?.status ?? '') === statusFilter
     const matchHideType = hideTypeFilter === '' || c.hide_type === hideTypeFilter
     const matchDateFrom = dateFrom === '' || new Date(c.created_at) >= new Date(dateFrom)
     const matchDateTo = dateTo === '' || new Date(c.created_at) <= new Date(dateTo + 'T23:59:59')
@@ -107,6 +116,177 @@ export default function ContainersPage() {
     const a = document.createElement('a'); a.href = url; a.download = 'containers.csv'; a.click()
   }
 
+  async function generateReport(type: 'filtered' | 'full') {
+    setGeneratingReport(true)
+    const data = type === 'filtered' ? filtered : containers
+
+    const rows = data.map(c => {
+      const purchaseAmt = (c.unit_price_usd && c.pieces_purchased)
+        ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+      const purchaseSubtotal = purchaseAmt + Number(c.shipping_amount_usd ?? 0)
+      return {
+        id: c.container_id,
+        title: c.container_number ?? '—',
+        tracking: c.tracking_number ?? '—',
+        trip: `${c.trip?.trip_id ?? ''} — ${c.trip?.title ?? ''}`,
+        status: c.status,
+        hideType: c.hide_type ? HIDE_TYPE_LABELS[c.hide_type] : '—',
+        funding: c.funding_type,
+        pieces: c.pieces_purchased?.toLocaleString() ?? '—',
+        avgWeight: c.average_weight ? `${c.average_weight} kg` : '—',
+        unitPrice: c.unit_price_usd ? `$${Number(c.unit_price_usd).toFixed(2)}` : '—',
+        purchaseSubtotal: purchaseSubtotal > 0 ? `$${purchaseSubtotal.toFixed(2)}` : '—',
+        landingCost: c.estimated_landing_cost ? `₦${Number(c.estimated_landing_cost).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—',
+        created: new Date(c.created_at).toLocaleDateString(),
+        createdBy: c.created_by_profile?.full_name ?? c.created_by_profile?.email ?? '—',
+      }
+    })
+
+    const totalLandingReport = data.reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
+    const totalPiecesReport = data.reduce((s, c) => s + Number(c.pieces_purchased ?? 0), 0)
+    const totalSubtotalReport = data.reduce((s, c) => {
+      const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+      return s + pa + Number(c.shipping_amount_usd ?? 0)
+    }, 0)
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Containers Report — Hydevest</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a2e; background: #fff; }
+    .header { background: #55249E; color: white; padding: 32px 40px; }
+    .header h1 { font-size: 24px; font-weight: 700; }
+    .header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+    .meta { display: flex; gap: 32px; margin-top: 16px; }
+    .meta-item { font-size: 12px; opacity: 0.9; }
+    .meta-item span { font-weight: 600; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px 40px; background: #f8f7ff; border-bottom: 1px solid #e8e0ff; }
+    .summary-card { background: white; border-radius: 8px; padding: 16px; border: 1px solid #ede9f7; }
+    .summary-card .label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+    .summary-card .value { font-size: 20px; font-weight: 700; color: #55249E; }
+    .content { padding: 24px 40px; }
+    .section-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead tr { background: #55249E; color: white; }
+    thead th { padding: 10px 12px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid #f0ebff; }
+    tbody tr:nth-child(even) { background: #faf8ff; }
+    tbody tr:hover { background: #f3eeff; }
+    tbody td { padding: 9px 12px; color: #374151; white-space: nowrap; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+    .badge-ordered { background: #f3f4f6; color: #4b5563; }
+    .badge-in_transit { background: #eff6ff; color: #1d4ed8; }
+    .badge-arrived { background: #f0fdf4; color: #15803d; }
+    .badge-cleared { background: #f3eeff; color: #55249E; }
+    .badge-entity { background: #eff6ff; color: #1d4ed8; }
+    .badge-partner { background: #f3eeff; color: #55249E; }
+    tfoot tr { background: #f3eeff; font-weight: 700; border-top: 2px solid #55249E; }
+    tfoot td { padding: 10px 12px; font-size: 12px; color: #55249E; }
+    .footer { padding: 20px 40px; border-top: 1px solid #ede9f7; text-align: center; font-size: 11px; color: #9ca3af; margin-top: 24px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Containers Report</h1>
+    <p>Hydevest Portal — ${type === 'filtered' ? 'Filtered View' : 'Full Report'}</p>
+    <div class="meta">
+      <div class="meta-item">Generated: <span>${new Date().toLocaleString()}</span></div>
+      <div class="meta-item">Total containers: <span>${data.length}</span></div>
+      ${type === 'filtered' && activeFilters > 0 ? `<div class="meta-item">Filters applied: <span>${activeFilters}</span></div>` : ''}
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card">
+      <div class="label">Total containers</div>
+      <div class="value">${data.length}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Total pieces</div>
+      <div class="value">${totalPiecesReport.toLocaleString()}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Total purchase subtotal</div>
+      <div class="value">$${totalSubtotalReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Total landing cost</div>
+      <div class="value">₦${totalLandingReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="section-title">Container details</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Container ID</th>
+          <th>Trip</th>
+          <th>Title</th>
+          <th>Tracking No.</th>
+          <th>Status</th>
+          <th>Hide Type</th>
+          <th>Funding</th>
+          <th>Pieces</th>
+          <th>Avg Weight</th>
+          <th>Unit Price</th>
+          <th>Purchase Subtotal</th>
+          <th>Landing Cost (₦)</th>
+          <th>Created</th>
+          <th>Created By</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+        <tr>
+          <td><strong style="color:#55249E">${r.id}</strong></td>
+          <td><span style="font-size:11px;color:#6b7280">${r.trip}</span></td>
+          <td><strong>${r.title}</strong></td>
+          <td>${r.tracking}</td>
+          <td><span class="badge badge-${r.status.replace(' ', '_')}">${r.status}</span></td>
+          <td>${r.hideType}</td>
+          <td><span class="badge badge-${r.funding}">${r.funding}</span></td>
+          <td style="text-align:center">${r.pieces}</td>
+          <td>${r.avgWeight}</td>
+          <td>${r.unitPrice}</td>
+          <td style="color:#55249E;font-weight:600">${r.purchaseSubtotal}</td>
+          <td style="font-weight:600">${r.landingCost}</td>
+          <td>${r.created}</td>
+          <td>${r.createdBy}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="7">TOTALS</td>
+          <td style="text-align:center">${totalPiecesReport.toLocaleString()}</td>
+          <td>—</td>
+          <td>—</td>
+          <td>$${totalSubtotalReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td>₦${totalLandingReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="footer">
+    Hydevest Portal · Generated ${new Date().toLocaleString()} · Confidential
+  </div>
+</body>
+</html>`
+
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    if (win) win.focus()
+    setGeneratingReport(false)
+    setReportOpen(false)
+  }
+
   // Summary stats
   const totalLanding = filtered.reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
   const totalPieces = filtered.reduce((s, c) => s + Number(c.pieces_purchased ?? 0), 0)
@@ -125,26 +305,56 @@ export default function ContainersPage() {
           <h1 className="text-xl font-semibold text-gray-900">Containers</h1>
           <p className="text-sm text-gray-400 mt-0.5">{filtered.length} container{filtered.length !== 1 ? 's' : ''} across all trips</p>
         </div>
-        <button onClick={exportCSV}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-          <Download size={15} /> Export
-        </button>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <p className="text-xs text-gray-400 mb-1">Total containers</p>
-          <p className="text-2xl font-semibold text-gray-900">{filtered.length}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <p className="text-xs text-gray-400 mb-1">Total pieces</p>
-          <p className="text-2xl font-semibold text-gray-900">{totalPieces.toLocaleString()}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <p className="text-xs text-gray-400 mb-1">Total landing cost (₦)</p>
-          <p className="text-2xl font-semibold text-brand-600">{totalLanding > 0 ? fmt(totalLanding) : '—'}</p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[
+          {
+            label: 'Total containers',
+            value: filtered.length.toString(),
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Avg landing cost (₦)',
+            value: filtered.length > 0 && totalLanding > 0
+              ? fmt(totalLanding / filtered.filter(c => c.estimated_landing_cost).length)
+              : '—',
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Avg pieces',
+            value: filtered.length > 0 && totalPieces > 0
+              ? (totalPieces / filtered.filter(c => c.pieces_purchased).length).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+              : '—',
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Avg quoted price ($)',
+            value: (() => {
+              const withQuoted = filtered.filter(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
+              if (withQuoted.length === 0) return '—'
+              const avg = withQuoted.reduce((s, c) => s + Number(c.quoted_price_usd), 0) / withQuoted.length
+              return fmtUSD(avg)
+            })(),
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Avg unit price ($)',
+            value: (() => {
+              const withPrice = filtered.filter(c => c.unit_price_usd && Number(c.unit_price_usd) > 0)
+              if (withPrice.length === 0) return '—'
+              const avg = withPrice.reduce((s, c) => s + Number(c.unit_price_usd), 0) / withPrice.length
+              return fmtUSD(avg)
+            })(),
+            color: 'text-brand-600',
+          },
+        ].map(metric => (
+          <div key={metric.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <p className="text-xs text-gray-400 mb-2 leading-tight">{metric.label}</p>
+            <p className={`text-xl font-semibold truncate ${metric.color}`}>{metric.value}</p>
+          </div>
+        ))}
       </div>
 
       {/* Search + Filters */}
@@ -156,21 +366,31 @@ export default function ContainersPage() {
               placeholder="Search by container ID, title, tracking number or trip..."
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <button
-            onClick={() => setShowFilters(v => !v)}
-            className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            <Filter size={15} />
-            Filters
-            {activeFilters > 0 && (
-              <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{activeFilters}</span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter size={15} />
+              Filters
+              {activeFilters > 0 && (
+                <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{activeFilters}</span>
+              )}
+            </button>
+            <button onClick={exportCSV}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              <Download size={15} /> Export CSV
+            </button>
+            <button onClick={() => setReportOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+              <FileText size={15} /> Generate report
+            </button>
+          </div>
         </div>
 
         {showFilters && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Status</label>
+              <label className="block text-xs text-gray-500 mb-1">Trip status</label>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                 <option value="">All statuses</option>
@@ -217,7 +437,7 @@ export default function ContainersPage() {
               <tr className="bg-gray-50 border-b border-gray-100">
                 {[
                   'Container ID', 'Trip', 'Title', 'Tracking No.',
-                  'Status', 'Hide Type', 'Funding',
+                  'Trip Status', 'Hide Type', 'Funding',
                   'Pieces', 'Avg Weight', 'Unit Price ($)',
                   'Purchase Subtotal ($)', 'Landing Cost (₦)',
                   'Created', 'Created By', ''
@@ -269,8 +489,8 @@ export default function ContainersPage() {
                     </td>
                     <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.tracking_number ?? '—'}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo(con.status).color}`}>
-                        {statusInfo(con.status).label}
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo(con.trip?.status ?? 'not_started').color}`}>
+                        {statusInfo(con.trip?.status ?? 'not_started').label}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
@@ -331,6 +551,51 @@ export default function ContainersPage() {
           </table>
         </div>
       </div>
+
+      {/* Report modal */}
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setReportOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+            <p className="text-sm text-gray-500">Choose which data to include in the report.</p>
+            <div className="space-y-2">
+              <button
+                onClick={() => setReportType('filtered')}
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-colors ${reportType === 'filtered' ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <p className={`text-sm font-medium ${reportType === 'filtered' ? 'text-brand-700' : 'text-gray-700'}`}>
+                  Filtered view
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {filtered.length} container{filtered.length !== 1 ? 's' : ''}
+                  {activeFilters > 0 ? ` · ${activeFilters} filter${activeFilters !== 1 ? 's' : ''} applied` : ' · No filters applied'}
+                </p>
+              </button>
+              <button
+                onClick={() => setReportType('full')}
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-colors ${reportType === 'full' ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <p className={`text-sm font-medium ${reportType === 'full' ? 'text-brand-700' : 'text-gray-700'}`}>
+                  Full report
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">{containers.length} total containers across all trips</p>
+              </button>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={() => setReportOpen(false)}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => generateReport(reportType)}
+                disabled={generatingReport}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+                {generatingReport ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

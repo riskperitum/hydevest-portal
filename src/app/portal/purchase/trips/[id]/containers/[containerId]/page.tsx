@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Plus, Trash2, Check, X,
   Pencil, Upload, Eye, RefreshCw, MessageSquare,
-  Activity, Paperclip, ChevronDown
+  Activity, Paperclip
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
@@ -69,11 +69,10 @@ interface ActivityLog {
 interface Entity { id: string; name: string; entity_id: string }
 interface Partner { id: string; name: string; partner_id: string }
 
-const CONTAINER_STATUS = [
-  { value: 'ordered',    label: 'Ordered',    color: 'bg-gray-100 text-gray-600' },
-  { value: 'in_transit', label: 'In transit', color: 'bg-blue-50 text-blue-700' },
-  { value: 'arrived',    label: 'Arrived',    color: 'bg-green-50 text-green-700' },
-  { value: 'cleared',    label: 'Cleared',    color: 'bg-brand-50 text-brand-700' },
+const TRIP_STATUS = [
+  { value: 'not_started', label: 'Not started', color: 'bg-gray-100 text-gray-600 border-gray-200' },
+  { value: 'in_progress', label: 'In progress', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { value: 'completed',   label: 'Completed',   color: 'bg-green-50 text-green-700 border-green-200' },
 ]
 
 export default function ContainerDetailPage() {
@@ -94,8 +93,6 @@ export default function ContainerDetailPage() {
 
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
-  const [statusOpen, setStatusOpen] = useState(false)
-
   const [funderOpen, setFunderOpen] = useState(false)
   const [funderForm, setFunderForm] = useState({ funder_type: 'entity', funder_id: '', percentage: '' })
   const [savingFunder, setSavingFunder] = useState(false)
@@ -109,7 +106,7 @@ export default function ContainerDetailPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadName, setUploadName] = useState('')
   const [documents, setDocuments] = useState<{ id: string; name: string; file_url: string; file_type: string | null; created_at: string }[]>([])
-  const [tripData, setTripData] = useState<{ source_port: string | null; destination_port: string | null } | null>(null)
+  const [tripData, setTripData] = useState<{ source_port: string | null; destination_port: string | null; status: string; trip_id: string; title: string } | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -124,7 +121,7 @@ export default function ContainerDetailPage() {
     if (con?.trip_id) {
       const { data: trip } = await supabase
         .from('trips')
-        .select('source_port, destination_port')
+        .select('source_port, destination_port, status, trip_id, title')
         .eq('id', con.trip_id)
         .single()
       setTripData(trip)
@@ -204,15 +201,6 @@ export default function ContainerDetailPage() {
       await supabase.from('trips').update({ needs_review: true }).eq('id', tripId)
     }
     setEditField(null)
-    load()
-    loadActivity()
-  }
-
-  async function updateStatus(status: string) {
-    const supabase = createClient()
-    await supabase.from('containers').update({ status }).eq('id', containerId)
-    await logActivity('Status changed', 'status', container?.status, status)
-    setStatusOpen(false)
     load()
     loadActivity()
   }
@@ -363,7 +351,7 @@ export default function ContainerDetailPage() {
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const statusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
+  const statusInfo = (s: string) => TRIP_STATUS.find(o => o.value === s) ?? TRIP_STATUS[0]
   const isPartner = container?.funding_type === 'partner'
 
   if (loading) return (
@@ -480,29 +468,14 @@ export default function ContainerDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <button onClick={() => setStatusOpen(v => !v)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border ${statusInfo(container.status).color}`}>
-              {statusInfo(container.status).label}
-              <ChevronDown size={13} />
-            </button>
-            {statusOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setStatusOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-lg border border-gray-100 shadow-lg z-20 py-1">
-                  {CONTAINER_STATUS.map(s => (
-                    <button key={s.value} onClick={() => updateStatus(s.value)}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors
-                        ${container.status === s.value ? 'font-medium text-brand-600' : 'text-gray-700'}`}>
-                      <span className={`w-2 h-2 rounded-full ${s.color.split(' ')[0]}`} />
-                      {s.label}
-                      {container.status === s.value && <Check size={12} className="ml-auto" />}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          {tripData && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">Trip status:</span>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border ${statusInfo(tripData.status).color}`}>
+                {statusInfo(tripData.status).label}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

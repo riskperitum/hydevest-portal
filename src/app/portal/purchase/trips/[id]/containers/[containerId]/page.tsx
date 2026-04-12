@@ -194,6 +194,15 @@ export default function ContainerDetailPage() {
     const oldValue = String((container as Record<string, unknown>)[field] ?? '')
     await supabase.from('containers').update({ [field]: value || null }).eq('id', containerId)
     await logActivity('Updated field', field, oldValue, value)
+    // Flag trip as needing review if it was previously reviewed
+    const { data: tripData } = await supabase
+      .from('trips')
+      .select('approval_status')
+      .eq('id', tripId)
+      .single()
+    if (tripData?.approval_status === 'reviewed') {
+      await supabase.from('trips').update({ needs_review: true }).eq('id', tripId)
+    }
     setEditField(null)
     load()
     loadActivity()

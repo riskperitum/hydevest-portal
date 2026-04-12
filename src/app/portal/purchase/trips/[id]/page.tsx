@@ -26,10 +26,14 @@ interface Trip {
   approval_status: string
   source_port: string | null
   destination_port: string | null
+  needs_review: boolean
+  last_reviewed_at: string | null
+  last_reviewed_by: string | null
   created_at: string
   supplier: { name: string } | null
   clearing_agent: { name: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
+  last_reviewer: { full_name: string | null; email: string } | null
 }
 
 interface TripExpense {
@@ -317,7 +321,7 @@ export default function TripDetailPage() {
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: t }, { data: exp }, { data: con }] = await Promise.all([
-      supabase.from('trips').select(`*, supplier:suppliers(name), clearing_agent:clearing_agents(name), created_by_profile:profiles!trips_created_by_fkey(full_name, email)`).eq('id', tripId).single(),
+      supabase.from('trips').select(`*, supplier:suppliers(name), clearing_agent:clearing_agents(name), created_by_profile:profiles!trips_created_by_fkey(full_name, email), last_reviewer:profiles!trips_last_reviewed_by_fkey(full_name, email)`).eq('id', tripId).single(),
       supabase.from('trip_expenses').select(`*, created_by_profile:profiles!trip_expenses_created_by_fkey(full_name, email)`).eq('trip_id', tripId).order('created_at', { ascending: false }),
       supabase.from('containers').select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)').eq('trip_id', tripId).order('created_at', { ascending: false }),
     ])
@@ -396,7 +400,11 @@ export default function TripDetailPage() {
   async function updateField(field: string, value: string) {
     const supabase = createClient()
     const oldValue = String((trip as unknown as Record<string, unknown>)[field] ?? '')
-    await supabase.from('trips').update({ [field]: value || null }).eq('id', tripId)
+    const wasReviewed = trip?.approval_status === 'reviewed'
+    await supabase.from('trips').update({
+      [field]: value || null,
+      ...(wasReviewed ? { needs_review: true } : {}),
+    }).eq('id', tripId)
     await logTripActivity('Updated field', field, oldValue, value)
     setEditField(null)
     load()
@@ -505,7 +513,12 @@ export default function TripDetailPage() {
         await logTripActivity('Trip completion approved', 'workflow', '', 'completed')
       }
       if (reviewTask.type === 'review_request') {
-        await supabase.from('trips').update({ approval_status: 'reviewed' }).eq('id', tripId)
+        await supabase.from('trips').update({
+          approval_status: 'reviewed',
+          needs_review: false,
+          last_reviewed_by: user?.id,
+          last_reviewed_at: new Date().toISOString(),
+        }).eq('id', tripId)
         await logTripActivity('Trip review approved', 'workflow', '', 'reviewed')
       }
     } else {
@@ -557,6 +570,10 @@ export default function TripDetailPage() {
     setExpenseForm(blankExpense)
     setSaving(false)
     await logTripActivity('Expense recorded', 'expenses', '', `${expenseForm.category} — ${expenseForm.amount} ${expenseForm.currency}`)
+    if (trip?.approval_status === 'reviewed') {
+      const supabase2 = createClient()
+      await supabase2.from('trips').update({ needs_review: true }).eq('id', tripId)
+    }
     await load()
   }
 
@@ -729,11 +746,28 @@ export default function TripDetailPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
               <span className="text-xs text-gray-400">
-                Created by <span className="text-gray-600">{fullDisplayName(trip.created_by_profile)}</span>
+                Created by <span className="text-gray-600">{trip.created_by_profile?.full_name ?? trip.created_by_profile?.email ?? '—'}</span>
               </span>
               <span className="text-xs text-gray-400">on {new Date(trip.created_at).toLocaleDateString()}</span>
+              {trip.last_reviewed_at && (
+                <>
+                  <span className="text-gray-200">·</span>
+                  <span className="text-xs text-gray-400">
+                    Last reviewed by <span className="text-gray-600">{trip.last_reviewer?.full_name ?? trip.last_reviewer?.email ?? '—'}</span>
+                  </span>
+                  <span className="text-xs text-gray-400">on {new Date(trip.last_reviewed_at).toLocaleDateString()}</span>
+                </>
+              )}
             </div>
-            <h1 className="text-lg font-semibold text-gray-900 mt-0.5">{trip.title}</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <h1 className="text-lg font-semibold text-gray-900">{trip.title}</h1>
+              {trip.needs_review && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Changes since last review
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

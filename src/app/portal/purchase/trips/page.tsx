@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Search, Download, Eye, Trash2, CheckCircle2, Clock } from 'lucide-react'
+import { Plus, Search, Download, Eye, Trash2, CheckCircle2, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import Modal from '@/components/ui/Modal'
-import { Loader2 } from 'lucide-react'
 
 interface Trip {
   id: string
@@ -50,7 +49,13 @@ export default function TripsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [workflowTrip, setWorkflowTrip] = useState<Trip | null>(null)
+  const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | null>(null)
+  const [workflowNote, setWorkflowNote] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -69,12 +74,17 @@ export default function TripsPage() {
 
   const loadDropdowns = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: sup }, { data: clr }] = await Promise.all([
+    const [{ data: sup }, { data: clr }, { data: emp }] = await Promise.all([
       supabase.from('suppliers').select('id, name').eq('is_active', true),
       supabase.from('clearing_agents').select('id, name').eq('is_active', true),
+      supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
     ])
     setSuppliers(sup ?? [])
     setClearingAgents(clr ?? [])
+    setEmployees(emp ?? [])
+    const supabase2 = createClient()
+    const { data: { user } } = await supabase2.auth.getUser()
+    setCurrentUserId(user?.id ?? null)
   }, [])
 
   useEffect(() => { load(); loadDropdowns() }, [load, loadDropdowns])
@@ -100,21 +110,55 @@ export default function TripsPage() {
 
   async function handleDelete(e: React.MouseEvent, trip: Trip) {
     e.stopPropagation()
-    if (!confirm(`Delete "${trip.title}" (${trip.trip_id})? This cannot be undone.`)) return
-    setDeletingId(trip.id)
-    const supabase = createClient()
-    await supabase.from('trips').delete().eq('id', trip.id)
-    setDeletingId(null)
-    load()
+    setWorkflowTrip(trip)
+    setWorkflowType('delete')
   }
 
-  async function handleToggleApproval(e: React.MouseEvent, trip: Trip) {
-    e.stopPropagation()
-    setApprovingId(trip.id)
+  async function submitWorkflow() {
+    if (!assignee || !workflowType || !workflowTrip) return
+    setSubmittingWorkflow(true)
     const supabase = createClient()
-    const newStatus = trip.approval_status === 'approved' ? 'not_approved' : 'approved'
-    await supabase.from('trips').update({ approval_status: newStatus }).eq('id', trip.id)
-    setApprovingId(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const typeKeys = {
+      delete: 'delete_approval',
+      review: 'review_request',
+      completion: 'completion_approval',
+    }
+    const typeLabels = {
+      delete: 'Delete approval',
+      review: 'Review request',
+      completion: 'Completion approval',
+    }
+
+    const { data: task } = await supabase.from('tasks').insert({
+      type: typeKeys[workflowType],
+      title: `${typeLabels[workflowType]}: ${workflowTrip.trip_id}`,
+      description: workflowNote || `${typeLabels[workflowType]} for trip ${workflowTrip.trip_id} — ${workflowTrip.title}`,
+      module: 'trips',
+      record_id: workflowTrip.id,
+      record_ref: workflowTrip.trip_id,
+      requested_by: user?.id,
+      assigned_to: assignee,
+      priority: workflowType === 'delete' ? 'high' : 'normal',
+    }).select().single()
+
+    await supabase.from('notifications').insert({
+      user_id: assignee,
+      type: `task_${typeKeys[workflowType]}`,
+      title: `New task: ${typeLabels[workflowType]}`,
+      message: `${workflowTrip.trip_id} — ${workflowTrip.title}`,
+      task_id: task?.id,
+      record_id: workflowTrip.id,
+      record_ref: workflowTrip.trip_id,
+      module: 'trips',
+    })
+
+    setSubmittingWorkflow(false)
+    setWorkflowTrip(null)
+    setWorkflowType(null)
+    setWorkflowNote('')
+    setAssignee('')
     load()
   }
 
@@ -250,25 +294,22 @@ export default function TripsPage() {
                           <Eye size={15} />
                         </button>
 
-                        {/* Approve / Unapprove */}
+                        {/* Request review */}
                         <button
-                          onClick={(e) => handleToggleApproval(e, trip)}
-                          disabled={approvingId === trip.id}
-                          title={trip.approval_status === 'approved' ? 'Unapprove' : 'Approve'}
+                          onClick={(e) => { e.stopPropagation(); setWorkflowTrip(trip); setWorkflowType('review') }}
+                          title="Request review"
                           className={`p-1.5 rounded-lg transition-colors
-                            ${trip.approval_status === 'approved'
-                              ? 'hover:bg-green-50 text-green-500 hover:text-green-700'
-                              : 'hover:bg-amber-50 text-gray-400 hover:text-amber-600'}`}>
-                          {approvingId === trip.id
-                            ? <Loader2 size={15} className="animate-spin" />
-                            : <CheckCircle2 size={15} />}
+                            ${trip.approval_status === 'reviewed'
+                              ? 'text-green-500 hover:bg-green-50'
+                              : 'text-gray-400 hover:bg-brand-50 hover:text-brand-600'}`}>
+                          <CheckCircle2 size={15} />
                         </button>
 
-                        {/* Delete */}
+                        {/* Request delete */}
                         <button
                           onClick={(e) => handleDelete(e, trip)}
                           disabled={deletingId === trip.id}
-                          title="Delete trip"
+                          title="Request deletion"
                           className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
                           {deletingId === trip.id
                             ? <Loader2 size={15} className="animate-spin" />
@@ -348,6 +389,71 @@ export default function TripsPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Workflow modal */}
+      <Modal
+        open={!!workflowTrip && !!workflowType}
+        onClose={() => { setWorkflowTrip(null); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+        title={
+          workflowType === 'delete' ? 'Request trip deletion' :
+          workflowType === 'review' ? 'Request trip review' :
+          'Request trip completion'
+        }
+        description="Select a user to assign this task to"
+        size="sm"
+      >
+        <div className="space-y-4">
+          {workflowType === 'delete' && (
+            <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+              <p className="text-xs text-red-700 font-medium">
+                This will send a delete approval request for <span className="font-semibold">{workflowTrip?.trip_id}</span>. The trip will only be deleted after the assigned user approves it.
+              </p>
+            </div>
+          )}
+          {workflowType === 'review' && (
+            <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
+              <p className="text-xs text-brand-700 font-medium">
+                Send a review request for <span className="font-semibold">{workflowTrip?.trip_id}</span>. The reviewer will be able to approve or reject from the trip page.
+              </p>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Assign to <span className="text-red-400">*</span>
+            </label>
+            <select required value={assignee} onChange={e => setAssignee(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+              <option value="">Select user...</option>
+              {employees
+                .filter(e => e.id !== currentUserId)
+                .map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.full_name ?? e.email}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+            <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              placeholder="Add context for the assignee..." />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => { setWorkflowTrip(null); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+              Cancel
+            </button>
+            <button type="button" onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+              className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
+                ${workflowType === 'delete'
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
+              {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

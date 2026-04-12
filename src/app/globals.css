@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --brand-primary: #55249E;
 }
 
 @theme inline {
@@ -10,6 +11,19 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Hydevest brand — 600 matches logo */
+  --color-brand-50: #f2eefa;
+  --color-brand-100: #e0d4f5;
+  --color-brand-200: #c4aaec;
+  --color-brand-300: #a47de0;
+  --color-brand-400: #8554d1;
+  --color-brand-500: #6b35bf;
+  --color-brand-600: var(--brand-primary);
+  --color-brand-700: #451a84;
+  --color-brand-800: #36136a;
+  --color-brand-900: #270d4f;
+  --color-brand-950: #180836;
 }
 
 @media (prefers-color-scheme: dark) {

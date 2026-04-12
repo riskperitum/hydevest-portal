@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Search, Download, Filter, Eye, FileText, Loader2 } from 'lucide-react'
+import { Search, Download, Filter, Eye, FileText, Loader2, Package, TrendingUp, Layers, Tag, DollarSign } from 'lucide-react'
 
 interface Container {
   id: string
@@ -299,11 +299,19 @@ export default function ContainersPage() {
 
   return (
     <div className="space-y-5">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Containers</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{filtered.length} container{filtered.length !== 1 ? 's' : ''} across all trips</p>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
+              <Package size={16} className="text-white" />
+            </div>
+            <h1 className="text-xl font-semibold text-gray-900">Containers</h1>
+          </div>
+          <p className="text-sm text-gray-400 ml-10">
+            {loading ? 'Loading...' : `${filtered.length} of ${containers.length} container${containers.length !== 1 ? 's' : ''} across all trips`}
+          </p>
         </div>
       </div>
 
@@ -313,58 +321,75 @@ export default function ContainersPage() {
           {
             label: 'Total containers',
             value: filtered.length.toString(),
-            color: 'text-brand-600',
+            sub: `of ${containers.length} total`,
+            icon: <Package size={15} />,
+            iconBg: 'bg-brand-100 text-brand-600',
+            valueCls: 'text-brand-600',
           },
           {
-            label: 'Avg landing cost (₦)',
+            label: 'Avg landing cost',
             value: filtered.length > 0 && totalLanding > 0
               ? fmt(totalLanding / filtered.filter(c => c.estimated_landing_cost).length)
               : '—',
-            color: 'text-brand-600',
+            sub: `total: ${totalLanding > 0 ? fmt(totalLanding) : '—'}`,
+            icon: <TrendingUp size={15} />,
+            iconBg: 'bg-green-100 text-green-600',
+            valueCls: 'text-gray-900',
           },
           {
             label: 'Avg pieces',
             value: filtered.length > 0 && totalPieces > 0
-              ? (totalPieces / filtered.filter(c => c.pieces_purchased).length).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+              ? (totalPieces / filtered.filter(c => c.pieces_purchased).length).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
               : '—',
-            color: 'text-brand-600',
+            sub: `total: ${totalPieces.toLocaleString()}`,
+            icon: <Layers size={15} />,
+            iconBg: 'bg-blue-100 text-blue-600',
+            valueCls: 'text-gray-900',
           },
           {
-            label: 'Avg quoted price ($)',
+            label: 'Avg quoted price',
             value: (() => {
-              const withQuoted = filtered.filter(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
-              if (withQuoted.length === 0) return '—'
-              const avg = withQuoted.reduce((s, c) => s + Number(c.quoted_price_usd), 0) / withQuoted.length
-              return fmtUSD(avg)
+              const w = filtered.filter(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
+              if (!w.length) return '—'
+              return fmtUSD(w.reduce((s, c) => s + Number(c.quoted_price_usd), 0) / w.length)
             })(),
-            color: 'text-brand-600',
+            sub: 'partner containers',
+            icon: <Tag size={15} />,
+            iconBg: 'bg-amber-100 text-amber-600',
+            valueCls: 'text-gray-900',
           },
           {
-            label: 'Avg unit price ($)',
+            label: 'Avg unit price',
             value: (() => {
-              const withPrice = filtered.filter(c => c.unit_price_usd && Number(c.unit_price_usd) > 0)
-              if (withPrice.length === 0) return '—'
-              const avg = withPrice.reduce((s, c) => s + Number(c.unit_price_usd), 0) / withPrice.length
-              return fmtUSD(avg)
+              const w = filtered.filter(c => c.unit_price_usd && Number(c.unit_price_usd) > 0)
+              if (!w.length) return '—'
+              return fmtUSD(w.reduce((s, c) => s + Number(c.unit_price_usd), 0) / w.length)
             })(),
-            color: 'text-brand-600',
+            sub: 'per piece',
+            icon: <DollarSign size={15} />,
+            iconBg: 'bg-purple-100 text-purple-600',
+            valueCls: 'text-gray-900',
           },
         ].map(metric => (
-          <div key={metric.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-2 leading-tight">{metric.label}</p>
-            <p className={`text-xl font-semibold truncate ${metric.color}`}>{metric.value}</p>
+          <div key={metric.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow">
+            <div className={`inline-flex p-1.5 rounded-lg ${metric.iconBg} mb-3`}>
+              {metric.icon}
+            </div>
+            <p className="text-xs text-gray-400 mb-1 leading-tight">{metric.label}</p>
+            <p className={`text-lg font-semibold truncate ${metric.valueCls}`}>{metric.value}</p>
+            <p className="text-xs text-gray-300 mt-0.5 truncate">{metric.sub}</p>
           </div>
         ))}
       </div>
 
-      {/* Search + Filters */}
+      {/* Search + Filters + Actions */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search by container ID, title, tracking number or trip..."
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -373,7 +398,7 @@ export default function ContainersPage() {
               <Filter size={15} />
               Filters
               {activeFilters > 0 && (
-                <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{activeFilters}</span>
+                <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>
               )}
             </button>
             <button onClick={exportCSV}
@@ -381,16 +406,16 @@ export default function ContainersPage() {
               <Download size={15} /> Export CSV
             </button>
             <button onClick={() => setReportOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shadow-sm">
               <FileText size={15} /> Generate report
             </button>
           </div>
         </div>
 
         {showFilters && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-gray-100">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Trip status</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip status</label>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                 <option value="">All statuses</option>
@@ -398,7 +423,7 @@ export default function ContainersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Hide type</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Hide type</label>
               <select value={hideTypeFilter} onChange={e => setHideTypeFilter(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                 <option value="">All types</option>
@@ -407,20 +432,21 @@ export default function ContainersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Date from</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date from</label>
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Date to</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date to</label>
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             {activeFilters > 0 && (
-              <div className="col-span-2 md:col-span-4 flex justify-end">
+              <div className="col-span-2 md:col-span-4 flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">{filtered.length} result{filtered.length !== 1 ? 's' : ''} match your filters</p>
                 <button
                   onClick={() => { setStatusFilter(''); setHideTypeFilter(''); setDateFrom(''); setDateTo('') }}
-                  className="text-xs text-red-500 hover:text-red-700 transition-colors">
+                  className="text-xs text-red-500 hover:text-red-700 transition-colors font-medium">
                   Clear all filters
                 </button>
               </div>
@@ -434,33 +460,45 @@ export default function ContainersPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
+              <tr className="border-b border-gray-100">
                 {[
                   'Container ID', 'Trip', 'Title', 'Tracking No.',
-                  'Trip Status', 'Hide Type', 'Funding',
+                  'Trip Status', 'Landing Cost (₦)',
                   'Pieces', 'Avg Weight', 'Unit Price ($)',
-                  'Purchase Subtotal ($)', 'Landing Cost (₦)',
+                  'Purchase Subtotal ($)',
+                  'Hide Type', 'Funding',
                   'Created', 'Created By', ''
                 ].map(h => (
-                  <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-50">
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-gray-50">
+                  <tr key={i}>
                     {Array.from({ length: 15 }).map((_, j) => (
-                      <td key={j} className="px-3 py-3">
-                        <div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" />
+                      <td key={j} className="px-3 py-3.5">
+                        <div className="h-3.5 bg-gray-100 rounded-full animate-pulse" style={{ width: `${40 + Math.random() * 40}%` }} />
                       </td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="px-4 py-16 text-center text-sm text-gray-400">
-                    No containers found.
+                  <td colSpan={15} className="px-4 py-20 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+                        <Package size={20} className="text-gray-300" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-400">No containers found</p>
+                      {activeFilters > 0 && (
+                        <button onClick={() => { setStatusFilter(''); setHideTypeFilter(''); setDateFrom(''); setDateTo('') }}
+                          className="text-xs text-brand-600 hover:underline">
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : filtered.map(con => {
@@ -470,56 +508,55 @@ export default function ContainersPage() {
                 return (
                   <tr key={con.id}
                     onClick={() => router.push(`/portal/purchase/trips/${con.trip_id}/containers/${con.id}`)}
-                    className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors cursor-pointer group">
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded font-medium">
+                    className="hover:bg-brand-50/20 transition-colors cursor-pointer group">
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-md font-semibold border border-brand-100">
                         {con.container_id}
                       </span>
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <div>
-                        <span className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                          {con.trip?.trip_id ?? '—'}
-                        </span>
-                        <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[100px]">{con.trip?.title ?? '—'}</p>
-                      </div>
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <span className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                        {con.trip?.trip_id ?? '—'}
+                      </span>
                     </td>
-                    <td className="px-3 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors whitespace-nowrap">
-                      {con.container_number ?? '—'}
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <span className="font-medium text-gray-900 group-hover:text-brand-700 transition-colors">
+                        {con.container_number ?? '—'}
+                      </span>
                     </td>
-                    <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.tracking_number ?? '—'}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo(con.trip?.status ?? 'not_started').color}`}>
+                    <td className="px-3 py-3.5 text-gray-500 whitespace-nowrap font-mono text-xs">{con.tracking_number ?? '—'}</td>
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusInfo(con.trip?.status ?? 'not_started').color}`}>
                         {statusInfo(con.trip?.status ?? 'not_started').label}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
-                      {con.hide_type ? HIDE_TYPE_LABELS[con.hide_type] ?? con.hide_type : '—'}
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      {con.estimated_landing_cost
+                        ? <span className="font-semibold text-gray-900">{fmt(con.estimated_landing_cost)}</span>
+                        : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${con.funding_type === 'partner' ? 'bg-brand-50 text-brand-700' : 'bg-blue-50 text-blue-700'}`}>
+                    <td className="px-3 py-3.5 text-gray-700 text-right pr-6 font-medium">{con.pieces_purchased?.toLocaleString() ?? <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3.5 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3.5 text-gray-700 whitespace-nowrap font-medium">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      {purchaseSubtotal > 0
+                        ? <span className="font-semibold text-brand-700">{fmtUSD(purchaseSubtotal)}</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-3.5 text-gray-500 whitespace-nowrap text-xs">
+                      {con.hide_type ? HIDE_TYPE_LABELS[con.hide_type] ?? con.hide_type : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-3.5 whitespace-nowrap">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${con.funding_type === 'partner' ? 'bg-brand-50 text-brand-700 border border-brand-100' : 'bg-blue-50 text-blue-700 border border-blue-100'}`}>
                         {con.funding_type === 'partner' ? 'Partner' : 'Entity'}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-gray-600 text-center">{con.pieces_purchased?.toLocaleString() ?? '—'}</td>
-                    <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : '—'}</td>
-                    <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : '—'}</td>
-                    <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
-                      {purchaseSubtotal > 0 ? fmtUSD(purchaseSubtotal) : '—'}
-                    </td>
-                    <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">
-                      {con.estimated_landing_cost ? fmt(con.estimated_landing_cost) : '—'}
-                    </td>
-                    <td className="px-3 py-3 text-gray-500 whitespace-nowrap">
-                      {new Date(con.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-3 py-3 text-gray-500 whitespace-nowrap">
-                      {con.created_by_profile?.full_name ?? con.created_by_profile?.email ?? '—'}
-                    </td>
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                    <td className="px-3 py-3.5 text-gray-400 whitespace-nowrap text-xs">{new Date(con.created_at).toLocaleDateString()}</td>
+                    <td className="px-3 py-3.5 text-gray-500 whitespace-nowrap text-xs">{con.created_by_profile?.full_name ?? con.created_by_profile?.email ?? '—'}</td>
+                    <td className="px-3 py-3.5" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => router.push(`/portal/purchase/trips/${con.trip_id}/containers/${con.id}`)}
-                        className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors opacity-0 group-hover:opacity-100">
+                        className="p-1.5 rounded-lg hover:bg-brand-100 text-gray-300 hover:text-brand-600 transition-all opacity-0 group-hover:opacity-100">
                         <Eye size={14} />
                       </button>
                     </td>
@@ -529,22 +566,23 @@ export default function ContainersPage() {
             </tbody>
             {filtered.length > 0 && (
               <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-gray-200">
-                  <td colSpan={7} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Totals ({filtered.length} containers)
+                <tr className="border-t-2 border-brand-100 bg-brand-50/30">
+                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">
+                    Totals · {filtered.length} container{filtered.length !== 1 ? 's' : ''}
                   </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-gray-700 text-center">
-                    {totalPieces.toLocaleString()}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-gray-400">—</td>
-                  <td className="px-3 py-3 text-xs text-gray-400">—</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
-                    {fmtUSD(totalUSD)}
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-gray-900 whitespace-nowrap">
+                  <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                  <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">
                     {totalLanding > 0 ? fmt(totalLanding) : '—'}
                   </td>
-                  <td colSpan={3} />
+                  <td className="px-3 py-3 text-xs font-bold text-gray-700 text-right pr-6">
+                    {totalPieces.toLocaleString()}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                  <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
+                    {fmtUSD(totalUSD)}
+                  </td>
+                  <td colSpan={5} />
                 </tr>
               </tfoot>
             )}
@@ -555,42 +593,46 @@ export default function ContainersPage() {
       {/* Report modal */}
       {reportOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40" onClick={() => setReportOpen(false)} />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
-            <p className="text-sm text-gray-500">Choose which data to include in the report.</p>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-9 h-9 rounded-xl bg-brand-100 flex items-center justify-center">
+                <FileText size={16} className="text-brand-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+                <p className="text-xs text-gray-400">Choose data to include</p>
+              </div>
+            </div>
             <div className="space-y-2">
-              <button
-                onClick={() => setReportType('filtered')}
-                className={`w-full px-4 py-3 rounded-xl border text-left transition-colors ${reportType === 'filtered' ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                <p className={`text-sm font-medium ${reportType === 'filtered' ? 'text-brand-700' : 'text-gray-700'}`}>
-                  Filtered view
-                </p>
+              <button onClick={() => setReportType('filtered')}
+                className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType === 'filtered' ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-semibold ${reportType === 'filtered' ? 'text-brand-700' : 'text-gray-700'}`}>Filtered view</p>
+                  {reportType === 'filtered' && <div className="w-4 h-4 rounded-full bg-brand-600 flex items-center justify-center"><div className="w-2 h-2 rounded-full bg-white" /></div>}
+                </div>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {filtered.length} container{filtered.length !== 1 ? 's' : ''}
-                  {activeFilters > 0 ? ` · ${activeFilters} filter${activeFilters !== 1 ? 's' : ''} applied` : ' · No filters applied'}
+                  {activeFilters > 0 ? ` · ${activeFilters} filter${activeFilters !== 1 ? 's' : ''} active` : ' · no filters'}
                 </p>
               </button>
-              <button
-                onClick={() => setReportType('full')}
-                className={`w-full px-4 py-3 rounded-xl border text-left transition-colors ${reportType === 'full' ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                <p className={`text-sm font-medium ${reportType === 'full' ? 'text-brand-700' : 'text-gray-700'}`}>
-                  Full report
-                </p>
+              <button onClick={() => setReportType('full')}
+                className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType === 'full' ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-semibold ${reportType === 'full' ? 'text-brand-700' : 'text-gray-700'}`}>Full report</p>
+                  {reportType === 'full' && <div className="w-4 h-4 rounded-full bg-brand-600 flex items-center justify-center"><div className="w-2 h-2 rounded-full bg-white" /></div>}
+                </div>
                 <p className="text-xs text-gray-400 mt-0.5">{containers.length} total containers across all trips</p>
               </button>
             </div>
-            <div className="flex gap-3 pt-2">
-              <button type="button" onClick={() => setReportOpen(false)}
-                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setReportOpen(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={() => generateReport(reportType)}
-                disabled={generatingReport}
-                className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
-                {generatingReport ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : 'Generate'}
+              <button onClick={() => generateReport(reportType)} disabled={generatingReport}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 shadow-sm">
+                {generatingReport ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><FileText size={14} /> Generate</>}
               </button>
             </div>
           </div>

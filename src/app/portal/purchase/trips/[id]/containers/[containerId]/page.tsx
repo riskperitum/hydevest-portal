@@ -33,6 +33,7 @@ interface Container {
   surcharge_ngn: number | null
   estimated_landing_cost: number | null
   status: string
+  approval_status: string
   created_at: string
 }
 
@@ -107,6 +108,7 @@ export default function ContainerDetailPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadName, setUploadName] = useState('')
   const [documents, setDocuments] = useState<{ id: string; name: string; file_url: string; file_type: string | null; created_at: string }[]>([])
+  const [tripData, setTripData] = useState<{ source_port: string | null; destination_port: string | null } | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -118,6 +120,16 @@ export default function ContainerDetailPage() {
     setContainer(con)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
+    if (con?.trip_id) {
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('source_port, destination_port')
+        .eq('id', con.trip_id)
+        .single()
+      setTripData(trip)
+    } else {
+      setTripData(null)
+    }
     setLoading(false)
   }, [containerId])
 
@@ -204,15 +216,20 @@ export default function ContainerDetailPage() {
       return
     }
 
-    const existingFunder = funders.find(f => f.funder_id === funderForm.funder_id)
-    const otherFundersTotal = funders
-      .filter(f => f.funder_id !== funderForm.funder_id)
-      .reduce((s, f) => s + Number(f.percentage), 0)
-    const remaining = 100 - otherFundersTotal
-
-    if (newPct > remaining) {
-      alert(`Cannot allocate ${newPct}%. Only ${remaining.toFixed(1)}% available after other funders.`)
+    if (newPct > 100) {
+      alert('Percentage cannot exceed 100%.')
       return
+    }
+
+    const existingFunder = funders.find(f => f.funder_id === funderForm.funder_id)
+
+    if (!existingFunder) {
+      const otherFundersTotal = funders.reduce((s, f) => s + Number(f.percentage), 0)
+      const remaining = 100 - otherFundersTotal
+      if (newPct > remaining) {
+        alert(`Cannot add ${newPct}%. Only ${remaining.toFixed(1)}% remaining to allocate across all funders.`)
+        return
+      }
     }
 
     setSavingFunder(true)
@@ -225,7 +242,12 @@ export default function ContainerDetailPage() {
       await supabase.from('container_funders')
         .update({ percentage: newPct })
         .eq('id', existingFunder.id)
-      await logActivity('Funder percentage updated', 'funders', `${funderName} ${existingFunder.percentage}%`, `${funderName} ${newPct}%`)
+      await logActivity(
+        'Funder percentage updated',
+        'funders',
+        `${funderName} ${existingFunder.percentage}%`,
+        `${funderName} ${newPct}%`
+      )
     } else {
       await supabase.from('container_funders').insert({
         container_id: containerId,
@@ -277,22 +299,41 @@ export default function ContainerDetailPage() {
     setUploading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
+
     const ext = uploadFile.name.split('.').pop()
     const path = `containers/${containerId}/${Date.now()}.${ext}`
-    const { error: uploadError } = await supabase.storage.from('documents').upload(path, uploadFile)
-    if (!uploadError) {
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
-      await supabase.from('trip_documents').insert({
-        container_id: containerId,
-        trip_id: tripId,
-        name: uploadName || uploadFile.name,
-        file_url: publicUrl,
-        file_type: uploadFile.type,
-        file_size: uploadFile.size,
-        uploaded_by: user?.id,
-      })
-      await logActivity('Document uploaded', 'documents', '', uploadName || uploadFile.name)
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(path, uploadFile, { upsert: true })
+
+    if (uploadError) {
+      alert(`Upload failed: ${uploadError.message}`)
+      setUploading(false)
+      return
     }
+
+    const { data: urlData } = supabase.storage
+      .from('documents')
+      .getPublicUrl(path)
+
+    const { error: insertError } = await supabase.from('trip_documents').insert({
+      container_id: containerId,
+      trip_id: tripId,
+      name: uploadName || uploadFile.name,
+      file_url: urlData.publicUrl,
+      file_type: uploadFile.type,
+      file_size: uploadFile.size,
+      uploaded_by: user?.id,
+    })
+
+    if (insertError) {
+      alert(`Failed to save document record: ${insertError.message}`)
+      setUploading(false)
+      return
+    }
+
+    await logActivity('Document uploaded', 'documents', '', uploadName || uploadFile.name)
     setUploading(false)
     setUploadOpen(false)
     setUploadFile(null)
@@ -325,40 +366,63 @@ export default function ContainerDetailPage() {
 
   const EditableField = ({
     fieldKey, label, value, type = 'text', placeholder = ''
-  }: { fieldKey: string; label: string; value: string; type?: string; placeholder?: string }) => (
-    <div>
-      <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
-      {editField === fieldKey ? (
-        <div className="flex gap-1.5">
-          <input
-            type={type}
-            value={fieldValue}
-            onChange={e => setFieldValue(e.target.value)}
-            className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
-            placeholder={placeholder}
-            autoFocus
-          />
-          <button onClick={() => updateField(fieldKey, fieldValue)}
-            className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-            <Check size={13} />
+  }: { fieldKey: string; label: string; value: string; type?: string; placeholder?: string }) => {
+    const isEmpty = !value || value === ''
+    const isApproved = container?.approval_status === 'approved'
+    const useAutosave = isEmpty && !isApproved
+
+    return (
+      <div>
+        <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
+        {editField === fieldKey ? (
+          <div className="flex gap-1.5">
+            <input
+              type={type}
+              value={fieldValue}
+              onChange={e => setFieldValue(e.target.value)}
+              onBlur={() => {
+                if (useAutosave && fieldValue !== value) {
+                  updateField(fieldKey, fieldValue)
+                }
+              }}
+              className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
+              placeholder={placeholder}
+              autoFocus
+            />
+            {!useAutosave && (
+              <>
+                <button onClick={() => updateField(fieldKey, fieldValue)}
+                  className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+                  <Check size={13} />
+                </button>
+                <button onClick={() => setEditField(null)}
+                  className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
+                  <X size={13} />
+                </button>
+              </>
+            )}
+            {useAutosave && (
+              <span className="text-xs text-gray-400 self-center whitespace-nowrap">blur to save</span>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
+            className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
+            <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+              {value || (useAutosave ? 'Click to set' : 'Not set')}
+            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {useAutosave && !value && (
+                <span className="text-xs text-brand-400 opacity-0 group-hover:opacity-100 transition-opacity">autosave</span>
+              )}
+              <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 transition-colors" />
+            </div>
           </button>
-          <button onClick={() => setEditField(null)}
-            className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
-            <X size={13} />
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
-          className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
-          <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
-            {value || 'Not set'}
-          </span>
-          <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
-        </button>
-      )}
-    </div>
-  )
+        )}
+      </div>
+    )
+  }
 
   const SelectField = ({
     fieldKey, label, value, options
@@ -367,6 +431,7 @@ export default function ContainerDetailPage() {
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <select
         value={value}
+        disabled={container?.approval_status === 'approved'}
         onChange={async e => {
           const supabase = createClient()
           await supabase.from('containers').update({ [fieldKey]: e.target.value }).eq('id', containerId)
@@ -374,7 +439,8 @@ export default function ContainerDetailPage() {
           load()
           loadActivity()
         }}
-        className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+        className={`w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white
+          ${container?.approval_status === 'approved' ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <option value="">Select...</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -445,8 +511,20 @@ export default function ContainerDetailPage() {
             { value: 'dried', label: 'Dried' },
             { value: 'wet_salted', label: 'Wet salted' },
           ]} />
-          <EditableField fieldKey="source_port" label="Source port" value={container.source_port ?? ''} placeholder="e.g. Barranquilla" />
-          <EditableField fieldKey="destination_port" label="Destination port" value={container.destination_port ?? ''} placeholder="e.g. Apapa, Lagos" />
+          <div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Source port</p>
+            <div className="px-2 py-1.5 flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-900">{tripData?.source_port ?? <span className="text-gray-400 italic font-normal">Not set on trip</span>}</span>
+              <span className="text-xs text-gray-300 italic">from trip</span>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Destination port</p>
+            <div className="px-2 py-1.5 flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-900">{tripData?.destination_port ?? <span className="text-gray-400 italic font-normal">Not set on trip</span>}</span>
+              <span className="text-xs text-gray-300 italic">from trip</span>
+            </div>
+          </div>
           <div className="col-span-2 md:col-span-3">
             <EditableField fieldKey="description" label="Description" value={container.description ?? ''} placeholder="Container notes or description" />
           </div>
@@ -484,9 +562,8 @@ export default function ContainerDetailPage() {
             </div>
             <button
               onClick={() => setFunderOpen(true)}
-              disabled={totalPct >= 100}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-              <Plus size={13} /> {totalPct >= 100 ? 'Fully allocated' : 'Add funder'}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors">
+              <Plus size={13} /> {totalPct >= 100 ? 'Update funder' : 'Add funder'}
             </button>
           </div>
         </div>
@@ -546,12 +623,33 @@ export default function ContainerDetailPage() {
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center gap-6 flex-wrap">
             {container.pieces_purchased && container.unit_price_usd && (
               <span className="text-xs text-gray-500">
-                Subtotal: <span className="font-semibold text-gray-900">{fmtUSD(container.pieces_purchased * container.unit_price_usd)}</span>
+                Purchase amount: <span className="font-semibold text-gray-900">
+                  {fmtUSD(
+                    (Number(container.pieces_purchased) * Number(container.unit_price_usd))
+                  )}
+                </span>
+              </span>
+            )}
+            {container.pieces_purchased && container.unit_price_usd && (
+              <span className="text-xs text-gray-500">
+                Subtotal (with shipping): <span className="font-semibold text-gray-900">
+                  {fmtUSD(
+                    (Number(container.pieces_purchased) * Number(container.unit_price_usd)) +
+                    Number(container.shipping_amount_usd ?? 0)
+                  )}
+                </span>
+              </span>
+            )}
+            {isPartner && container.pieces_purchased && container.quoted_price_usd && (
+              <span className="text-xs text-gray-500">
+                Quoted amount: <span className="font-semibold text-gray-900">
+                  {fmtUSD(Number(container.pieces_purchased) * Number(container.quoted_price_usd))}
+                </span>
               </span>
             )}
             {container.estimated_landing_cost && (
               <span className="text-xs text-gray-500">
-                Est. landing: <span className="font-semibold text-brand-700">{fmt(container.estimated_landing_cost)}</span>
+                Est. landing cost: <span className="font-semibold text-brand-700">{fmt(container.estimated_landing_cost)}</span>
               </span>
             )}
           </div>
@@ -773,21 +871,27 @@ export default function ContainerDetailPage() {
               required
               type="number"
               min="0.01"
-              max={100 - totalPct}
+              max="100"
               step="0.01"
               value={funderForm.percentage}
               onChange={e => setFunderForm(f => ({ ...f, percentage: e.target.value }))}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder={`Max ${(100 - totalPct).toFixed(1)}%`}
+              placeholder="e.g. 100"
             />
-            <div className="flex items-center justify-between mt-1">
-              <p className="text-xs text-gray-400">
-                {totalPct > 0 ? `${(100 - totalPct).toFixed(1)}% remaining to allocate` : 'Total must equal 100%'}
-              </p>
-              {totalPct >= 100 && (
-                <p className="text-xs text-green-600 font-medium">Fully allocated ✓</p>
-              )}
-            </div>
+            {(() => {
+              const existingFunder = funders.find(f => f.funder_id === funderForm.funder_id)
+              const otherFundersTotal = funders
+                .filter(f => f.funder_id !== funderForm.funder_id)
+                .reduce((s, f) => s + Number(f.percentage), 0)
+              const remaining = 100 - otherFundersTotal
+              return (
+                <p className="text-xs text-gray-400 mt-1">
+                  {existingFunder
+                    ? `Currently at ${existingFunder.percentage}% — enter new percentage to update`
+                    : `${remaining.toFixed(1)}% available to allocate`}
+                </p>
+              )
+            })()}
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setFunderOpen(false)}

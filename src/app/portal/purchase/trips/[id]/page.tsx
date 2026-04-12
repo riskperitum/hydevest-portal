@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, CheckCircle2, Clock, PlayCircle,
-  Plus, Trash2, ChevronDown, Pencil, Check, X,
+  Plus, Trash2, ChevronDown, Pencil, Check, X, Eye,
   TrendingUp, Package, DollarSign, Activity, Zap
 } from 'lucide-react'
 import Link from 'next/link'
@@ -23,6 +23,8 @@ interface Trip {
   end_date: string | null
   status: string
   approval_status: string
+  source_port: string | null
+  destination_port: string | null
   created_at: string
   supplier: { name: string } | null
   clearing_agent: { name: string } | null
@@ -45,17 +47,22 @@ interface TripExpense {
 interface Container {
   id: string
   container_id: string
+  trip_id: string
   container_number: string | null
   tracking_number: string | null
   description: string | null
-  weight_kg: number | null
-  quantity: number | null
-  unit_price: number | null
-  currency: string
-  exchange_rate: number
-  total_cost_ngn: number | null
+  average_weight: number | null
+  max_weight: number | null
+  unit_price_usd: number | null
+  shipping_amount_usd: number | null
+  quoted_price_usd: number | null
+  surcharge_ngn: number | null
+  estimated_landing_cost: number | null
+  pieces_purchased: number | null
+  approval_status: string
   status: string
   created_at: string
+  created_by_profile: { full_name: string | null; email: string } | null
 }
 
 interface Supplier { id: string; name: string }
@@ -107,7 +114,7 @@ export default function TripDetailPage() {
     const [{ data: t }, { data: exp }, { data: con }] = await Promise.all([
       supabase.from('trips').select(`*, supplier:suppliers(name), clearing_agent:clearing_agents(name), created_by_profile:profiles!trips_created_by_fkey(full_name, email)`).eq('id', tripId).single(),
       supabase.from('trip_expenses').select(`*, created_by_profile:profiles!trip_expenses_created_by_fkey(full_name, email)`).eq('trip_id', tripId).order('created_at', { ascending: false }),
-      supabase.from('containers').select('*').eq('trip_id', tripId).order('created_at', { ascending: false }),
+      supabase.from('containers').select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)').eq('trip_id', tripId).order('created_at', { ascending: false }),
     ])
     setTrip(t)
     setExpenses(exp ?? [])
@@ -246,11 +253,11 @@ export default function TripDetailPage() {
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
   const containerStatusInfo = (s: string) => CONTAINER_STATUS.find(o => o.value === s) ?? CONTAINER_STATUS[0]
 
-  const containerPaymentUSD = containers.filter(c => c.currency === 'USD').reduce((s, c) => s + (Number(c.unit_price ?? 0) * Number(c.quantity ?? 1)), 0)
-  const containerPaymentNGN = containers.reduce((s, c) => s + Number(c.total_cost_ngn ?? 0), 0)
+  const containerPaymentUSD = containers.reduce((s, c) => s + Number(c.unit_price_usd ?? 0) * Number(c.pieces_purchased ?? 0), 0)
+  const containerPaymentNGN = containers.reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
   const otherExpenses = expenses.reduce((s, e) => s + Number(e.amount_ngn), 0)
   const totalLanding = containerPaymentNGN + otherExpenses
-  const avgFx = containers.length > 0 ? containers.reduce((s, c) => s + Number(c.exchange_rate ?? 0), 0) / containers.length : 0
+  const avgFx = containerPaymentUSD > 0 ? containerPaymentNGN / containerPaymentUSD : 0
 
   const metrics = [
     { label: 'Total landing amount (₦)', value: fmt(totalLanding), icon: <TrendingUp size={16} />, color: 'text-brand-600 bg-brand-50' },
@@ -450,7 +457,49 @@ export default function TripDetailPage() {
             </div>
           </div>
 
-          {/* Row 3: Description — full width */}
+          {/* Row 3: Source Port + Destination Port */}
+          <div className="grid grid-cols-3 divide-x divide-gray-50">
+            {[
+              { key: 'source_port', label: 'Source port', value: trip.source_port ?? '' },
+              { key: 'destination_port', label: 'Destination port', value: trip.destination_port ?? '' },
+            ].map(field => (
+              <div key={field.key} className="px-4 py-3">
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{field.label}</p>
+                {editField === field.key ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={fieldValue}
+                      onChange={e => setFieldValue(e.target.value)}
+                      className="flex-1 px-2 py-1 text-sm border border-brand-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
+                      placeholder={field.key === 'source_port' ? 'e.g. Barranquilla' : 'e.g. Apapa, Lagos'}
+                      autoFocus
+                    />
+                    <button onClick={() => updateField(field.key, fieldValue)}
+                      className="p-1.5 bg-brand-600 text-white rounded-md hover:bg-brand-700 transition-colors shrink-0">
+                      <Check size={12} />
+                    </button>
+                    <button onClick={() => setEditField(null)}
+                      className="p-1.5 border border-gray-200 text-gray-500 rounded-md hover:bg-gray-50 transition-colors shrink-0">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditField(field.key); setFieldValue(field.value) }}
+                    className="group w-full text-left flex items-center justify-between gap-2">
+                    <span className={`text-sm truncate ${field.value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+                      {field.value || 'Not set'}
+                    </span>
+                    <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="px-4 py-3" />
+          </div>
+
+          {/* Row 4: Description — full width */}
           <div className="px-4 py-3">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Description</p>
             {editField === 'description' ? (
@@ -583,35 +632,164 @@ export default function TripDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['ID', 'Title / Label', 'Tracking number', 'Status', ''].map(h => (
+                    {[
+                      'Container ID', 'Status', 'Title', 'Tracking No.',
+                      'Pieces', 'Avg Weight', 'Unit Price ($)', 'Landing Cost (₦)',
+                      'Max Weight', 'Shipping ($)', 'Surcharge (₦)',
+                      'Purchase Amt ($)', 'Purchase Subtotal ($)',
+                      'Quoted Price ($)', 'Quoted Amt ($)', 'Quoted Subtotal ($)',
+                      'Created', 'Created by', 'Actions'
+                    ].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {containers.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">No containers added yet.</td></tr>
-                  ) : containers.map(con => (
-                    <tr key={con.id}
-                      onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
-                      className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group">
-                      <td className="px-3 py-3"><span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span></td>
-                      <td className="px-3 py-3 font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{con.container_number ?? '—'}</td>
-                      <td className="px-3 py-3 text-gray-500">{con.tracking_number ?? '—'}</td>
-                      <td className="px-3 py-3">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${containerStatusInfo(con.status).color}`}>
-                          {containerStatusInfo(con.status).label}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <button onClick={(e) => { e.stopPropagation(); deleteContainer(con.id) }}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={13} />
-                        </button>
+                    <tr>
+                      <td colSpan={19} className="px-4 py-12 text-center text-sm text-gray-400">
+                        No containers added yet.
                       </td>
                     </tr>
-                  ))}
+                  ) : containers.map(con => {
+                    const purchaseAmt = (con.unit_price_usd && con.pieces_purchased)
+                      ? Number(con.unit_price_usd) * Number(con.pieces_purchased)
+                      : null
+                    const quotedAmt = (con.quoted_price_usd && Number(con.quoted_price_usd) > 0 && con.pieces_purchased)
+                      ? Number(con.quoted_price_usd) * Number(con.pieces_purchased)
+                      : null
+                    return (
+                      <tr key={con.id}
+                        className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors group cursor-pointer"
+                        onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className="font-mono text-xs bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded">{con.container_id}</span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${containerStatusInfo(con.status).color}`}>
+                            {containerStatusInfo(con.status).label}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.container_number ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.tracking_number ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 text-center">{con.pieces_purchased ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.unit_price_usd ? `$${Number(con.unit_price_usd).toLocaleString()}` : '—'}</td>
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.estimated_landing_cost ? fmt(con.estimated_landing_cost) : '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.max_weight ? `${con.max_weight} kg` : '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.shipping_amount_usd ? `$${Number(con.shipping_amount_usd).toLocaleString()}` : '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.surcharge_ngn ? fmt(con.surcharge_ngn) : '—'}</td>
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{purchaseAmt ? `$${purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                        <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
+                          {purchaseAmt != null
+                            ? `$${(purchaseAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.quoted_price_usd ? `$${Number(con.quoted_price_usd).toLocaleString()}` : '—'}</td>
+                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">
+                          {quotedAmt != null && quotedAmt > 0
+                            ? `$${quotedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
+                          {quotedAmt != null && quotedAmt > 0
+                            ? `$${(quotedAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(con.created_at).toLocaleDateString()}</td>
+                        <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.created_by_profile?.full_name ?? con.created_by_profile?.email ?? '—'}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
+                              title="View container"
+                              className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const supabase = createClient()
+                                const newStatus = con.approval_status === 'approved' ? 'not_approved' : 'approved'
+                                await supabase.from('containers').update({ approval_status: newStatus }).eq('id', con.id)
+                                await logTripActivity('Container approval changed', 'containers', con.container_number ?? con.container_id, newStatus)
+                                load()
+                              }}
+                              title={con.approval_status === 'approved' ? 'Unapprove' : 'Approve'}
+                              className={`p-1.5 rounded-lg transition-colors ${con.approval_status === 'approved' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-amber-50 hover:text-amber-600'}`}>
+                              <CheckCircle2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => deleteContainer(con.id)}
+                              title="Delete container"
+                              className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t-2 border-gray-200">
+                    <td colSpan={6} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Totals</td>
+                    <td className="px-3 py-3 text-xs text-gray-400">—</td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      {(() => {
+                        const total = containers.reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
+                        return total > 0 ? fmt(total) : '—'
+                      })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-gray-400">—</td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      ${containers.reduce((s, c) => s + Number(c.shipping_amount_usd ?? 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      {fmt(containers.reduce((s, c) => s + Number(c.surcharge_ngn ?? 0), 0))}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      ${containers.reduce((s, c) => {
+                        const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+                        return s + pa
+                      }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
+                      ${containers.reduce((s, c) => {
+                        const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+                        return s + pa + Number(c.shipping_amount_usd ?? 0)
+                      }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      {(() => {
+                        const total = containers.reduce((s, c) => s + (Number(c.quoted_price_usd ?? 0) > 0 ? Number(c.quoted_price_usd) : 0), 0)
+                        return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+                      })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                      {(() => {
+                        const total = containers.reduce((s, c) => {
+                          const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
+                            ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
+                          return s + qa
+                        }, 0)
+                        return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+                      })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
+                      {(() => {
+                        const hasQuoted = containers.some(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
+                        if (!hasQuoted) return '—'
+                        const total = containers.reduce((s, c) => {
+                          const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
+                            ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
+                          return s + qa + (qa > 0 ? Number(c.shipping_amount_usd ?? 0) : 0)
+                        }, 0)
+                        return `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      })()}
+                    </td>
+                    <td colSpan={3} />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}

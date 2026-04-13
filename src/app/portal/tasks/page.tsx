@@ -145,6 +145,7 @@ export default function TasksPage() {
           const { data: { user } } = await supabase.auth.getUser()
           await supabase.from('presales').update({
             approval_status: 'approved',
+            status: 'confirmed',
             needs_review: false,
             last_reviewed_by: user?.id,
             last_reviewed_at: new Date().toISOString(),

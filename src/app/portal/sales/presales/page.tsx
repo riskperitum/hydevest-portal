@@ -187,16 +187,69 @@ export default function PresalesPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         {[
-          { label: 'Total presales', value: presales.length.toString(), color: 'text-brand-600' },
-          { label: 'Box sales', value: presales.filter(p => p.sale_type === 'box_sale').length.toString(), color: 'text-blue-600' },
-          { label: 'Split sales', value: presales.filter(p => p.sale_type === 'split_sale').length.toString(), color: 'text-purple-600' },
-          { label: 'Expected revenue', value: totalRevenue > 0 ? fmt(totalRevenue) : '—', color: 'text-green-600' },
+          {
+            label: 'Total presales',
+            value: filteredPresales.length.toString(),
+            sub: `${presales.filter(p => p.sale_type === 'box_sale').length} box · ${presales.filter(p => p.sale_type === 'split_sale').length} split`,
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Box sales',
+            value: filteredPresales.filter(p => p.sale_type === 'box_sale').length.toString(),
+            color: 'text-blue-600',
+          },
+          {
+            label: 'Split sales',
+            value: filteredPresales.filter(p => p.sale_type === 'split_sale').length.toString(),
+            color: 'text-purple-600',
+          },
+          {
+            label: 'Avg W/H weight',
+            value: (() => {
+              const w = filteredPresales.filter(p => p.warehouse_confirmed_avg_weight && Number(p.warehouse_confirmed_avg_weight) > 0)
+              if (!w.length) return '—'
+              const avg = w.reduce((s, p) => s + Number(p.warehouse_confirmed_avg_weight), 0) / w.length
+              return `${avg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
+            })(),
+            color: 'text-gray-900',
+          },
+          {
+            label: 'Avg price / kilo',
+            value: (() => {
+              const w = filteredPresales.filter(p => p.price_per_kilo && Number(p.price_per_kilo) > 0)
+              if (!w.length) return '—'
+              const avg = w.reduce((s, p) => s + Number(p.price_per_kilo), 0) / w.length
+              return fmt(avg)
+            })(),
+            color: 'text-amber-600',
+          },
+          {
+            label: 'Avg price / piece',
+            value: (() => {
+              const w = filteredPresales.filter(p => p.price_per_piece && Number(p.price_per_piece) > 0)
+              if (!w.length) return '—'
+              const avg = w.reduce((s, p) => s + Number(p.price_per_piece), 0) / w.length
+              return fmt(avg)
+            })(),
+            color: 'text-brand-600',
+          },
+          {
+            label: 'Avg expected revenue',
+            value: (() => {
+              const w = filteredPresales.filter(p => p.expected_sale_revenue && Number(p.expected_sale_revenue) > 0)
+              if (!w.length) return '—'
+              const avg = w.reduce((s, p) => s + Number(p.expected_sale_revenue), 0) / w.length
+              return fmt(avg)
+            })(),
+            color: 'text-green-600',
+          },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-1">{m.label}</p>
-            <p className={`text-xl font-semibold truncate ${m.color}`}>{m.value}</p>
+            <p className="text-xs text-gray-400 mb-1 leading-tight">{m.label}</p>
+            <p className={`text-base font-semibold truncate ${m.color}`}>{m.value}</p>
+            {'sub' in m && m.sub && <p className="text-xs text-gray-300 mt-0.5 truncate">{m.sub}</p>}
           </div>
         ))}
       </div>

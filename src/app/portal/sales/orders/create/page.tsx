@@ -77,20 +77,30 @@ export default function CreateSalesOrderPage() {
   const [amountPaid, setAmountPaid] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('transfer')
   const [palletLines, setPalletLines] = useState<PalletLine[]>([])
+  const [presaleOpen, setPresaleOpen] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
-    supabase.from('presales')
-      .select('container_id')
-      .in('status', ['draft', 'confirmed', 'altered'])
-      .then(({ data }) => {
-        const ids = [...new Set((data ?? []).map(p => p.container_id))]
-        if (!ids.length) return
-        supabase.from('containers')
-          .select('*, trip:trips(trip_id, title)')
-          .in('id', ids)
-          .then(({ data: c }) => setContainers(c ?? []))
+    Promise.all([
+      supabase.from('presales')
+        .select('container_id, sale_type')
+        .in('status', ['draft', 'confirmed', 'altered']),
+      supabase.from('sales_orders')
+        .select('container_id, sale_type')
+        .eq('sale_type', 'box_sale'),
+    ]).then(([{ data: presales }, { data: boxSales }]) => {
+      const soldBoxIds = new Set((boxSales ?? []).map(o => o.container_id))
+      const availablePresales = (presales ?? []).filter(p => {
+        if (p.sale_type === 'box_sale' && soldBoxIds.has(p.container_id)) return false
+        return true
       })
+      const ids = [...new Set(availablePresales.map(p => p.container_id))]
+      if (!ids.length) { setContainers([]); return }
+      supabase.from('containers')
+        .select('*, trip:trips(trip_id, title)')
+        .in('id', ids)
+        .then(({ data: c }) => setContainers(c ?? []))
+    })
     supabase.from('customers')
       .select('id, customer_id, name, phone')
       .eq('is_active', true)
@@ -232,8 +242,49 @@ export default function CreateSalesOrderPage() {
     return false
   }
 
+  const CollapsiblePresale = () => {
+    if (!selectedPresale) return null
+    return (
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <button type="button"
+          onClick={() => setPresaleOpen(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-700">Presale summary</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${selectedPresale.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+              {selectedPresale.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
+            </span>
+          </div>
+          <ChevronRight size={15} className={`text-gray-400 transition-transform ${presaleOpen ? 'rotate-90' : ''}`} />
+        </button>
+        {presaleOpen && (
+          <div className="px-5 pb-5 border-t border-gray-100">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4">
+              {[
+                { label: 'Presale ID', value: selectedPresale.presale_id },
+                { label: 'Type', value: selectedPresale.sale_type === 'box_sale' ? 'Box sale' : 'Split sale' },
+                { label: 'Status', value: selectedPresale.status },
+                { label: 'W/H avg weight', value: selectedPresale.warehouse_confirmed_avg_weight ? `${selectedPresale.warehouse_confirmed_avg_weight} kg` : '—' },
+                { label: 'W/H pieces', value: selectedPresale.warehouse_confirmed_pieces?.toLocaleString() ?? '—' },
+                { label: 'Price / kilo', value: selectedPresale.price_per_kilo ? `₦${Number(selectedPresale.price_per_kilo).toLocaleString()}` : '—' },
+                { label: 'Price / piece', value: selectedPresale.price_per_piece ? `₦${Number(selectedPresale.price_per_piece).toLocaleString()}` : '—' },
+                { label: 'Expected revenue', value: selectedPresale.expected_sale_revenue ? fmt(selectedPresale.expected_sale_revenue) : '—' },
+                ...(selectedPresale.sale_type === 'split_sale' ? [{ label: 'Total pallets', value: selectedPresale.total_number_of_pallets?.toString() ?? '—' }] : []),
+              ].map(item => (
+                <div key={item.label}>
+                  <p className="text-xs text-gray-400 mb-0.5">{item.label}</p>
+                  <p className="text-sm font-medium text-gray-900">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pb-12">
+    <div className="max-w-3xl mx-auto space-y-6 pb-12">
 
       {/* Header */}
       <div className="flex items-center gap-3 pt-2">
@@ -341,32 +392,7 @@ export default function CreateSalesOrderPage() {
       {/* STEP 2 — Customer */}
       {currentStep === 'customer' && selectedPresale && (
         <div className="space-y-4">
-          {/* Presale summary */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-gray-700">Presale summary</h2>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${selectedPresale.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                {selectedPresale.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { label: 'Presale ID', value: selectedPresale.presale_id },
-                { label: 'W/H avg weight', value: selectedPresale.warehouse_confirmed_avg_weight ? `${selectedPresale.warehouse_confirmed_avg_weight} kg` : '—' },
-                { label: 'W/H pieces', value: selectedPresale.warehouse_confirmed_pieces?.toLocaleString() ?? '—' },
-                { label: 'Price / piece', value: selectedPresale.price_per_piece ? fmt(selectedPresale.price_per_piece) : '—' },
-                { label: 'Price / kilo', value: selectedPresale.price_per_kilo ? fmt(selectedPresale.price_per_kilo) : '—' },
-                { label: 'Expected revenue', value: selectedPresale.expected_sale_revenue ? fmt(selectedPresale.expected_sale_revenue) : '—' },
-                { label: 'Status', value: selectedPresale.status },
-                ...(selectedPresale.sale_type === 'split_sale' ? [{ label: 'Total pallets', value: selectedPresale.total_number_of_pallets?.toString() ?? '—' }] : []),
-              ].map(item => (
-                <div key={item.label}>
-                  <p className="text-xs text-gray-400 mb-0.5">{item.label}</p>
-                  <p className="text-sm font-medium text-gray-900">{item.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <CollapsiblePresale />
 
           {/* Customer selection */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -409,6 +435,8 @@ export default function CreateSalesOrderPage() {
       {currentStep === 'details' && selectedPresale && selectedCustomer && (
         <form onSubmit={handleSubmit} className="space-y-5">
 
+          <CollapsiblePresale />
+
           {/* Split sale pallet selection */}
           {selectedPresale.sale_type === 'split_sale' && (
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -416,12 +444,12 @@ export default function CreateSalesOrderPage() {
                 <h2 className="text-sm font-semibold text-gray-700">Pallet selection</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Enter pallets purchased and selling price per piece for each pallet type</p>
               </div>
-              <div className="overflow-x-auto">
+              <div>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      {['Pallet type', 'Available', 'Pallets purchased', 'Sell price/pc (₦)', 'Total pieces', 'Line total'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      {['Pallet type', 'Available pallets', 'Pallets purchased', 'Selling price / piece (₦)', 'Total pieces', 'Line total'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -431,6 +459,8 @@ export default function CreateSalesOrderPage() {
                       const price = parseFloat(line.selling_price_per_piece) || 0
                       const totalPieces = pallets * line.pallet_pieces
                       const lineTotal = totalPieces * price
+                      const exceedsAvailable = pallets > line.available_pallets
+                      const belowPresalePrice = price > 0 && selectedPresale?.price_per_piece && price < Number(selectedPresale.price_per_piece)
                       return (
                         <tr key={idx} className="border-b border-gray-50">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{line.pallet_pieces.toLocaleString()} pcs/pallet</td>
@@ -439,15 +469,25 @@ export default function CreateSalesOrderPage() {
                             <input type="number" min="0" max={line.available_pallets}
                               value={line.pallets_to_sell}
                               onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, pallets_to_sell: e.target.value } : l))}
-                              className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                                ${exceedsAvailable ? 'border-red-300 focus:ring-red-400 bg-red-50' : 'border-gray-200 focus:ring-brand-500'}`}
                               placeholder="0" />
+                            {exceedsAvailable && (
+                              <p className="text-xs text-red-500 mt-1 font-medium">Max {line.available_pallets} available</p>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <input type="number" step="0.01"
                               value={line.selling_price_per_piece}
                               onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, selling_price_per_piece: e.target.value } : l))}
-                              className="w-28 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="0" />
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                                ${belowPresalePrice ? 'border-amber-300 focus:ring-amber-400 bg-amber-50' : 'border-gray-200 focus:ring-brand-500'}`}
+                              placeholder="₦0.00" />
+                            {belowPresalePrice && (
+                              <p className="text-xs text-amber-600 mt-1 font-medium">
+                                Below presale price (₦{Number(selectedPresale?.price_per_piece).toLocaleString()})
+                              </p>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-700">{totalPieces > 0 ? totalPieces.toLocaleString() : '—'}</td>
                           <td className="px-4 py-3 text-sm font-semibold text-brand-700">{lineTotal > 0 ? fmt(lineTotal) : '—'}</td>
@@ -472,13 +512,18 @@ export default function CreateSalesOrderPage() {
           {/* Sale details */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
             <h2 className="text-sm font-semibold text-gray-700">Sale details</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {selectedPresale.sale_type === 'box_sale' && (
-                <div className="sm:col-span-2">
+                <div className="col-span-2">
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Sale amount (₦) <span className="text-red-400">*</span></label>
                   <input type="number" step="0.01" value={saleAmount} onChange={e => setSaleAmount(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     placeholder="Enter sale amount" />
+                  {selectedPresale.expected_sale_revenue && parseFloat(saleAmount) > 0 && parseFloat(saleAmount) < Number(selectedPresale.expected_sale_revenue) && (
+                    <p className="text-xs text-amber-600 mt-1.5 font-medium flex items-center gap-1">
+                      <span>{'\u26A0'}</span> Sale amount is below the expected presale revenue (��{Number(selectedPresale.expected_sale_revenue).toLocaleString()})
+                    </p>
+                  )}
                 </div>
               )}
               <div>
@@ -555,7 +600,7 @@ export default function CreateSalesOrderPage() {
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
               Back
             </button>
-            <button type="submit" disabled={saving || effectiveSaleAmount <= 0}
+            <button type="submit" disabled={saving || effectiveSaleAmount <= 0 || palletLines.some(l => parseInt(l.pallets_to_sell) > l.available_pallets)}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Recording…</> : 'Record sale'}
             </button>

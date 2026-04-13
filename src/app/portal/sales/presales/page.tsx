@@ -4,16 +4,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import {
-  Plus, Search, Eye, Trash2,
-  Package
-} from 'lucide-react'
+import { Plus, Search, Eye, Trash2, Loader2, Package, Download, Filter, FileText, ClipboardCheck, CheckCircle2 } from 'lucide-react'
 
 interface Presale {
   id: string
   presale_id: string
   sale_type: string
   status: string
+  approval_status: string
   created_at: string
   warehouse_confirmed_pieces: number | null
   warehouse_confirmed_avg_weight: number | null
@@ -40,6 +38,20 @@ export default function PresalesPage() {
   const [presales, setPresales] = useState<Presale[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [saleTypeFilter, setSaleTypeFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
+  const [workflowPresale, setWorkflowPresale] = useState<Presale | null>(null)
+  const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'approval' | null>(null)
+  const [workflowNote, setWorkflowNote] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -51,7 +63,13 @@ export default function PresalesPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
+    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
+      .then(({ data }) => setEmployees(data ?? []))
+  }, [load])
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this presale? This cannot be undone.')) return
@@ -60,14 +78,97 @@ export default function PresalesPage() {
     load()
   }
 
+  async function submitWorkflow() {
+    if (!assignee || !workflowType || !workflowPresale) return
+    setSubmittingWorkflow(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const typeKeys = { delete: 'delete_approval', review: 'review_request', approval: 'approval_request' }
+    const typeLabels = { delete: 'Delete approval', review: 'Review request', approval: 'Approval request' }
+    const { data: task } = await supabase.from('tasks').insert({
+      type: typeKeys[workflowType],
+      title: `${typeLabels[workflowType]}: ${workflowPresale.presale_id}`,
+      description: workflowNote || `${typeLabels[workflowType]} for presale ${workflowPresale.presale_id}`,
+      module: 'presales',
+      record_id: workflowPresale.id,
+      record_ref: workflowPresale.presale_id,
+      requested_by: user?.id,
+      assigned_to: assignee,
+      priority: workflowType === 'delete' ? 'high' : 'normal',
+    }).select().single()
+    await supabase.from('notifications').insert({
+      user_id: assignee,
+      type: `task_${typeKeys[workflowType]}`,
+      title: `New task: ${typeLabels[workflowType]}`,
+      message: workflowPresale.presale_id,
+      task_id: task?.id,
+      record_id: workflowPresale.id,
+      record_ref: workflowPresale.presale_id,
+      module: 'presales',
+    })
+    setSubmittingWorkflow(false)
+    setWorkflowPresale(null)
+    setWorkflowType(null)
+    setWorkflowNote('')
+    setAssignee('')
+    load()
+  }
+
+  function generateReport(type: 'filtered' | 'full') {
+    const data = type === 'filtered' ? filteredPresales : presales
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Presales Report — Hydevest</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;color:#1a1a2e}
+    .header{background:#55249E;color:white;padding:32px 40px}.header h1{font-size:24px;font-weight:700}
+    .header p{font-size:13px;opacity:.8;margin-top:4px}.content{padding:24px 40px}
+    table{width:100%;border-collapse:collapse;font-size:12px}thead tr{background:#55249E;color:white}
+    thead th{padding:10px 12px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap}
+    tbody tr{border-bottom:1px solid #f0ebff}tbody tr:nth-child(even){background:#faf8ff}
+    tbody td{padding:9px 12px;color:#374151;white-space:nowrap}
+    .footer{padding:20px 40px;border-top:1px solid #ede9f7;text-align:center;font-size:11px;color:#9ca3af;margin-top:24px}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+    <div class="header"><h1>Presales Report</h1><p>Hydevest Portal — ${type === 'filtered' ? 'Filtered View' : 'Full Report'}</p>
+    <p style="font-size:12px;opacity:.8;margin-top:8px">Generated: ${new Date().toLocaleString()} · ${data.length} presales</p></div>
+    <div class="content"><table><thead><tr>
+    <th>Presale ID</th><th>Type</th><th>Container</th><th>Tracking No.</th>
+    <th>W/H Pieces</th><th>Price/Kilo</th><th>Price/Piece</th><th>Expected Revenue</th><th>Status</th><th>Created</th>
+    </tr></thead><tbody>
+    ${data.map(p => `<tr>
+    <td><strong style="color:#55249E">${p.presale_id}</strong></td>
+    <td>${p.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}</td>
+    <td>${p.container?.container_id ?? '—'}</td>
+    <td>${p.container?.tracking_number ?? '—'}</td>
+    <td>${p.warehouse_confirmed_pieces?.toLocaleString() ?? '—'}</td>
+    <td>${p.price_per_kilo ? '₦' + Number(p.price_per_kilo).toLocaleString() : '—'}</td>
+    <td>${p.price_per_piece ? '₦' + Number(p.price_per_piece).toLocaleString() : '—'}</td>
+    <td><strong>${p.expected_sale_revenue ? '₦' + Number(p.expected_sale_revenue).toLocaleString(undefined, {minimumFractionDigits:2}) : '—'}</strong></td>
+    <td>${p.status}</td>
+    <td>${new Date(p.created_at).toLocaleDateString()}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    <div class="footer">Hydevest Portal · Generated ${new Date().toLocaleString()} · Confidential</div>
+    </body></html>`
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    if (win) win.focus()
+    setReportOpen(false)
+  }
+
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-  const filteredPresales = presales.filter(p =>
-    search === '' ||
-    p.presale_id.toLowerCase().includes(search.toLowerCase()) ||
-    (p.container?.tracking_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.container?.container_id ?? '').toLowerCase().includes(search.toLowerCase())
-  )
+  const filteredPresales = presales.filter(p => {
+    const matchSearch = search === '' ||
+      p.presale_id.toLowerCase().includes(search.toLowerCase()) ||
+      (p.container?.tracking_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.container?.container_id ?? '').toLowerCase().includes(search.toLowerCase())
+    const matchStatus = statusFilter === '' || p.status === statusFilter
+    const matchType = saleTypeFilter === '' || p.sale_type === saleTypeFilter
+    const matchDateFrom = dateFrom === '' || new Date(p.created_at) >= new Date(dateFrom)
+    const matchDateTo = dateTo === '' || new Date(p.created_at) <= new Date(dateTo + 'T23:59:59')
+    return matchSearch && matchStatus && matchType && matchDateFrom && matchDateTo
+  })
+
+  const activeFilters = [statusFilter, saleTypeFilter, dateFrom, dateTo].filter(Boolean).length
 
   const totalRevenue = filteredPresales.reduce((s, p) => s + Number(p.expected_sale_revenue ?? 0), 0)
 
@@ -100,14 +201,78 @@ export default function PresalesPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search by presale ID or tracking number..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      {/* Search + filters + actions */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search by presale ID or tracking number..."
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowFilters(v => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
+                ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter size={15} /> Filters
+              {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
+            </button>
+            <button onClick={() => setReportOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+              <FileText size={15} /> Report
+            </button>
+            <button onClick={() => {
+              const headers = ['Presale ID','Type','Container','Tracking No.','W/H Pieces','Price/Kilo','Price/Piece','Expected Revenue','Status','Created']
+              const rows = filteredPresales.map(p => [p.presale_id, p.sale_type, p.container?.container_id ?? '', p.container?.tracking_number ?? '', p.warehouse_confirmed_pieces ?? '', p.price_per_kilo ?? '', p.price_per_piece ?? '', p.expected_sale_revenue ?? '', p.status, new Date(p.created_at).toLocaleDateString()])
+              const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+              const blob = new Blob([csv], { type: 'text/csv' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a'); a.href = url; a.download = 'presales.csv'; a.click()
+            }} className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              <Download size={15} /> Export
+            </button>
+          </div>
         </div>
+        {showFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All statuses</option>
+                <option value="draft">Draft</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Sale type</label>
+              <select value={saleTypeFilter} onChange={e => setSaleTypeFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All types</option>
+                <option value="box_sale">Box sale</option>
+                <option value="split_sale">Split sale</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date from</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date to</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            {activeFilters > 0 && (
+              <div className="col-span-2 md:col-span-4 flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">{filteredPresales.length} result{filteredPresales.length !== 1 ? 's' : ''}</p>
+                <button onClick={() => { setStatusFilter(''); setSaleTypeFilter(''); setDateFrom(''); setDateTo('') }}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium transition-colors">Clear all</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -144,7 +309,9 @@ export default function PresalesPage() {
                   </td>
                 </tr>
               ) : filteredPresales.map(ps => (
-                <tr key={ps.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
+                <tr key={ps.id}
+                  onClick={() => router.push(`/portal/sales/presales/${ps.id}`)}
+                  className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors group cursor-pointer">
                   <td className="px-3 py-3 whitespace-nowrap">
                     <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{ps.presale_id}</span>
                   </td>
@@ -169,16 +336,22 @@ export default function PresalesPage() {
                   </td>
                   <td className="px-3 py-3 text-gray-500 whitespace-nowrap text-xs">{ps.created_by_profile?.full_name ?? ps.created_by_profile?.email ?? '—'}</td>
                   <td className="px-3 py-3 text-gray-400 whitespace-nowrap text-xs">{new Date(ps.created_at).toLocaleDateString()}</td>
-                  <td className="px-3 py-3 whitespace-nowrap">
+                  <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => router.push(`/portal/sales/presales/${ps.id}`)}
-                        className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                      <button onClick={() => router.push(`/portal/sales/presales/${ps.id}`)}
+                        title="View" className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
                         <Eye size={14} />
                       </button>
-                      <button
-                        onClick={() => handleDelete(ps.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                      <button onClick={() => { setWorkflowPresale(ps); setWorkflowType('review') }}
+                        title="Request review" className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                        <ClipboardCheck size={14} />
+                      </button>
+                      <button onClick={() => { setWorkflowPresale(ps); setWorkflowType('approval') }}
+                        title="Request approval" className={`p-1.5 rounded-lg transition-colors ${ps.approval_status === 'approved' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-amber-50 hover:text-amber-600'}`}>
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <button onClick={() => { setWorkflowPresale(ps); setWorkflowType('delete') }}
+                        title="Request deletion" className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -189,6 +362,78 @@ export default function PresalesPage() {
           </table>
         </div>
       </div>
+
+      {/* Workflow modal */}
+      {workflowPresale && workflowType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setWorkflowPresale(null); setWorkflowType(null) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              {workflowType === 'delete' ? 'Request deletion' : workflowType === 'review' ? 'Request review' : 'Request approval'}
+            </h2>
+            {workflowType === 'delete' && (
+              <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+                <p className="text-xs text-red-700 font-medium">The presale will only be deleted after the assigned user approves it.</p>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
+              <select required value={assignee} onChange={e => setAssignee(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">Select user...</option>
+                {employees.filter(e => e.id !== currentUserId).map(e => (
+                  <option key={e.id} value={e.id}>{e.full_name ?? e.email}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+              <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setWorkflowPresale(null); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+                className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
+                  ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' :
+                    workflowType === 'approval' ? 'bg-green-600 text-white hover:bg-green-700' :
+                    'bg-brand-600 text-white hover:bg-brand-700'}`}>
+                {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report modal */}
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+            <div className="space-y-2">
+              {(['filtered', 'full'] as const).map(t => (
+                <button key={t} onClick={() => setReportType(t)}
+                  className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType === t ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200'}`}>
+                  <p className={`text-sm font-semibold ${reportType === t ? 'text-brand-700' : 'text-gray-700'}`}>
+                    {t === 'filtered' ? 'Filtered view' : 'Full report'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {t === 'filtered' ? `${filteredPresales.length} presales` : `${presales.length} total presales`}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setReportOpen(false)}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button onClick={() => generateReport(reportType)}
+                className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">Generate</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

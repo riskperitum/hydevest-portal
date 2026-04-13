@@ -123,6 +123,34 @@ export default function TasksPage() {
           await supabase.from('trips').update({ approval_status: 'approved' }).eq('id', selectedTask.record_id)
         }
       }
+
+      if (selectedTask.type === 'delete_approval' && action === 'approved') {
+        if (selectedTask.module === 'presales') {
+          await supabase.from('presales').delete().eq('id', selectedTask.record_id)
+        }
+      }
+      if (selectedTask.type === 'review_request' && action === 'approved') {
+        if (selectedTask.module === 'presales') {
+          const { data: { user } } = await supabase.auth.getUser()
+          await supabase.from('presales').update({
+            approval_status: 'reviewed',
+            needs_review: false,
+            last_reviewed_by: user?.id,
+            last_reviewed_at: new Date().toISOString(),
+          }).eq('id', selectedTask.record_id)
+        }
+      }
+      if (selectedTask.type === 'approval_request' && action === 'approved') {
+        if (selectedTask.module === 'presales') {
+          const { data: { user } } = await supabase.auth.getUser()
+          await supabase.from('presales').update({
+            approval_status: 'approved',
+            needs_review: false,
+            last_reviewed_by: user?.id,
+            last_reviewed_at: new Date().toISOString(),
+          }).eq('id', selectedTask.record_id)
+        }
+      }
     }
 
     // Notify the requester
@@ -146,6 +174,9 @@ export default function TasksPage() {
   function navigateToRecord(task: Task) {
     if (task.module === 'trips' && task.record_id) {
       router.push(`/portal/purchase/trips/${task.record_id}?task=${task.id}`)
+    }
+    if (task.module === 'presales' && task.record_id) {
+      router.push(`/portal/sales/presales/${task.record_id}`)
     }
   }
 

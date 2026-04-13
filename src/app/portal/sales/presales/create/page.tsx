@@ -74,10 +74,19 @@ export default function CreatePresalePage() {
 
   useEffect(() => {
     const supabase = createClient()
-    supabase.from('containers')
-      .select('*, trip:trips(title, source_location, trip_id)')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setContainers(data ?? []))
+    // First get all container IDs that already have a presale
+    supabase.from('presales')
+      .select('container_id')
+      .then(({ data: existingPresales }) => {
+        const presoldIds = new Set((existingPresales ?? []).map(p => p.container_id))
+        // Then load containers excluding already presold ones
+        supabase.from('containers')
+          .select('*, trip:trips(title, source_location, trip_id)')
+          .order('created_at', { ascending: false })
+          .then(({ data }) => {
+            setContainers((data ?? []).filter(c => !presoldIds.has(c.id)))
+          })
+      })
   }, [])
 
   const filteredContainers = containers.filter(c =>

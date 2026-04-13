@@ -34,9 +34,9 @@ const NAV: NavItem[] = [
       { label: 'Sales orders', href: '/portal/sales/orders' },
     ]
   },
+  { label: 'Recoveries',  href: '/portal/recoveries', icon: <RefreshCcw size={18} /> },
   { label: 'Expensify',   href: '/portal/expensify',  icon: <Receipt size={18} /> },
   { label: 'Inventory',   href: '/portal/inventory',  icon: <Package size={18} /> },
-  { label: 'Recoveries',  href: '/portal/recoveries', icon: <RefreshCcw size={18} /> },
   { label: 'Finance',     href: '/portal/finance',    icon: <Wallet size={18} /> },
   { label: 'Partnership', href: '/portal/partnership', icon: <Building2 size={18} /> },
   { label: 'Reports',     href: '/portal/reports',    icon: <BarChart2 size={18} /> },

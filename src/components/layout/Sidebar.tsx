@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, Inbox, Users,
-  Settings, ChevronDown, ChevronRight, Menu, X, Building2
+  Settings, ChevronDown, ChevronRight, Menu, X, Building2, RefreshCcw
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -30,13 +30,13 @@ const NAV: NavItem[] = [
   {
     label: 'Sales', icon: <TrendingUp size={18} />,
     children: [
-      { label: 'Pre-sale', href: '/portal/sales/presale' },
-      { label: 'Orders',   href: '/portal/sales/orders' },
-      { label: 'Buyers',   href: '/portal/sales/buyers' },
+      { label: 'Pre-sales',    href: '/portal/sales/presales' },
+      { label: 'Sales orders', href: '/portal/sales/orders' },
     ]
   },
-  { label: 'Inventory',   href: '/portal/inventory',  icon: <Package size={18} /> },
   { label: 'Expensify',   href: '/portal/expensify',  icon: <Receipt size={18} /> },
+  { label: 'Inventory',   href: '/portal/inventory',  icon: <Package size={18} /> },
+  { label: 'Recoveries',  href: '/portal/recoveries', icon: <RefreshCcw size={18} /> },
   { label: 'Finance',     href: '/portal/finance',    icon: <Wallet size={18} /> },
   { label: 'Partnership', href: '/portal/partnership', icon: <Building2 size={18} /> },
   { label: 'Reports',     href: '/portal/reports',    icon: <BarChart2 size={18} /> },

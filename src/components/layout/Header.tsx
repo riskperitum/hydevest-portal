@@ -87,7 +87,7 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
 
   return (
     <header className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-6 shrink-0">
-      <div className="lg:hidden w-10" />
+      <div className="w-10 lg:w-0" />
       <div className="flex items-center gap-3">
 
         {/* Notification bell */}

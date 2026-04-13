@@ -188,7 +188,7 @@ export default function ContainerDetailPage() {
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
-    const oldValue = String((container as Record<string, unknown>)[field] ?? '')
+    const oldValue = String((container as unknown as Record<string, unknown>)[field] ?? '')
     await supabase.from('containers').update({ [field]: value || null }).eq('id', containerId)
     await logActivity('Updated field', field, oldValue, value)
     // Flag trip as needing review if it was previously reviewed

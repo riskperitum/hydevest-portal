@@ -484,7 +484,7 @@ export default function ContainerDetailPage() {
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50">
           <h2 className="text-sm font-semibold text-gray-700">Container details</h2>
         </div>
-        <div className="p-5 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
+        <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField fieldKey="container_number" label="Title / Label" value={container.container_number ?? ''} placeholder="e.g. Container A" />
           <EditableField fieldKey="tracking_number" label="Tracking number" value={container.tracking_number ?? ''} placeholder="e.g. MSCU1234567" />
           <EditableField fieldKey="invoice_number" label="Invoice number" value={container.invoice_number ?? ''} placeholder="e.g. INV-001" />
@@ -525,7 +525,7 @@ export default function ContainerDetailPage() {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500">Funding type:</span>
               <select
@@ -585,7 +585,7 @@ export default function ContainerDetailPage() {
             {isPartner ? 'Partner funding — all fields apply' : 'Entity funding — base fields apply'}
           </p>
         </div>
-        <div className="p-5 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
+        <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField fieldKey="pieces_purchased" label="Pieces purchased" value={container.pieces_purchased?.toString() ?? ''} type="number" placeholder="0" />
           <EditableField fieldKey="unit_price_usd" label="Unit price (USD)" value={container.unit_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
           <EditableField fieldKey="shipping_amount_usd" label="Shipping amount (USD)" value={container.shipping_amount_usd?.toString() ?? ''} type="number" placeholder="0.00" />
@@ -680,7 +680,7 @@ export default function ContainerDetailPage() {
 
       {/* ── SECTION 5: Comments & Activity ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex border-b border-gray-100">
+        <div className="flex border-b border-gray-100 overflow-x-auto">
           {[
             { key: 'comments', label: 'Comments', icon: <MessageSquare size={14} />, count: comments.length },
             { key: 'activity', label: 'Activity log', icon: <Activity size={14} />, count: activityLogs.length },

@@ -1,119 +1,181 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ShoppingCart, TrendingUp, Package, Receipt, DollarSign, Users, BarChart2, Inbox, Settings, ChevronDown, ChevronRight, ChevronLeft, ClipboardList } from 'lucide-react'
-import { BrandLogo } from '@/components/brand/BrandLogo'
+import {
+  LayoutDashboard, ClipboardList, ShoppingCart, TrendingUp,
+  Package, Receipt, Wallet, BarChart2, Inbox, Users,
+  Settings, ChevronDown, ChevronRight, Menu, X, Building2
+} from 'lucide-react'
+import Image from 'next/image'
 
-interface NavChild { label: string; href: string }
-interface NavItem { label: string; href?: string; icon: React.ReactNode; children?: NavChild[] }
+interface NavItem {
+  label: string
+  href?: string
+  icon: React.ReactNode
+  children?: { label: string; href: string }[]
+}
 
 const NAV: NavItem[] = [
-  { label: 'Overview', href: '/portal/overview', icon: <LayoutDashboard size={18} /> },
-  { label: 'Tasks', href: '/portal/tasks', icon: <ClipboardList size={18} /> },
-  { label: 'Purchase', icon: <ShoppingCart size={18} />, children: [
-    { label: 'Trips', href: '/portal/purchase/trips' },
-    { label: 'Containers', href: '/portal/purchase/containers' },
-  ]},
-  { label: 'Sales', icon: <TrendingUp size={18} />, children: [
-    { label: 'Pre-sale', href: '/portal/sales/presale' },
-    { label: 'Orders', href: '/portal/sales/orders' },
-    { label: 'Buyers', href: '/portal/sales/buyers' },
-  ]},
-  { label: 'Inventory', href: '/portal/inventory', icon: <Package size={18} /> },
-  { label: 'Expensify', href: '/portal/expensify', icon: <Receipt size={18} /> },
-  { label: 'Finance', href: '/portal/finance', icon: <DollarSign size={18} /> },
-  { label: 'Partnership', href: '/portal/partnership', icon: <Users size={18} /> },
-  { label: 'Reports', href: '/portal/reports', icon: <BarChart2 size={18} /> },
-  { label: 'Requestbox', href: '/portal/requestbox', icon: <Inbox size={18} /> },
-  { label: 'Accounts', href: '/portal/accounts', icon: <Users size={18} /> },
+  { label: 'Overview',    href: '/portal/overview',  icon: <LayoutDashboard size={18} /> },
+  { label: 'Tasks',       href: '/portal/tasks',      icon: <ClipboardList size={18} /> },
+  {
+    label: 'Purchase', icon: <ShoppingCart size={18} />,
+    children: [
+      { label: 'Trips',      href: '/portal/purchase/trips' },
+      { label: 'Containers', href: '/portal/purchase/containers' },
+    ]
+  },
+  {
+    label: 'Sales', icon: <TrendingUp size={18} />,
+    children: [
+      { label: 'Pre-sale', href: '/portal/sales/presale' },
+      { label: 'Orders',   href: '/portal/sales/orders' },
+      { label: 'Buyers',   href: '/portal/sales/buyers' },
+    ]
+  },
+  { label: 'Inventory',   href: '/portal/inventory',  icon: <Package size={18} /> },
+  { label: 'Expensify',   href: '/portal/expensify',  icon: <Receipt size={18} /> },
+  { label: 'Finance',     href: '/portal/finance',    icon: <Wallet size={18} /> },
+  { label: 'Partnership', href: '/portal/partnership', icon: <Building2 size={18} /> },
+  { label: 'Reports',     href: '/portal/reports',    icon: <BarChart2 size={18} /> },
+  { label: 'Requestbox',  href: '/portal/requestbox', icon: <Inbox size={18} /> },
+  { label: 'Accounts',    href: '/portal/accounts',   icon: <Users size={18} /> },
+  { label: 'Admin',       href: '/portal/admin',      icon: <Settings size={18} /> },
 ]
 
-export default function Sidebar({ isSuperAdmin }: { roles: string[]; isSuperAdmin: boolean }) {
+export default function Sidebar() {
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
   const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
-  const toggle = (label: string) =>
-    setOpenGroups(p => p.includes(label) ? p.filter(l => l !== label) : [...p, label])
+  // Close mobile sidebar on route change
+  useEffect(() => { setMobileOpen(false) }, [pathname])
 
-  const active = (href: string) => pathname === href || pathname.startsWith(href + '/')
-  const groupActive = (item: NavItem) => item.children?.some(c => active(c.href)) ?? false
+  // Auto-expand group if current path is inside it
+  useEffect(() => {
+    NAV.forEach(item => {
+      if (item.children?.some(c => pathname.startsWith(c.href))) {
+        setOpenGroups(prev => prev.includes(item.label) ? prev : [...prev, item.label])
+      }
+    })
+  }, [pathname])
 
-  const cls = (...c: (string | boolean | undefined)[]) => c.filter(Boolean).join(' ')
+  function toggleGroup(label: string) {
+    setOpenGroups(prev =>
+      prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
+    )
+  }
 
-  return (
-    <aside className={cls('flex flex-col h-full bg-white border-r border-gray-100 transition-all duration-200 shrink-0', collapsed ? 'w-16' : 'w-60')}>
-      <div className="flex items-center min-h-[4rem] h-16 px-3 border-b border-gray-100 shrink-0 gap-1">
-        <Link
-          href="/portal/overview"
-          className={cls(
-            'flex items-center min-w-0 flex-1 overflow-hidden',
-            collapsed && 'justify-center px-0',
-          )}
-        >
-          <BrandLogo
-            priority
-            className={cls(
-              'object-contain shrink-0',
-              collapsed ? 'h-7 w-auto max-w-[3.75rem]' : 'h-10 w-auto max-w-[12.5rem]',
-            )}
-          />
+  function isActive(href: string) {
+    return pathname === href || pathname.startsWith(href + '/')
+  }
+
+  const SidebarContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Logo */}
+      <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 shrink-0">
+        <Link href="/portal/overview" className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shrink-0">
+            <span className="text-white text-xs font-bold">H</span>
+          </div>
+          {!collapsed && <span className="font-bold text-gray-900 text-base">Hydevest</span>}
         </Link>
-        <button onClick={() => setCollapsed(v => !v)} className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 shrink-0">
-          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        {/* Desktop collapse toggle */}
+        <button
+          onClick={() => setCollapsed(v => !v)}
+          className="hidden lg:flex p-1 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} className="rotate-90" />}
+        </button>
+        {/* Mobile close button */}
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="lg:hidden p-1 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+          <X size={18} />
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {NAV.map(item => (
-          <div key={item.label}>
-            {item.href && !item.children ? (
-              <Link href={item.href} title={collapsed ? item.label : undefined}
-                className={cls('flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all',
-                  active(item.href) ? 'bg-brand-50 text-brand-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900')}>
-                <span className="shrink-0">{item.icon}</span>
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            ) : (
-              <div>
-                <button onClick={() => toggle(item.label)} title={collapsed ? item.label : undefined}
-                  className={cls('w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all',
-                    groupActive(item) ? 'text-brand-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900')}>
-                  <span className="shrink-0">{item.icon}</span>
-                  {!collapsed && <>
-                    <span className="flex-1 text-left truncate">{item.label}</span>
-                    {openGroups.includes(item.label) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  </>}
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+        {NAV.map(item => {
+          if (item.children) {
+            const isOpen = openGroups.includes(item.label)
+            const hasActive = item.children.some(c => isActive(c.href))
+            return (
+              <div key={item.label}>
+                <button
+                  onClick={() => toggleGroup(item.label)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                    ${hasActive ? 'text-brand-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                  <span className={hasActive ? 'text-brand-600' : 'text-gray-400'}>{item.icon}</span>
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      <ChevronDown size={14} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    </>
+                  )}
                 </button>
-                {!collapsed && openGroups.includes(item.label) && (
-                  <div className="ml-7 mt-0.5 space-y-0.5">
-                    {item.children?.map(child => (
+                {isOpen && !collapsed && (
+                  <div className="ml-9 mt-0.5 space-y-0.5">
+                    {item.children.map(child => (
                       <Link key={child.href} href={child.href}
-                        className={cls('block px-3 py-1.5 rounded-lg text-sm transition-all',
-                          active(child.href) ? 'bg-brand-50 text-brand-700 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800')}>
+                        className={`block px-3 py-1.5 rounded-lg text-sm transition-colors
+                          ${isActive(child.href)
+                            ? 'bg-brand-50 text-brand-700 font-medium'
+                            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}>
                         {child.label}
                       </Link>
                     ))}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        ))}
+            )
+          }
+          return (
+            <Link key={item.href} href={item.href!}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                ${isActive(item.href!)
+                  ? 'bg-brand-50 text-brand-700'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+              <span className={isActive(item.href!) ? 'text-brand-600' : 'text-gray-400'}>{item.icon}</span>
+              {!collapsed && <span>{item.label}</span>}
+            </Link>
+          )
+        })}
       </nav>
+    </div>
+  )
 
-      {isSuperAdmin && (
-        <div className="px-2 pb-3 border-t border-gray-100 pt-2">
-          <Link href="/portal/admin" title={collapsed ? 'Admin' : undefined}
-            className={cls('flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all',
-              active('/portal/admin') ? 'bg-brand-50 text-brand-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900')}>
-            <Settings size={18} className="shrink-0" />
-            {!collapsed && <span>Admin</span>}
-          </Link>
-        </div>
+  return (
+    <>
+      {/* Mobile hamburger button — shown in header area */}
+      <button
+        onClick={() => setMobileOpen(true)}
+        className="lg:hidden fixed top-3.5 left-4 z-40 p-2 rounded-lg bg-white border border-gray-200 shadow-sm text-gray-600 hover:bg-gray-50 transition-colors">
+        <Menu size={18} />
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+          onClick={() => setMobileOpen(false)}
+        />
       )}
-    </aside>
+
+      {/* Mobile sidebar */}
+      <aside className={`lg:hidden fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 shadow-xl transform transition-transform duration-200
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <SidebarContent />
+      </aside>
+
+      {/* Desktop sidebar */}
+      <aside className={`hidden lg:flex flex-col bg-white border-r border-gray-100 h-screen sticky top-0 transition-all duration-200
+        ${collapsed ? 'w-16' : 'w-56'}`}>
+        <SidebarContent />
+      </aside>
+    </>
   )
 }

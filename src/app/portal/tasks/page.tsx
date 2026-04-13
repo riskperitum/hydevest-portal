@@ -167,8 +167,8 @@ export default function TasksPage() {
 
       {/* Tabs + filters */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center border-b border-gray-100">
-          <div className="flex flex-1">
+        <div className="flex items-center border-b border-gray-100 flex-wrap gap-2 px-4 py-2 sm:p-0">
+          <div className="flex flex-1 min-w-max">
             {([
               { key: 'assigned', label: 'Assigned to me' },
               { key: 'requested', label: 'My requests' },
@@ -248,7 +248,7 @@ export default function TasksPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                   {task.record_id && (
                     <button onClick={() => navigateToRecord(task)}
                       title="View record"

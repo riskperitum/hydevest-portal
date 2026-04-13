@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Search, Download, Eye, ClipboardCheck, CheckCircle2, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Search, Download, Eye, ClipboardCheck, CheckCircle2, Trash2, Loader2, AlertTriangle, Filter, FileText } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { ModifiedIndicator } from '@/components/trips/ModifiedIndicator'
 import Modal from '@/components/ui/Modal'
@@ -17,14 +17,12 @@ interface Trip {
   end_date: string | null
   status: string
   approval_status: string
+  needs_review: boolean
+  last_reviewed_at: string | null
   created_at: string
   supplier: { name: string } | null
   clearing_agent: { name: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
-  review_status?: string
-  review_requested_at?: string | null
-  last_reviewed_at?: string | null
-  modified_since_last_review?: boolean
 }
 
 interface Supplier { id: string; name: string }
@@ -53,6 +51,15 @@ export default function TripsPage() {
   const [clearingAgents, setClearingAgents] = useState<ClearingAgent[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [approvalFilter, setApprovalFilter] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
+  const [generatingReport, setGeneratingReport] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [workflowTrip, setWorkflowTrip] = useState<Trip | null>(null)
   const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | 'approval' | null>(null)
@@ -177,68 +184,293 @@ export default function TripsPage() {
     a.href = url; a.download = 'trips.csv'; a.click()
   }
 
+  async function generateReport(type: 'filtered' | 'full') {
+    setGeneratingReport(true)
+    const data = type === 'filtered' ? filtered : trips
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Trips Report — Hydevest</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a2e; background: #fff; }
+    .header { background: #55249E; color: white; padding: 32px 40px; }
+    .header h1 { font-size: 24px; font-weight: 700; }
+    .header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+    .meta { display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap; }
+    .meta-item { font-size: 12px; opacity: 0.9; }
+    .meta-item span { font-weight: 600; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px 40px; background: #f8f7ff; border-bottom: 1px solid #e8e0ff; }
+    .summary-card { background: white; border-radius: 8px; padding: 16px; border: 1px solid #ede9f7; }
+    .summary-card .label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+    .summary-card .value { font-size: 20px; font-weight: 700; color: #55249E; }
+    .content { padding: 24px 40px; }
+    .section-title { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead tr { background: #55249E; color: white; }
+    thead th { padding: 10px 12px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid #f0ebff; }
+    tbody tr:nth-child(even) { background: #faf8ff; }
+    tbody td { padding: 9px 12px; color: #374151; white-space: nowrap; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+    .badge-not_started { background: #f3f4f6; color: #4b5563; }
+    .badge-in_progress { background: #eff6ff; color: #1d4ed8; }
+    .badge-completed { background: #f0fdf4; color: #15803d; }
+    .badge-not_approved { background: #fffbeb; color: #b45309; }
+    .badge-reviewed { background: #eff6ff; color: #1d4ed8; }
+    .badge-approved { background: #f0fdf4; color: #15803d; }
+    .caution { display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 50%; margin-left: 4px; }
+    .footer { padding: 20px 40px; border-top: 1px solid #ede9f7; text-align: center; font-size: 11px; color: #9ca3af; margin-top: 24px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Trips Report</h1>
+    <p>Hydevest Portal — ${type === 'filtered' ? 'Filtered View' : 'Full Report'}</p>
+    <div class="meta">
+      <div class="meta-item">Generated: <span>${new Date().toLocaleString()}</span></div>
+      <div class="meta-item">Total trips: <span>${data.length}</span></div>
+      ${type === 'filtered' && activeFilters > 0 ? `<div class="meta-item">Filters applied: <span>${activeFilters}</span></div>` : ''}
+      ${statusFilter ? `<div class="meta-item">Status: <span>${statusFilter}</span></div>` : ''}
+      ${approvalFilter ? `<div class="meta-item">Approval: <span>${approvalFilter}</span></div>` : ''}
+      ${locationFilter ? `<div class="meta-item">Location: <span>${locationFilter}</span></div>` : ''}
+      ${dateFrom || dateTo ? `<div class="meta-item">Date range: <span>${dateFrom || '—'} to ${dateTo || '—'}</span></div>` : ''}
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card">
+      <div class="label">Total trips</div>
+      <div class="value">${data.length}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Not started</div>
+      <div class="value">${data.filter(t => t.status === 'not_started').length}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">In progress</div>
+      <div class="value">${data.filter(t => t.status === 'in_progress').length}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Completed</div>
+      <div class="value">${data.filter(t => t.status === 'completed').length}</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="section-title">Trip details</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Trip ID</th>
+          <th>Title</th>
+          <th>Location</th>
+          <th>Supplier</th>
+          <th>Clearing Agent</th>
+          <th>Start Date</th>
+          <th>End Date</th>
+          <th>Status</th>
+          <th>Approval</th>
+          <th>Created By</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.map(t => `
+        <tr>
+          <td><strong style="color:#55249E">${t.trip_id}</strong></td>
+          <td>
+            <strong>${t.title}</strong>
+            ${t.needs_review ? '<span class="caution" title="Modified since last review"></span>' : ''}
+          </td>
+          <td>${t.source_location ?? '—'}</td>
+          <td>${t.supplier?.name ?? '—'}</td>
+          <td>${t.clearing_agent?.name ?? '—'}</td>
+          <td>${t.start_date ? new Date(t.start_date).toLocaleDateString() : '—'}</td>
+          <td>${t.end_date ? new Date(t.end_date).toLocaleDateString() : '—'}</td>
+          <td><span class="badge badge-${t.status}">${t.status.replace('_', ' ')}</span></td>
+          <td><span class="badge badge-${t.approval_status}">${t.approval_status.replace('_', ' ')}</span></td>
+          <td>${t.created_by_profile?.full_name ?? t.created_by_profile?.email ?? '—'}</td>
+          <td>${new Date(t.created_at).toLocaleDateString()}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Hydevest Portal · Generated ${new Date().toLocaleString()} · Confidential
+  </div>
+</body>
+</html>`
+
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    if (win) win.focus()
+    setGeneratingReport(false)
+    setReportOpen(false)
+  }
+
   const filtered = trips.filter(t => {
     const matchSearch = search === '' ||
       t.title.toLowerCase().includes(search.toLowerCase()) ||
       t.trip_id.toLowerCase().includes(search.toLowerCase()) ||
-      (t.supplier?.name ?? '').toLowerCase().includes(search.toLowerCase())
+      (t.supplier?.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (t.source_location ?? '').toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === '' || t.status === statusFilter
-    return matchSearch && matchStatus
+    const matchApproval = approvalFilter === '' || t.approval_status === approvalFilter
+    const matchLocation = locationFilter === '' ||
+      (t.source_location ?? '').toLowerCase().includes(locationFilter.toLowerCase())
+    const matchSupplier = supplierFilter === '' || t.supplier?.name === supplierFilter
+    const matchDateFrom = dateFrom === '' || new Date(t.created_at) >= new Date(dateFrom)
+    const matchDateTo = dateTo === '' || new Date(t.created_at) <= new Date(dateTo + 'T23:59:59')
+    return matchSearch && matchStatus && matchApproval && matchLocation && matchSupplier && matchDateFrom && matchDateTo
   })
+
+  const activeFilters = [statusFilter, approvalFilter, locationFilter, supplierFilter, dateFrom, dateTo].filter(Boolean).length
+
+  const uniqueLocations = [...new Set(trips.map(t => t.source_location).filter(Boolean))] as string[]
+  const uniqueSuppliers = [...new Set(trips.map(t => t.supplier?.name).filter(Boolean))] as string[]
 
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Trips</h1>
           <p className="text-sm text-gray-400 mt-0.5">{trips.length} total trip{trips.length !== 1 ? 's' : ''}</p>
         </div>
         <button onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
-          <Plus size={16} /> Create trip
+          className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+          <Plus size={16} /> <span className="hidden sm:inline">Create trip</span>
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-        <div className="flex items-center gap-3 flex-wrap">
+      {/* Search + Filters */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by title, ID or supplier..."
+              placeholder="Search by title, ID, supplier or location..."
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-            <option value="">All statuses</option>
-            {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-          <button onClick={exportCSV}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-            <Download size={15} /> Export
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
+                ${showFilters || activeFilters > 0
+                  ? 'border-brand-300 bg-brand-50 text-brand-700'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter size={15} />
+              Filters
+              {activeFilters > 0 && (
+                <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                  {activeFilters}
+                </span>
+              )}
+            </button>
+            <button onClick={() => setReportOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shadow-sm">
+              <FileText size={15} /> Generate report
+            </button>
+            <button onClick={exportCSV}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              <Download size={15} /> Export
+            </button>
+          </div>
         </div>
+
+        {showFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All statuses</option>
+                {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Approval</label>
+              <select value={approvalFilter} onChange={e => setApprovalFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All approvals</option>
+                <option value="not_approved">Not approved</option>
+                <option value="reviewed">Reviewed</option>
+                <option value="approved">Approved</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Location</label>
+              <select value={locationFilter} onChange={e => setLocationFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All locations</option>
+                {uniqueLocations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Supplier</label>
+              <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">All suppliers</option>
+                {uniqueSuppliers.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Created from</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Created to</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            {activeFilters > 0 && (
+              <div className="col-span-2 md:col-span-3 lg:col-span-6 flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">
+                  {filtered.length} result{filtered.length !== 1 ? 's' : ''} · {activeFilters} filter{activeFilters !== 1 ? 's' : ''} active
+                </p>
+                <button
+                  onClick={() => {
+                    setStatusFilter('')
+                    setApprovalFilter('')
+                    setLocationFilter('')
+                    setSupplierFilter('')
+                    setDateFrom('')
+                    setDateTo('')
+                  }}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium transition-colors">
+                  Clear all filters
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-max">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Trip ID</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Title</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Location</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Supplier</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Clearing Agent</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Start</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">End</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Approval</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Trip ID</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Title</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Location</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Supplier</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Clearing Agent</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Start</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">End</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Approval</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -246,7 +478,7 @@ export default function TripsPage() {
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
                     {Array.from({ length: 10 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
+                      <td key={j} className="px-4 py-3 whitespace-nowrap">
                         <div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" />
                       </td>
                     ))}
@@ -254,7 +486,7 @@ export default function TripsPage() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center text-sm text-gray-400">
+                  <td colSpan={10} className="px-4 py-16 text-center text-sm text-gray-400 whitespace-nowrap">
                     No trips found. Create your first trip.
                   </td>
                 </tr>
@@ -265,34 +497,47 @@ export default function TripsPage() {
                     onClick={() => router.push(`/portal/purchase/trips/${trip.id}`)}
                     className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group"
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="flex items-center font-medium text-gray-900 group-hover:text-brand-700 transition-colors">
-                        {trip.title}
-                        {trip.modified_since_last_review && (
-                          <ModifiedIndicator lastReviewedAt={trip.last_reviewed_at} />
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900 group-hover:text-brand-700 transition-colors">
+                          {trip.title}
+                        </span>
+                        {trip.needs_review && (
+                          <div className="relative group/tooltip">
+                            <div className="flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 shrink-0">
+                              <AlertTriangle size={10} className="text-amber-600" />
+                            </div>
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-10">
+                              Modified since last review
+                              {trip.last_reviewed_at && (
+                                <span className="text-gray-400"> · {new Date(trip.last_reviewed_at).toLocaleDateString()}</span>
+                              )}
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                            </div>
+                          </div>
                         )}
-                      </span>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{trip.source_location ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">{trip.supplier?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">{trip.clearing_agent?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{trip.source_location ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{trip.supplier?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{trip.clearing_agent?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{trip.start_date ? new Date(trip.start_date).toLocaleDateString() : '—'}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{trip.end_date ? new Date(trip.end_date).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${statusInfo(trip.status).color}`}>
                         {statusInfo(trip.status).label}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap
                         ${trip.approval_status === 'approved' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
                         {trip.approval_status === 'approved' ? 'Approved' : 'Not approved'}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
                         {/* View */}
                         <button
@@ -484,6 +729,71 @@ export default function TripsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Report modal */}
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-9 h-9 rounded-xl bg-brand-100 flex items-center justify-center">
+                <FileText size={16} className="text-brand-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+                <p className="text-xs text-gray-400">Choose which trips to include</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <button onClick={() => setReportType('filtered')}
+                className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all
+                  ${reportType === 'filtered' ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-semibold ${reportType === 'filtered' ? 'text-brand-700' : 'text-gray-700'}`}>
+                    Filtered view
+                  </p>
+                  {reportType === 'filtered' && (
+                    <div className="w-4 h-4 rounded-full bg-brand-600 flex items-center justify-center">
+                      <div className="w-2 h-2 rounded-full bg-white" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {filtered.length} trip{filtered.length !== 1 ? 's' : ''}
+                  {activeFilters > 0 ? ` · ${activeFilters} filter${activeFilters !== 1 ? 's' : ''} active` : ' · no filters applied'}
+                </p>
+              </button>
+              <button onClick={() => setReportType('full')}
+                className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all
+                  ${reportType === 'full' ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-semibold ${reportType === 'full' ? 'text-brand-700' : 'text-gray-700'}`}>
+                    Full report
+                  </p>
+                  {reportType === 'full' && (
+                    <div className="w-4 h-4 rounded-full bg-brand-600 flex items-center justify-center">
+                      <div className="w-2 h-2 rounded-full bg-white" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">{trips.length} total trip{trips.length !== 1 ? 's' : ''}</p>
+              </button>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setReportOpen(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => generateReport(reportType)} disabled={generatingReport}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 shadow-sm">
+                {generatingReport
+                  ? <><Loader2 size={14} className="animate-spin" /> Generating…</>
+                  : <><FileText size={14} /> Generate</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

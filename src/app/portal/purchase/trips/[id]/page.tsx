@@ -880,7 +880,7 @@ export default function TripDetailPage() {
         <div className="divide-y divide-gray-50">
 
           {/* Row 1: Title + Source Location + Status readonly */}
-          <div className="grid grid-cols-3 divide-x divide-gray-50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 divide-x divide-gray-50">
             {[
               { key: 'title', label: 'Title', value: trip.title },
               { key: 'source_location', label: 'Source location', value: trip.source_location ?? '' },
@@ -926,7 +926,7 @@ export default function TripDetailPage() {
           </div>
 
           {/* Row 2: Start Date + End Date + Clearing Agent */}
-          <div className="grid grid-cols-3 divide-x divide-gray-50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 divide-x divide-gray-50">
             {[
               { key: 'start_date', label: 'Start date', value: trip.start_date ?? '', type: 'date' },
               { key: 'end_date', label: 'End date', value: trip.end_date ?? '', type: 'date' },
@@ -972,7 +972,7 @@ export default function TripDetailPage() {
           </div>
 
           {/* Row 3: Source Port + Destination Port */}
-          <div className="grid grid-cols-3 divide-x divide-gray-50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 divide-x divide-gray-50">
             {[
               { key: 'source_port', label: 'Source port', value: trip.source_port ?? '' },
               { key: 'destination_port', label: 'Destination port', value: trip.destination_port ?? '' },
@@ -1055,8 +1055,8 @@ export default function TripDetailPage() {
 
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center border-b border-gray-100">
-          <div className="flex flex-1">
+        <div className="flex items-center border-b border-gray-100 overflow-x-auto">
+          <div className="flex flex-1 min-w-max">
             {[
               { key: 'expenses', label: 'Trip Expense', count: expenses.length },
               { key: 'containers', label: 'Containers', count: containers.length },

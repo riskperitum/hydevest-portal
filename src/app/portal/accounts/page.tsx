@@ -30,7 +30,7 @@ export default function AccountsPage() {
         <p className="text-sm text-gray-400 mt-0.5">Manage all entities across the system</p>
       </div>
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex overflow-x-auto border-b border-gray-100">
+        <div className="flex overflow-x-auto border-b border-gray-100 scrollbar-hide">
           {TABS.map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium whitespace-nowrap transition-all border-b-2 -mb-px

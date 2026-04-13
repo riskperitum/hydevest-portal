@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Search, ChevronRight, CheckCircle2, X,
   Loader2, Upload, Eye, Trash2, ChevronDown
@@ -41,9 +41,12 @@ interface PalletLine {
 
 type Step = 'customer' | 'order' | 'payment'
 
-export default function CreateRecoveryPage() {
+function CreateRecoveryPageInner() {
   const router = useRouter()
-  const [currentStep, setCurrentStep] = useState<Step>('customer')
+  const searchParams = useSearchParams()
+  const prefilledOrderId = searchParams.get('orderId')
+  const prefilledCustomerId = searchParams.get('customerId')
+  const [currentStep, setCurrentStep] = useState<Step>(prefilledOrderId ? 'payment' : 'customer')
   const [saving, setSaving] = useState(false)
 
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -77,7 +80,38 @@ export default function CreateRecoveryPage() {
 
   useEffect(() => {
     const supabase = createClient()
-    // Only customers with outstanding balance
+
+    // If prefilled from drilldown, load directly
+    if (prefilledOrderId && prefilledCustomerId) {
+      const one = <T,>(v: T | T[] | null | undefined): T | null => {
+        if (v == null) return null
+        return Array.isArray(v) ? (v[0] ?? null) : v
+      }
+      Promise.all([
+        supabase.from('customers').select('id, customer_id, name, phone').eq('id', prefilledCustomerId).single(),
+        supabase.from('sales_orders').select(`
+          id, order_id, sale_type, customer_payable, amount_paid,
+          outstanding_balance, payment_status, created_at,
+          container:containers(tracking_number, container_id)
+        `).eq('id', prefilledOrderId).single(),
+        supabase.from('recoveries').select('sales_order_id, amount_paid').eq('sales_order_id', prefilledOrderId),
+        supabase.from('sales_order_pallets').select('*').eq('order_id', prefilledOrderId),
+      ]).then(([{ data: cust }, { data: ord }, { data: recs }, { data: pl }]) => {
+        if (cust) setSelectedCustomer(cust as Customer)
+        if (ord) {
+          const totalRecovered = (recs ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
+          setSelectedOrder({
+            ...ord,
+            container: one(ord.container),
+            pallet_lines: (pl ?? []) as PalletLine[],
+            total_recovered: totalRecovered,
+          } as SalesOrder)
+        }
+        setCurrentStep('payment')
+      })
+      return
+    }
+
     supabase.from('sales_orders')
       .select('customer_id')
       .in('payment_status', ['outstanding', 'partial'])
@@ -90,7 +124,7 @@ export default function CreateRecoveryPage() {
           .eq('is_active', true)
           .then(({ data }) => setCustomers(data ?? []))
       })
-  }, [])
+  }, [prefilledOrderId, prefilledCustomerId])
 
   async function selectCustomer(c: Customer) {
     setSelectedCustomer(c)
@@ -543,5 +577,13 @@ export default function CreateRecoveryPage() {
         </form>
       )}
     </div>
+  )
+}
+
+export default function CreateRecoveryPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>}>
+      <CreateRecoveryPageInner />
+    </Suspense>
   )
 }

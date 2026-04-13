@@ -168,6 +168,9 @@ export default function CreateSalesOrderPage() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
+    const paidAmount = parseFloat(amountPaid) || 0
+    const paymentStatus = paidAmount <= 0 ? 'outstanding' : outstandingBalance <= 0 ? 'paid' : 'partial'
+
     const { data: order, error } = await supabase.from('sales_orders').insert({
       container_id: selectedContainer.id,
       presale_id: selectedPresale.id,
@@ -177,9 +180,12 @@ export default function CreateSalesOrderPage() {
       discount: parseFloat(discount) || 0,
       overages: parseFloat(overages) || 0,
       customer_payable: customerPayable,
-      amount_paid: parseFloat(amountPaid) || 0,
+      amount_paid: paidAmount,
       outstanding_balance: outstandingBalance,
       payment_method: paymentMethod,
+      payment_status: paymentStatus,
+      approval_status: 'pending',
+      needs_approval: true,
       created_by: user?.id,
     }).select().single()
 
@@ -202,6 +208,13 @@ export default function CreateSalesOrderPage() {
           .update({ pallets_sold: (dist?.pallets_sold ?? 0) + palletsSold })
           .eq('id', line.distribution_id)
       }
+    }
+    if (!error && order) {
+      await supabase.from('sales_order_activity_log').insert({
+        order_id: order.id,
+        action: 'Sale recorded',
+        performed_by: user?.id,
+      })
     }
     setSaving(false)
     if (!error) router.push('/portal/sales/orders')

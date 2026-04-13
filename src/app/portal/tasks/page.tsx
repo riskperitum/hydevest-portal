@@ -169,6 +169,24 @@ export default function TasksPage() {
           await supabase.from('sales_orders').delete().eq('id', selectedTask.record_id)
         }
       }
+      if (selectedTask.type === 'delete_approval' && action === 'approved') {
+        if (selectedTask.module === 'recoveries') {
+          // Delete the recovery and recalculate order totals
+          const { data: rec } = await supabase.from('recoveries').select('sales_order_id, amount_paid').eq('recovery_id', selectedTask.record_ref ?? '').single()
+          if (rec) {
+            await supabase.from('recoveries').delete().eq('recovery_id', selectedTask.record_ref ?? '')
+            const { data: remaining } = await supabase.from('recoveries').select('amount_paid').eq('sales_order_id', rec.sales_order_id)
+            const { data: order } = await supabase.from('sales_orders').select('customer_payable').eq('id', rec.sales_order_id).single()
+            const newTotal = (remaining ?? []).reduce((s: number, r: { amount_paid: number }) => s + Number(r.amount_paid), 0)
+            const newOutstanding = Math.max(Number(order?.customer_payable ?? 0) - newTotal, 0)
+            await supabase.from('sales_orders').update({
+              amount_paid: newTotal,
+              outstanding_balance: newOutstanding,
+              payment_status: newOutstanding <= 0 ? 'paid' : newTotal > 0 ? 'partial' : 'outstanding',
+            }).eq('id', rec.sales_order_id)
+          }
+        }
+      }
     }
 
     // Notify the requester
@@ -198,6 +216,9 @@ export default function TasksPage() {
     }
     if (task.module === 'sales_orders' && task.record_id) {
       router.push(`/portal/sales/orders/${task.record_id}`)
+    }
+    if (task.module === 'recoveries' && task.record_id) {
+      router.push(`/portal/recoveries/${task.record_id}`)
     }
   }
 

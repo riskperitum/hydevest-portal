@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Search, Loader2, X, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Search, Loader2, X, CheckCircle2, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 
@@ -51,8 +51,11 @@ interface PalletLine {
   selling_price_per_piece: string
 }
 
+type Step = 'container' | 'customer' | 'details'
+
 export default function CreateSalesOrderPage() {
   const router = useRouter()
+  const [currentStep, setCurrentStep] = useState<Step>('container')
   const [saving, setSaving] = useState(false)
 
   const [containers, setContainers] = useState<Container[]>([])
@@ -69,14 +72,11 @@ export default function CreateSalesOrderPage() {
   const [savingCustomer, setSavingCustomer] = useState(false)
 
   const [saleAmount, setSaleAmount] = useState('')
-  const [discount, setDiscount] = useState('0')
-  const [overages, setOverages] = useState('0')
-  const [amountPaid, setAmountPaid] = useState('0')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [discount, setDiscount] = useState('')
+  const [overages, setOverages] = useState('')
+  const [amountPaid, setAmountPaid] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('transfer')
   const [palletLines, setPalletLines] = useState<PalletLine[]>([])
-
-  // Step tracking
-  const step = !selectedContainer ? 1 : !selectedCustomer ? 2 : 3
 
   useEffect(() => {
     const supabase = createClient()
@@ -120,6 +120,7 @@ export default function CreateSalesOrderPage() {
       })))
     }
     setLoadingPresale(false)
+    setCurrentStep('customer')
   }
 
   async function handleAddCustomer(e: React.FormEvent) {
@@ -137,13 +138,11 @@ export default function CreateSalesOrderPage() {
     setNewCustomer({ name: '', phone: '', address: '' })
   }
 
-  const splitSaleAmount = palletLines.reduce((s, l) => {
-    return s + (parseInt(l.pallets_to_sell) || 0) * l.pallet_pieces * (parseFloat(l.selling_price_per_piece) || 0)
-  }, 0)
+  const splitSaleAmount = palletLines.reduce((s, l) =>
+    s + (parseInt(l.pallets_to_sell) || 0) * l.pallet_pieces * (parseFloat(l.selling_price_per_piece) || 0), 0)
 
   const effectiveSaleAmount = selectedPresale?.sale_type === 'split_sale'
     ? splitSaleAmount : parseFloat(saleAmount) || 0
-
   const customerPayable = effectiveSaleAmount - (parseFloat(discount) || 0) + (parseFloat(overages) || 0)
   const outstandingBalance = Math.max(customerPayable - (parseFloat(amountPaid) || 0), 0)
 
@@ -208,336 +207,348 @@ export default function CreateSalesOrderPage() {
     if (!error) router.push('/portal/sales/orders')
   }
 
+  const steps: { key: Step; label: string }[] = [
+    { key: 'container', label: 'Container' },
+    { key: 'customer', label: 'Customer' },
+    { key: 'details', label: 'Sale details' },
+  ]
+
+  const stepDone = (s: Step) => {
+    if (s === 'container') return !!selectedContainer
+    if (s === 'customer') return !!selectedCustomer
+    return false
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
-      <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <Link href="/portal/sales/orders"
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-            <ArrowLeft size={18} />
-          </Link>
-          <div>
-            <h1 className="text-base font-semibold text-gray-900">Record sale</h1>
-            <div className="flex items-center gap-2 mt-0.5">
+    <div className="max-w-2xl mx-auto space-y-6 pb-12">
+
+      {/* Header */}
+      <div className="flex items-center gap-3 pt-2">
+        <Link href="/portal/sales/orders"
+          className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+          <ArrowLeft size={18} />
+        </Link>
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Record sale</h1>
+          <p className="text-sm text-gray-400">Complete all steps to record a customer sale</p>
+        </div>
+      </div>
+
+      {/* Step tracker */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <div className="flex items-center gap-2">
+          {steps.map((s, i) => (
+            <div key={s.key} className="flex items-center gap-2 flex-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (s.key === 'container') setCurrentStep('container')
+                  if (s.key === 'customer' && selectedContainer) setCurrentStep('customer')
+                  if (s.key === 'details' && selectedContainer && selectedCustomer) setCurrentStep('details')
+                }}
+                className={`flex items-center gap-2 flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all
+                  ${currentStep === s.key ? 'bg-brand-50 text-brand-700' : stepDone(s.key) ? 'text-green-600' : 'text-gray-400'}`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors
+                  ${stepDone(s.key) ? 'bg-green-100 text-green-600' : currentStep === s.key ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                  {stepDone(s.key) ? '✓' : i + 1}
+                </div>
+                <span className="hidden sm:block">{s.label}</span>
+              </button>
+              {i < steps.length - 1 && (
+                <ChevronRight size={14} className={`shrink-0 ${stepDone(s.key) ? 'text-green-400' : 'text-gray-200'}`} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Selected summary */}
+        {(selectedContainer || selectedCustomer) && (
+          <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100 flex-wrap">
+            {selectedContainer && (
+              <div className="flex items-center gap-1.5 text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full border border-green-200">
+                <CheckCircle2 size={11} />
+                <span className="font-medium">{selectedContainer.tracking_number ?? selectedContainer.container_id}</span>
+                <button type="button" onClick={() => { setSelectedContainer(null); setSelectedPresale(null); setSelectedCustomer(null); setCurrentStep('container') }}
+                  className="ml-0.5 text-green-500 hover:text-green-700">
+                  <X size={11} />
+                </button>
+              </div>
+            )}
+            {selectedCustomer && (
+              <div className="flex items-center gap-1.5 text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full border border-green-200">
+                <CheckCircle2 size={11} />
+                <span className="font-medium">{selectedCustomer.name}</span>
+                <button type="button" onClick={() => { setSelectedCustomer(null); setCurrentStep('customer') }}
+                  className="ml-0.5 text-green-500 hover:text-green-700">
+                  <X size={11} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* STEP 1 — Container */}
+      {currentStep === 'container' && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700">Select container</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Only containers with an active presale are shown</p>
+          </div>
+          <div className="p-4">
+            <div className="relative mb-3">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={containerSearch} onChange={e => setContainerSearch(e.target.value)}
+                placeholder="Search by tracking number..."
+                className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+          </div>
+          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+            {filteredContainers.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-gray-400">No presaled containers available</p>
+            ) : filteredContainers.map(c => (
+              <button key={c.id} type="button" onClick={() => selectContainer(c)}
+                className="w-full text-left px-5 py-3.5 hover:bg-brand-50/50 transition-colors flex items-center justify-between gap-3 group">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-700">{c.tracking_number ?? c.container_id}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{c.container_id} · {c.trip?.trip_id} — {c.trip?.title}</p>
+                </div>
+                <ChevronRight size={16} className="text-gray-300 group-hover:text-brand-400 shrink-0" />
+              </button>
+            ))}
+          </div>
+          {loadingPresale && (
+            <div className="px-5 py-4 flex items-center gap-2 text-sm text-gray-400 border-t border-gray-100">
+              <Loader2 size={14} className="animate-spin" /> Loading presale...
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STEP 2 — Customer */}
+      {currentStep === 'customer' && selectedPresale && (
+        <div className="space-y-4">
+          {/* Presale summary */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700">Presale summary</h2>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${selectedPresale.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+                {selectedPresale.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                { n: 1, label: 'Container' },
-                { n: 2, label: 'Customer' },
-                { n: 3, label: 'Details' },
-              ].map((s, i) => (
-                <div key={s.n} className="flex items-center gap-1.5">
-                  {i > 0 && <div className={`w-8 h-px ${step > i ? 'bg-brand-400' : 'bg-gray-200'}`} />}
-                  <div className={`flex items-center gap-1 text-xs font-medium ${step === s.n ? 'text-brand-600' : step > s.n ? 'text-green-600' : 'text-gray-400'}`}>
-                    <div className={`w-4 h-4 rounded-full flex items-center justify-center text-xs
-                      ${step > s.n ? 'bg-green-100 text-green-600' : step === s.n ? 'bg-brand-100 text-brand-600' : 'bg-gray-100 text-gray-400'}`}>
-                      {step > s.n ? '✓' : s.n}
-                    </div>
-                    {s.label}
-                  </div>
+                { label: 'Presale ID', value: selectedPresale.presale_id },
+                { label: 'W/H avg weight', value: selectedPresale.warehouse_confirmed_avg_weight ? `${selectedPresale.warehouse_confirmed_avg_weight} kg` : '—' },
+                { label: 'W/H pieces', value: selectedPresale.warehouse_confirmed_pieces?.toLocaleString() ?? '—' },
+                { label: 'Price / piece', value: selectedPresale.price_per_piece ? fmt(selectedPresale.price_per_piece) : '—' },
+                { label: 'Price / kilo', value: selectedPresale.price_per_kilo ? fmt(selectedPresale.price_per_kilo) : '—' },
+                { label: 'Expected revenue', value: selectedPresale.expected_sale_revenue ? fmt(selectedPresale.expected_sale_revenue) : '—' },
+                { label: 'Status', value: selectedPresale.status },
+                ...(selectedPresale.sale_type === 'split_sale' ? [{ label: 'Total pallets', value: selectedPresale.total_number_of_pallets?.toString() ?? '—' }] : []),
+              ].map(item => (
+                <div key={item.label}>
+                  <p className="text-xs text-gray-400 mb-0.5">{item.label}</p>
+                  <p className="text-sm font-medium text-gray-900">{item.value}</p>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-        <Link href="/portal/sales/orders"
-          className="text-sm text-gray-500 hover:text-gray-700 transition-colors">
-          Cancel
-        </Link>
-      </div>
 
-      <div className="flex h-[calc(100vh-73px)]">
-
-        {/* LEFT PANEL — Selections */}
-        <div className="w-96 bg-white border-r border-gray-100 flex flex-col shrink-0">
-
-          {/* Step 1: Container */}
-          <div className="p-4 border-b border-gray-100">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              1 · Select container
-            </p>
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={containerSearch}
-                onChange={e => setContainerSearch(e.target.value)}
-                placeholder="Search tracking number..."
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
+          {/* Customer selection */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700">Select customer</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Search by name, phone number or customer ID</p>
+              </div>
+              <button type="button" onClick={() => setAddCustomerOpen(true)}
+                className="text-xs text-brand-600 hover:underline font-medium">+ New customer</button>
             </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-            {filteredContainers.length === 0 ? (
-              <div className="p-8 text-center text-sm text-gray-400">No presaled containers available</div>
-            ) : filteredContainers.map(c => (
-              <button key={c.id} type="button"
-                onClick={() => selectContainer(c)}
-                className={`w-full text-left px-4 py-3 hover:bg-brand-50/50 transition-colors flex items-center justify-between gap-2
-                  ${selectedContainer?.id === c.id ? 'bg-brand-50 border-l-2 border-brand-600' : ''}`}>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{c.tracking_number ?? c.container_id}</p>
-                  <p className="text-xs text-gray-400 truncate">{c.container_id} · {c.trip?.trip_id}</p>
-                </div>
-                {selectedContainer?.id === c.id && (
-                  <CheckCircle2 size={16} className="text-brand-600 shrink-0" />
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Step 2: Customer */}
-          {selectedContainer && (
-            <>
-              <div className="p-4 border-t border-gray-200 bg-gray-50/50">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">2 · Select customer</p>
-                  <button type="button" onClick={() => setAddCustomerOpen(true)}
-                    className="text-xs text-brand-600 hover:underline font-medium">+ New</button>
-                </div>
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    value={customerSearch}
-                    onChange={e => setCustomerSearch(e.target.value)}
-                    placeholder="Search name, phone or ID..."
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-                  />
-                </div>
+            <div className="p-4">
+              <div className="relative mb-3">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Search customer..."
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
-              <div className="max-h-52 overflow-y-auto divide-y divide-gray-50 border-t border-gray-100">
-                {filteredCustomers.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-gray-400">No customers found</div>
-                ) : filteredCustomers.map(c => (
-                  <button key={c.id} type="button"
-                    onClick={() => setSelectedCustomer(c)}
-                    className={`w-full text-left px-4 py-2.5 hover:bg-brand-50/50 transition-colors flex items-center justify-between gap-2
-                      ${selectedCustomer?.id === c.id ? 'bg-brand-50 border-l-2 border-brand-600' : ''}`}>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.customer_id}{c.phone ? ` · ${c.phone}` : ''}</p>
-                    </div>
-                    {selectedCustomer?.id === c.id && (
-                      <CheckCircle2 size={15} className="text-brand-600 shrink-0" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* RIGHT PANEL — Details */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {!selectedContainer && (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center">
-                <Search size={24} className="text-gray-300" />
-              </div>
-              <p className="text-gray-500 font-medium">Select a container to start</p>
-              <p className="text-sm text-gray-400">Search and select a presaled container from the left panel</p>
             </div>
-          )}
-
-          {selectedContainer && loadingPresale && (
-            <div className="flex items-center justify-center h-32 gap-2 text-gray-400">
-              <Loader2 size={18} className="animate-spin" /> Loading presale information...
-            </div>
-          )}
-
-          {selectedContainer && selectedPresale && !loadingPresale && (
-            <form onSubmit={handleSubmit} className="space-y-5 max-w-2xl">
-
-              {/* Presale info */}
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Presale information</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {[
-                    { label: 'Presale ID', value: selectedPresale.presale_id },
-                    { label: 'Type', value: selectedPresale.sale_type === 'box_sale' ? 'Box sale' : 'Split sale' },
-                    { label: 'Status', value: selectedPresale.status },
-                    { label: 'W/H avg weight', value: selectedPresale.warehouse_confirmed_avg_weight ? `${selectedPresale.warehouse_confirmed_avg_weight} kg` : '—' },
-                    { label: 'W/H pieces', value: selectedPresale.warehouse_confirmed_pieces?.toLocaleString() ?? '—' },
-                    { label: 'Price / piece', value: selectedPresale.price_per_piece ? fmt(selectedPresale.price_per_piece) : '—' },
-                    { label: 'Price / kilo', value: selectedPresale.price_per_kilo ? fmt(selectedPresale.price_per_kilo) : '—' },
-                    { label: 'Expected revenue', value: selectedPresale.expected_sale_revenue ? fmt(selectedPresale.expected_sale_revenue) : '—' },
-                    ...(selectedPresale.sale_type === 'split_sale' ? [{ label: 'Total pallets', value: selectedPresale.total_number_of_pallets?.toString() ?? '—' }] : []),
-                  ].map(item => (
-                    <div key={item.label}>
-                      <p className="text-xs text-gray-400 mb-0.5">{item.label}</p>
-                      <p className="text-sm font-medium text-gray-900">{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Customer selected info */}
-              {selectedCustomer && (
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+            <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+              {filteredCustomers.length === 0 ? (
+                <p className="px-5 py-8 text-center text-sm text-gray-400">No customers found</p>
+              ) : filteredCustomers.map(c => (
+                <button key={c.id} type="button"
+                  onClick={() => { setSelectedCustomer(c); setCurrentStep('details') }}
+                  className="w-full text-left px-5 py-3.5 hover:bg-brand-50/50 transition-colors flex items-center justify-between gap-3 group">
                   <div>
-                    <p className="text-xs text-gray-400 mb-0.5">Customer</p>
-                    <p className="text-sm font-semibold text-gray-900">{selectedCustomer.name}</p>
-                    <p className="text-xs text-gray-400">{selectedCustomer.customer_id}{selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ''}</p>
+                    <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-700">{c.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{c.customer_id}{c.phone ? ` · ${c.phone}` : ''}</p>
                   </div>
-                  <button type="button" onClick={() => setSelectedCustomer(null)}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              {!selectedCustomer && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700 font-medium">
-                  ← Select a customer from the left panel to continue
-                </div>
-              )}
-
-              {/* Split sale pallet selection */}
-              {selectedCustomer && selectedPresale.sale_type === 'split_sale' && (
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50">
-                    <h2 className="text-sm font-semibold text-gray-700">Pallet selection</h2>
-                    <p className="text-xs text-gray-400 mt-0.5">Enter pallets to sell and selling price per piece</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-100">
-                          {['Pallet type', 'Available', 'Pallets to sell', 'Sell price/pc (₦)', 'Total pieces', 'Line total'].map(h => (
-                            <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {palletLines.map((line, idx) => {
-                          const pallets = parseInt(line.pallets_to_sell) || 0
-                          const price = parseFloat(line.selling_price_per_piece) || 0
-                          const totalPieces = pallets * line.pallet_pieces
-                          const lineTotal = totalPieces * price
-                          return (
-                            <tr key={idx} className="border-b border-gray-50">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900">{line.pallet_pieces.toLocaleString()} pcs</td>
-                              <td className="px-4 py-3 text-sm text-gray-500">{line.available_pallets}</td>
-                              <td className="px-4 py-3">
-                                <input type="number" min="0" max={line.available_pallets}
-                                  value={line.pallets_to_sell}
-                                  onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, pallets_to_sell: e.target.value } : l))}
-                                  className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                                  placeholder="0" />
-                              </td>
-                              <td className="px-4 py-3">
-                                <input type="number" step="0.01"
-                                  value={line.selling_price_per_piece}
-                                  onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, selling_price_per_piece: e.target.value } : l))}
-                                  className="w-28 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                                  placeholder="0" />
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-700">{totalPieces > 0 ? totalPieces.toLocaleString() : '—'}</td>
-                              <td className="px-4 py-3 text-sm font-semibold text-brand-700">{lineTotal > 0 ? fmt(lineTotal) : '—'}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr className="bg-gray-50 border-t-2 border-gray-200">
-                          <td colSpan={4} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase">Total</td>
-                          <td className="px-4 py-2.5 text-xs font-bold text-gray-700">
-                            {palletLines.reduce((s, l) => s + (parseInt(l.pallets_to_sell) || 0) * l.pallet_pieces, 0).toLocaleString()} pcs
-                          </td>
-                          <td className="px-4 py-2.5 text-xs font-bold text-brand-700">{splitSaleAmount > 0 ? fmt(splitSaleAmount) : '—'}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Sale details */}
-              {selectedCustomer && (
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
-                  <h2 className="text-sm font-semibold text-gray-700">Sale details</h2>
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedPresale.sale_type === 'box_sale' && (
-                      <div className="col-span-2">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5">Sale amount (₦) <span className="text-red-400">*</span></label>
-                        <input required type="number" step="0.01" value={saleAmount}
-                          onChange={e => setSaleAmount(e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                          placeholder="₦0.00" />
-                      </div>
-                    )}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Payment method</label>
-                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                        <option value="cash">Cash</option>
-                        <option value="transfer">Transfer</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Discount (₦)</label>
-                      <input type="number" step="0.01" value={discount}
-                        onChange={e => setDiscount(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="₦0.00" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Overages (₦)</label>
-                      <input type="number" step="0.01" value={overages}
-                        onChange={e => setOverages(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="₦0.00" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount paid / deposit (₦)</label>
-                      <input type="number" step="0.01" value={amountPaid}
-                        onChange={e => setAmountPaid(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="₦0.00" />
-                    </div>
-                  </div>
-
-                  {/* Summary */}
-                  <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Payment summary</p>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Sale amount</span>
-                      <span className="font-medium">{effectiveSaleAmount > 0 ? fmt(effectiveSaleAmount) : '—'}</span>
-                    </div>
-                    {parseFloat(discount) > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Discount</span>
-                        <span className="text-red-500 font-medium">-{fmt(parseFloat(discount))}</span>
-                      </div>
-                    )}
-                    {parseFloat(overages) > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Overages</span>
-                        <span className="text-green-600 font-medium">+{fmt(parseFloat(overages))}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-                      <span className="font-semibold text-gray-700">Customer payable</span>
-                      <span className="font-bold text-lg text-gray-900">{customerPayable > 0 ? fmt(customerPayable) : '—'}</span>
-                    </div>
-                    <div className={`flex justify-between text-sm pt-2 border-t border-gray-200`}>
-                      <span className="font-semibold text-gray-700">Outstanding balance</span>
-                      <span className={`font-bold ${outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {fmt(outstandingBalance)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button type="submit"
-                    disabled={saving || effectiveSaleAmount <= 0}
-                    className="w-full px-4 py-3 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
-                    {saving ? <><Loader2 size={14} className="animate-spin" /> Recording sale…</> : 'Record sale'}
-                  </button>
-                </div>
-              )}
-            </form>
-          )}
+                  <ChevronRight size={16} className="text-gray-300 group-hover:text-brand-400 shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* STEP 3 — Sale details */}
+      {currentStep === 'details' && selectedPresale && selectedCustomer && (
+        <form onSubmit={handleSubmit} className="space-y-5">
+
+          {/* Split sale pallet selection */}
+          {selectedPresale.sale_type === 'split_sale' && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100">
+                <h2 className="text-sm font-semibold text-gray-700">Pallet selection</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Enter pallets purchased and selling price per piece for each pallet type</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['Pallet type', 'Available', 'Pallets purchased', 'Sell price/pc (₦)', 'Total pieces', 'Line total'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {palletLines.map((line, idx) => {
+                      const pallets = parseInt(line.pallets_to_sell) || 0
+                      const price = parseFloat(line.selling_price_per_piece) || 0
+                      const totalPieces = pallets * line.pallet_pieces
+                      const lineTotal = totalPieces * price
+                      return (
+                        <tr key={idx} className="border-b border-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{line.pallet_pieces.toLocaleString()} pcs/pallet</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{line.available_pallets}</td>
+                          <td className="px-4 py-3">
+                            <input type="number" min="0" max={line.available_pallets}
+                              value={line.pallets_to_sell}
+                              onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, pallets_to_sell: e.target.value } : l))}
+                              className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              placeholder="0" />
+                          </td>
+                          <td className="px-4 py-3">
+                            <input type="number" step="0.01"
+                              value={line.selling_price_per_piece}
+                              onChange={e => setPalletLines(lines => lines.map((l, i) => i === idx ? { ...l, selling_price_per_piece: e.target.value } : l))}
+                              className="w-28 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              placeholder="0" />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">{totalPieces > 0 ? totalPieces.toLocaleString() : '—'}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-brand-700">{lineTotal > 0 ? fmt(lineTotal) : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-200">
+                      <td colSpan={4} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase">Total</td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-gray-700">
+                        {palletLines.reduce((s, l) => s + (parseInt(l.pallets_to_sell) || 0) * l.pallet_pieces, 0).toLocaleString()} pcs
+                      </td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-brand-700">{splitSaleAmount > 0 ? fmt(splitSaleAmount) : '—'}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Sale details */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-gray-700">Sale details</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {selectedPresale.sale_type === 'box_sale' && (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Sale amount (₦) <span className="text-red-400">*</span></label>
+                  <input type="number" step="0.01" value={saleAmount} onChange={e => setSaleAmount(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    placeholder="Enter sale amount" />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Payment method</label>
+                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                  <option value="transfer">Bank transfer</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Discount (₦)</label>
+                <input type="number" step="0.01" value={discount} onChange={e => setDiscount(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Overages (₦)</label>
+                <input type="number" step="0.01" value={overages} onChange={e => setOverages(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount paid / deposit (₦)</label>
+                <input type="number" step="0.01" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="0.00" />
+              </div>
+            </div>
+
+            {/* Payment summary */}
+            {effectiveSaleAmount > 0 && (
+              <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2.5">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Payment summary</p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Sale amount</span>
+                  <span className="font-medium text-gray-900">{fmt(effectiveSaleAmount)}</span>
+                </div>
+                {parseFloat(discount) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Discount</span>
+                    <span className="text-red-500 font-medium">-{fmt(parseFloat(discount))}</span>
+                  </div>
+                )}
+                {parseFloat(overages) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Overages</span>
+                    <span className="text-green-600 font-medium">+{fmt(parseFloat(overages))}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
+                  <span className="font-semibold text-gray-700">Customer payable</span>
+                  <span className="font-bold text-gray-900">{fmt(customerPayable)}</span>
+                </div>
+                {parseFloat(amountPaid) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Amount paid</span>
+                    <span className="text-green-600 font-medium">-{fmt(parseFloat(amountPaid))}</span>
+                  </div>
+                )}
+                <div className={`flex justify-between text-sm pt-2 border-t border-gray-200`}>
+                  <span className="font-semibold text-gray-700">Outstanding balance</span>
+                  <span className={`font-bold text-base ${outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {fmt(outstandingBalance)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button type="button" onClick={() => setCurrentStep('customer')}
+              className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
+              Back
+            </button>
+            <button type="submit" disabled={saving || effectiveSaleAmount <= 0}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Recording…</> : 'Record sale'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Add customer modal */}
       <Modal open={addCustomerOpen} onClose={() => setAddCustomerOpen(false)} title="Add new customer" size="sm">

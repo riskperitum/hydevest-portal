@@ -507,8 +507,9 @@ export default function InventoryPage() {
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-brand-100">
-                  <td colSpan={5} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">
-                    Totals across {filtered.length} container{filtered.length !== 1 ? 's' : ''}
+                  <td className="px-3 py-3" />
+                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">
+                    Totals — {filtered.length} container{filtered.length !== 1 ? 's' : ''}
                   </td>
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pieces_purchased, 0).toLocaleString()} pcs

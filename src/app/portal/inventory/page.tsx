@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
@@ -338,8 +338,8 @@ export default function InventoryPage() {
                 const hasDetails = row.sale_type === 'split_sale' && row.pallet_distributions.length > 0
 
                 return (
-                  <>
-                    <tr key={row.container_db_id}
+                  <React.Fragment key={row.container_db_id}>
+                    <tr
                       className={`border-b border-gray-50 transition-colors
                         ${isExpanded ? 'bg-brand-50/20' : 'hover:bg-gray-50/50'}`}>
                       <td className="px-3 py-3">
@@ -410,7 +410,7 @@ export default function InventoryPage() {
 
                     {/* Expanded pallet distribution rows */}
                     {isExpanded && hasDetails && (
-                      <tr key={`${row.container_db_id}-expanded`} className="border-b border-gray-100 bg-brand-50/10">
+                      <tr className="border-b border-gray-100 bg-brand-50/10">
                         <td colSpan={14} className="px-6 py-4">
                           <div className="ml-4">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -498,7 +498,7 @@ export default function InventoryPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 )
               })}
             </tbody>

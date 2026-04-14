@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
   Package, Layers, TrendingDown, CheckCircle2,
-  Clock, Search, Filter, Eye, ChevronDown, ChevronUp
+  Clock, Search, Filter, Eye, ChevronDown, ChevronUp,
+  FileText, Download
 } from 'lucide-react'
 
 interface ContainerInventory {
@@ -64,6 +65,8 @@ export default function InventoryPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [saleTypeFilter, setSaleTypeFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
@@ -187,6 +190,141 @@ export default function InventoryPage() {
     setLoading(false)
   }, [])
 
+  function generateReport(type: 'filtered' | 'full') {
+    const data = type === 'filtered' ? filtered : inventory
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Inventory Report — Hydevest</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:-apple-system,sans-serif;color:#1a1a2e}
+      .header{background:#55249E;color:white;padding:32px 40px}
+      .header h1{font-size:24px;font-weight:700}
+      .header p{font-size:13px;opacity:.8;margin-top:4px}
+      .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 40px;background:#f8f7ff;border-bottom:1px solid #e8e0ff}
+      .card{background:white;border-radius:8px;padding:16px;border:1px solid #ede9f7}
+      .card .label{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+      .card .value{font-size:20px;font-weight:700;color:#55249E}
+      .content{padding:24px 40px}
+      .section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#374151;margin-bottom:12px;margin-top:24px}
+      table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px}
+      thead tr{background:#55249E;color:white}
+      thead th{padding:10px 12px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap}
+      tbody tr{border-bottom:1px solid #f0ebff}
+      tbody tr:nth-child(even){background:#faf8ff}
+      tbody td{padding:9px 12px;color:#374151;white-space:nowrap}
+      .badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600}
+      .badge-no_presale{background:#f3f4f6;color:#4b5563}
+      .badge-presaled_unsold{background:#eff6ff;color:#1d4ed8}
+      .badge-partially_sold{background:#fffbeb;color:#b45309}
+      .badge-fully_sold{background:#f0fdf4;color:#15803d}
+      .sub-table{margin:0 0 8px 0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
+      .sub-table thead tr{background:#6d4fc2}
+      .footer{padding:20px 40px;border-top:1px solid #ede9f7;text-align:center;font-size:11px;color:#9ca3af;margin-top:24px}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body>
+    <div class="header">
+      <h1>Inventory Report</h1>
+      <p>Hydevest Portal — ${type === 'filtered' ? 'Filtered View' : 'Full Report'} · Generated ${new Date().toLocaleString()}</p>
+    </div>
+    <div class="summary">
+      <div class="card"><div class="label">Total containers</div><div class="value">${data.length}</div></div>
+      <div class="card"><div class="label">Pieces remaining</div><div class="value">${data.reduce((s,r)=>s+r.pieces_remaining,0).toLocaleString()}</div></div>
+      <div class="card"><div class="label">Pallets available</div><div class="value">${data.reduce((s,r)=>s+r.pallets_available,0)} / ${data.reduce((s,r)=>s+r.pallets_total,0)}</div></div>
+      <div class="card"><div class="label">Fully sold</div><div class="value">${data.filter(r=>r.inventory_status==='fully_sold').length}</div></div>
+    </div>
+    <div class="content">
+      <div class="section-title">Container inventory</div>
+      <table><thead><tr>
+        <th>Container</th><th>Tracking No.</th><th>Trip</th><th>Sale type</th><th>Status</th>
+        <th>Pcs purchased</th><th>W/H pcs</th><th>Pcs sold</th><th>Pcs remaining</th>
+        <th>Pallets total</th><th>Pallets sold</th><th>Pallets avail</th><th>Orders</th>
+      </tr></thead><tbody>
+      ${data.map(r=>`<tr>
+        <td><strong style="color:#55249E">${r.container_id}</strong></td>
+        <td>${r.tracking_number??'—'}</td>
+        <td>${r.trip?.trip_id??'—'}</td>
+        <td>${r.sale_type?r.sale_type==='box_sale'?'Box sale':'Split sale':'—'}</td>
+        <td><span class="badge badge-${r.inventory_status}">${INVENTORY_STATUS_CONFIG[r.inventory_status].label}</span></td>
+        <td>${r.pieces_purchased.toLocaleString()}</td>
+        <td>${r.warehouse_confirmed_pieces?.toLocaleString()??'—'}</td>
+        <td>${r.pieces_sold>0?r.pieces_sold.toLocaleString():'—'}</td>
+        <td><strong>${r.pieces_remaining.toLocaleString()}</strong></td>
+        <td>${r.pallets_total>0?r.pallets_total:'—'}</td>
+        <td>${r.pallets_sold>0?r.pallets_sold:'—'}</td>
+        <td><strong>${r.pallets_available>0?r.pallets_available:'—'}</strong></td>
+        <td>${r.total_orders}</td>
+      </tr>
+      ${r.pallet_distributions.length>0?`
+      <tr><td colspan="13" style="padding:8px 12px;background:#f8f7ff">
+        <table class="sub-table" style="width:100%"><thead><tr>
+          <th>Pallet type</th><th>Total pallets</th><th>Sold</th><th>Available</th><th>Total pieces</th><th>Pieces sold</th><th>Pieces remaining</th>
+        </tr></thead><tbody>
+        ${r.pallet_distributions.map(pd=>`<tr>
+          <td>${pd.pallet_pieces.toLocaleString()} pcs/pallet</td>
+          <td>${pd.number_of_pallets}</td>
+          <td>${pd.pallets_sold}</td>
+          <td><strong>${pd.pallets_available}</strong></td>
+          <td>${(pd.pallet_pieces*pd.number_of_pallets).toLocaleString()}</td>
+          <td>${(pd.pallet_pieces*pd.pallets_sold).toLocaleString()}</td>
+          <td><strong>${(pd.pallet_pieces*pd.pallets_available).toLocaleString()}</strong></td>
+        </tr>`).join('')}
+        </tbody></table>
+      </td></tr>`:''}
+      `).join('')}
+      </tbody>
+      <tfoot><tr style="background:#55249E;color:white">
+        <td colspan="5" style="padding:10px 12px;font-weight:700;font-size:11px;text-transform:uppercase">Totals</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pieces_purchased,0).toLocaleString()}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+(r.warehouse_confirmed_pieces??0),0).toLocaleString()}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pieces_sold,0).toLocaleString()}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pieces_remaining,0).toLocaleString()}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pallets_total,0)}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pallets_sold,0)}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.pallets_available,0)}</td>
+        <td style="padding:10px 12px;font-weight:700">${data.reduce((s,r)=>s+r.total_orders,0)}</td>
+      </tr></tfoot>
+      </table>
+    </div>
+    <div class="footer">Hydevest Portal · Inventory Report · Confidential</div>
+    </body></html>`
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const win = window.open(url, '_blank')
+    if (win) win.focus()
+    setReportOpen(false)
+  }
+
+  function exportCSV(type: 'filtered' | 'full') {
+    const data = type === 'filtered' ? filtered : inventory
+    const headers = [
+      'Container ID','Tracking No.','Trip','Sale Type','Inventory Status',
+      'Pieces Purchased','W/H Pieces','Pieces Sold','Pieces Remaining',
+      'Pallets Total','Pallets Sold','Pallets Available','Orders'
+    ]
+    const rows = data.map(r => [
+      r.container_id,
+      r.tracking_number ?? '',
+      r.trip?.trip_id ?? '',
+      r.sale_type ?? '',
+      INVENTORY_STATUS_CONFIG[r.inventory_status].label,
+      r.pieces_purchased,
+      r.warehouse_confirmed_pieces ?? '',
+      r.pieces_sold,
+      r.pieces_remaining,
+      r.pallets_total,
+      r.pallets_sold,
+      r.pallets_available,
+      r.total_orders,
+    ])
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `inventory-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+  }
+
   useEffect(() => { load() }, [load])
 
   const filtered = inventory.filter(row => {
@@ -261,12 +399,22 @@ export default function InventoryPage() {
               placeholder="Search by tracking number, container ID or trip..."
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <button onClick={() => setShowFilters(v => !v)}
-            className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
-              ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            <Filter size={15} /> Filters
-            {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowFilters(v => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
+                ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter size={15} /> Filters
+              {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
+            </button>
+            <button onClick={() => setReportOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+              <FileText size={15} /> Report
+            </button>
+            <button onClick={() => exportCSV('filtered')}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              <Download size={15} /> Export
+            </button>
+          </div>
         </div>
         {showFilters && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-3 border-t border-gray-100">
@@ -558,6 +706,52 @@ export default function InventoryPage() {
           </table>
         </div>
       </div>
+
+      {/* Report modal */}
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+            <div className="space-y-2">
+              {(['filtered', 'full'] as const).map(t => (
+                <button key={t} onClick={() => setReportType(t)}
+                  className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType === t ? 'border-brand-400 bg-brand-50' : 'border-gray-100 hover:border-gray-200'}`}>
+                  <p className={`text-sm font-semibold ${reportType === t ? 'text-brand-700' : 'text-gray-700'}`}>
+                    {t === 'filtered' ? 'Filtered view' : 'Full report'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {t === 'filtered' ? `${filtered.length} container${filtered.length !== 1 ? 's' : ''}` : `${inventory.length} total containers`}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setReportOpen(false)}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={() => generateReport(reportType)}
+                className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                Generate
+              </button>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400 mb-2">Or export as CSV:</p>
+              <div className="flex gap-2">
+                <button onClick={() => { exportCSV('filtered'); setReportOpen(false) }}
+                  className="flex-1 px-3 py-2 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                  Filtered CSV
+                </button>
+                <button onClick={() => { exportCSV('full'); setReportOpen(false) }}
+                  className="flex-1 px-3 py-2 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                  Full CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

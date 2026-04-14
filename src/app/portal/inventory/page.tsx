@@ -503,37 +503,54 @@ export default function InventoryPage() {
               })}
             </tbody>
 
-            {/* Table footer totals */}
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-brand-100">
+                  {/* col 1: expand button */}
                   <td className="px-3 py-3" />
-                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">
-                    Totals — {filtered.length} container{filtered.length !== 1 ? 's' : ''}
+                  {/* col 2: Container */}
+                  <td className="px-3 py-3 text-xs font-bold text-gray-500 uppercase whitespace-nowrap">
+                    {filtered.length} container{filtered.length !== 1 ? 's' : ''}
                   </td>
+                  {/* col 3: Tracking No. */}
+                  <td className="px-3 py-3" />
+                  {/* col 4: Trip */}
+                  <td className="px-3 py-3" />
+                  {/* col 5: Sale type */}
+                  <td className="px-3 py-3" />
+                  {/* col 6: Inventory status */}
+                  <td className="px-3 py-3" />
+                  {/* col 7: Pieces purchased */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pieces_purchased, 0).toLocaleString()} pcs
                   </td>
+                  {/* col 8: W/H pieces */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + (r.warehouse_confirmed_pieces ?? 0), 0).toLocaleString()} pcs
                   </td>
+                  {/* col 9: Pieces sold */}
                   <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pieces_sold, 0).toLocaleString()} pcs
                   </td>
+                  {/* col 10: Pieces remaining */}
                   <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pieces_remaining, 0).toLocaleString()} pcs
                   </td>
+                  {/* col 11: Pallets total */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.pallets_total, 0)} pallets
+                    {filtered.reduce((s, r) => s + r.pallets_total, 0)}
                   </td>
+                  {/* col 12: Pallets sold */}
                   <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.pallets_sold, 0)} sold
+                    {filtered.reduce((s, r) => s + r.pallets_sold, 0)}
                   </td>
+                  {/* col 13: Pallets available */}
                   <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.pallets_available, 0)} avail
+                    {filtered.reduce((s, r) => s + r.pallets_available, 0)}
                   </td>
+                  {/* col 14: Orders */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.total_orders, 0)} orders
+                    {filtered.reduce((s, r) => s + r.total_orders, 0)}
                   </td>
                 </tr>
               </tfoot>

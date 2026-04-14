@@ -191,6 +191,7 @@ export default function CreateSalesOrderPage() {
       overages: parseFloat(overages) || 0,
       customer_payable: customerPayable,
       amount_paid: paidAmount,
+      initial_payment: paidAmount,
       outstanding_balance: outstandingBalance,
       payment_method: paymentMethod,
       payment_status: paymentStatus,
@@ -220,6 +221,19 @@ export default function CreateSalesOrderPage() {
       }
     }
     if (!error && order) {
+      // Always seed the initial payment as the first recovery record
+      if (paidAmount > 0) {
+        await supabase.from('recoveries').insert({
+          sales_order_id: order.id,
+          customer_id: selectedCustomer.id,
+          payment_type: 'initial',
+          amount_paid: paidAmount,
+          payment_date: new Date().toISOString().split('T')[0],
+          payment_method: paymentMethod,
+          approval_status: 'approved',
+          created_by: user?.id,
+        })
+      }
       await supabase.from('sales_order_activity_log').insert({
         order_id: order.id,
         action: 'Sale recorded',

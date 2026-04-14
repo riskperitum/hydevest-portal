@@ -62,9 +62,9 @@ function CreateRecoveryPageInner() {
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0])
   const [paymentMethod, setPaymentMethod] = useState('transfer')
   const [comments, setComments] = useState('')
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
-  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string } | null>(null)
+  const [uploadedFiles, setUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
 
   const steps: { key: Step; label: string }[] = [
     { key: 'customer', label: 'Customer' },
@@ -183,19 +183,23 @@ function CreateRecoveryPageInner() {
     setCurrentStep('order')
   }
 
-  async function handleUpload() {
-    if (!uploadFile) return
+  async function handleUpload(files: File[]) {
+    if (!files.length) return
     setUploading(true)
     const supabase = createClient()
-    const ext = uploadFile.name.split('.').pop()
-    const path = `recoveries/${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('documents').upload(path, uploadFile, { upsert: true })
-    if (!error) {
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
-      setUploadedFile({ url: publicUrl, name: uploadFile.name, type: uploadFile.type })
+    const uploaded: { url: string; name: string; type: string }[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `recoveries/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+        uploaded.push({ url: publicUrl, name: file.name, type: file.type })
+      }
     }
+    setUploadedFiles(prev => [...prev, ...uploaded])
     setUploading(false)
-    setUploadFile(null)
+    setUploadFiles([])
   }
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -210,6 +214,7 @@ function CreateRecoveryPageInner() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedOrder || !selectedCustomer || !amountPaid) return
+    if (parseFloat(amountPaid) > Number(selectedOrder.outstanding_balance)) return
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -225,9 +230,10 @@ function CreateRecoveryPageInner() {
       payment_date: paymentDate,
       payment_method: paymentMethod,
       comments: comments || null,
-      file_url: uploadedFile?.url ?? null,
-      file_name: uploadedFile?.name ?? null,
-      file_type: uploadedFile?.type ?? null,
+      file_url: uploadedFiles[0]?.url ?? null,
+      file_name: uploadedFiles[0]?.name ?? null,
+      file_type: uploadedFiles[0]?.type ?? null,
+      file_urls: uploadedFiles.length > 0 ? uploadedFiles : [],
       approval_status: 'approved',
       created_by: user?.id,
     })
@@ -473,10 +479,21 @@ function CreateRecoveryPageInner() {
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount paid (₦) <span className="text-red-400">*</span></label>
                 <input required type="number" step="0.01" value={amountPaid}
                   onChange={e => setAmountPaid(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  max={Number(selectedOrder.outstanding_balance)}
+                  className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                    ${parseFloat(amountPaid) > Number(selectedOrder.outstanding_balance)
+                      ? 'border-red-300 focus:ring-red-400 bg-red-50'
+                      : 'border-gray-200 focus:ring-brand-500'}`}
                   placeholder="₦0.00" />
                 {parseFloat(amountPaid) > Number(selectedOrder.outstanding_balance) && (
-                  <p className="text-xs text-amber-600 mt-1 font-medium">⚠ Amount exceeds outstanding balance ({fmt(selectedOrder.outstanding_balance)})</p>
+                  <p className="text-xs text-red-500 mt-1 font-medium flex items-center gap-1">
+                    <span>⚠</span> Cannot exceed outstanding balance of {fmt(Number(selectedOrder.outstanding_balance))}
+                  </p>
+                )}
+                {parseFloat(amountPaid) > 0 && parseFloat(amountPaid) <= Number(selectedOrder.outstanding_balance) && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Max: <span className="font-medium text-gray-600">{fmt(Number(selectedOrder.outstanding_balance))}</span>
+                  </p>
                 )}
               </div>
               <div>
@@ -521,45 +538,47 @@ function CreateRecoveryPageInner() {
               </div>
             )}
 
-            {/* Attachment */}
+            {/* Attachments */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">Attachment (receipt)</label>
-              {uploadedFile ? (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{uploadedFile.name}</p>
-                    <p className="text-xs text-gray-400">Uploaded successfully</p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <a href={uploadedFile.url} target="_blank" rel="noreferrer"
-                      className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
-                      <Eye size={14} />
-                    </a>
-                    <label className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors cursor-pointer">
-                      <Upload size={14} />
-                      <input type="file" className="hidden" onChange={e => { setUploadFile(e.target.files?.[0] ?? null); setUploadedFile(null) }} />
-                    </label>
-                    <button type="button" onClick={() => setUploadedFile(null)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-400 hover:border-brand-300 hover:text-brand-600 transition-colors cursor-pointer">
-                    <Upload size={16} />
-                    <span>{uploadFile ? uploadFile.name : 'Click to upload receipt'}</span>
-                    <input type="file" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
-                  </label>
-                  {uploadFile && (
-                    <button type="button" onClick={handleUpload} disabled={uploading}
-                      className="px-4 py-3 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center gap-2 shrink-0">
-                      {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : 'Upload'}
-                    </button>
-                  )}
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Attachments (receipts)</label>
+              {/* Uploaded files list */}
+              {uploadedFiles.length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {uploadedFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{f.name}</p>
+                        <p className="text-xs text-green-600">Uploaded successfully</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <a href={f.url} target="_blank" rel="noreferrer"
+                          className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                          <Eye size={14} />
+                        </a>
+                        <button type="button" onClick={() => setUploadedFiles(prev => prev.filter((_, j) => j !== i))}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
+              {/* Upload area */}
+              <div className="flex items-center gap-3">
+                <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-400 hover:border-brand-300 hover:text-brand-600 transition-colors cursor-pointer">
+                  <Upload size={16} />
+                  <span>{uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''} selected` : 'Click to upload receipts'}</span>
+                  <input type="file" multiple className="hidden"
+                    onChange={e => setUploadFiles(Array.from(e.target.files ?? []))} />
+                </label>
+                {uploadFiles.length > 0 && (
+                  <button type="button" onClick={() => handleUpload(uploadFiles)} disabled={uploading}
+                    className="px-4 py-3 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center gap-2 shrink-0">
+                    {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : `Upload ${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''}`}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -569,7 +588,7 @@ function CreateRecoveryPageInner() {
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
               Back
             </button>
-            <button type="submit" disabled={saving || !amountPaid || parseFloat(amountPaid) <= 0}
+            <button type="submit" disabled={saving || !amountPaid || parseFloat(amountPaid) <= 0 || parseFloat(amountPaid) > Number(selectedOrder.outstanding_balance)}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Recording…</> : 'Record recovery'}
             </button>

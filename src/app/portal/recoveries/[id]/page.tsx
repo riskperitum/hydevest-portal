@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Check, X, Pencil,
-  Trash2, Eye, Activity, ChevronDown,
+  Trash2, Eye, Upload, Activity, ChevronDown,
   AlertTriangle, TrendingUp, Wallet,
   CreditCard, Package, Calendar, User
 } from 'lucide-react'
@@ -17,9 +17,9 @@ interface SalesOrder {
   order_id: string
   sale_type: string
   customer_payable: number
-  initial_payment: number
   amount_paid: number
   outstanding_balance: number
+  initial_payment: number
   payment_status: string
   payment_method: string
   created_at: string
@@ -38,6 +38,7 @@ interface Recovery {
   comments: string | null
   file_url: string | null
   file_name: string | null
+  file_urls: { url: string; name: string; type: string }[]
   approval_status: string
   needs_approval: boolean
   created_at: string
@@ -108,7 +109,7 @@ export default function RecoveryDetailPage() {
       supabase.from('recoveries')
         .select('*, created_by_profile:profiles!recoveries_created_by_fkey(full_name, email)')
         .eq('sales_order_id', orderId)
-        .order('created_at', { ascending: true }),
+        .order('created_at', { ascending: false }),
       supabase.from('sales_order_pallets').select('*').eq('order_id', orderId),
       supabase.from('sales_order_activity_log')
         .select('*, performer:profiles!sales_order_activity_log_performed_by_fkey(full_name, email)')
@@ -267,13 +268,14 @@ export default function RecoveryDetailPage() {
     load()
   }
 
+  // Most recent recovery at top, initial payment always at bottom
+  const sortedRecoveries = [
+    ...recoveries.filter(r => r.payment_type !== 'initial').sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    ...recoveries.filter(r => r.payment_type === 'initial'),
+  ]
   const totalRecovered = recoveries.reduce((s, r) => s + Number(r.amount_paid), 0)
-  const recoveryPayments = recoveries.filter(r => r.payment_type === 'recovery')
-  const totalRecoveryPayments = recoveryPayments.reduce((s, r) => s + Number(r.amount_paid), 0)
   const totalSale = Number(order?.customer_payable ?? 0)
   const progressPct = totalSale > 0 ? Math.min((totalRecovered / totalSale) * 100, 100) : 0
-  const initialPct = totalSale > 0 ? Math.min((Number(order?.initial_payment ?? 0) / totalSale) * 100, 100) : 0
-  const recoveryPct = totalSale > 0 ? Math.min((totalRecoveryPayments / totalSale) * 100, 100) : 0
   const statusCfg = order ? (PAYMENT_STATUS[order.payment_status as keyof typeof PAYMENT_STATUS] ?? PAYMENT_STATUS.outstanding) : PAYMENT_STATUS.outstanding
 
   if (loading) return (
@@ -313,7 +315,7 @@ export default function RecoveryDetailPage() {
           </div>
         </div>
         <Link
-          href={`/portal/recoveries/create?orderId=${order.id}&customerId=${order.customer?.id}`}
+          href={`/portal/recoveries/create?orderId=${order.id}&customerId=${order.customer?.id}&returnTo=${orderId}`}
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors">
           + Record recovery
         </Link>
@@ -332,6 +334,7 @@ export default function RecoveryDetailPage() {
           {
             label: 'Initial payment',
             value: fmt(order.initial_payment),
+            sub: 'Recovery #1',
             icon: <CreditCard size={16} className="text-blue-600" />,
             bg: 'bg-blue-50',
             text: 'text-blue-700',
@@ -339,16 +342,17 @@ export default function RecoveryDetailPage() {
           {
             label: 'Total recovered',
             value: fmt(totalRecovered),
+            sub: `${recoveries.length} payment${recoveries.length !== 1 ? 's' : ''}`,
             icon: <TrendingUp size={16} className="text-green-600" />,
             bg: 'bg-green-50',
             text: 'text-green-700',
           },
           {
             label: 'Outstanding',
-            value: fmt(order.outstanding_balance),
-            icon: <AlertTriangle size={16} className={Number(order.outstanding_balance) > 0 ? 'text-red-500' : 'text-green-500'} />,
-            bg: Number(order.outstanding_balance) > 0 ? 'bg-red-50' : 'bg-green-50',
-            text: Number(order.outstanding_balance) > 0 ? 'text-red-600' : 'text-green-700',
+            value: fmt(Math.max(Number(order.customer_payable) - totalRecovered, 0)),
+            icon: <AlertTriangle size={16} className={Number(order.customer_payable) - totalRecovered > 0 ? 'text-red-500' : 'text-green-500'} />,
+            bg: Number(order.customer_payable) - totalRecovered > 0 ? 'bg-red-50' : 'bg-green-50',
+            text: Number(order.customer_payable) - totalRecovered > 0 ? 'text-red-600' : 'text-green-700',
           },
         ].map(m => (
           <div key={m.label} className={`${m.bg} rounded-xl border border-white shadow-sm p-4`}>
@@ -357,6 +361,7 @@ export default function RecoveryDetailPage() {
               <p className="text-xs text-gray-500 font-medium">{m.label}</p>
             </div>
             <p className={`text-lg font-bold ${m.text} truncate`}>{m.value}</p>
+            {'sub' in m && m.sub && <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>}
           </div>
         ))}
       </div>
@@ -365,48 +370,25 @@ export default function RecoveryDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-700">Recovery progress</p>
-          <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}% of total sale</p>
+          <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}%</p>
         </div>
-
-        {/* Stacked progress bar */}
-        <div className="h-4 bg-gray-100 rounded-full overflow-hidden flex">
-          {/* Initial payment segment */}
+        <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-400 transition-all duration-500 relative group"
-            style={{ width: `${initialPct}%` }}
-            title={`Initial payment: ${fmt(order.initial_payment)} (${initialPct.toFixed(1)}%)`}
-          />
-          {/* Recovery payments segment */}
-          <div
-            className="h-full bg-brand-500 transition-all duration-500"
-            style={{ width: `${recoveryPct}%` }}
-            title={`Recoveries: ${fmt(totalRecoveryPayments)} (${recoveryPct.toFixed(1)}%)`}
+            className={`h-full rounded-full transition-all duration-500 ${progressPct >= 100 ? 'bg-green-500' : progressPct >= 60 ? 'bg-brand-500' : progressPct >= 30 ? 'bg-amber-400' : 'bg-red-400'}`}
+            style={{ width: `${progressPct}%` }}
           />
         </div>
-
-        {/* Legend */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-blue-400" />
-              <span className="text-xs text-gray-500">Initial payment <span className="font-semibold text-gray-700">{fmt(order.initial_payment)}</span> <span className="text-gray-400">({initialPct.toFixed(1)}%)</span></span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-brand-500" />
-              <span className="text-xs text-gray-500">Recoveries <span className="font-semibold text-gray-700">{fmt(totalRecoveryPayments)}</span> <span className="text-gray-400">({recoveryPct.toFixed(1)}%)</span></span>
-            </div>
-          </div>
-          <div className="text-xs text-gray-400">
-            <span className={`font-semibold ${Number(order.outstanding_balance) > 0 ? 'text-red-500' : 'text-green-600'}`}>
-              {fmt(Number(order.outstanding_balance))}
-            </span> remaining
-          </div>
-        </div>
-
-        {/* Goal marker */}
-        <div className="flex items-center justify-between text-xs text-gray-400 pt-1 border-t border-gray-100">
-          <span>Goal: <span className="font-semibold text-gray-700">{fmt(order.customer_payable)}</span> total sale amount</span>
-          <span>{fmt(totalRecovered)} recovered in total</span>
+        <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-100">
+          <span className="text-gray-500">
+            Recovered: <span className="font-bold text-gray-900">{fmt(totalRecovered)}</span>
+            <span className="text-gray-400"> of </span>
+            <span className="font-bold text-gray-900">{fmt(order.customer_payable)}</span>
+          </span>
+          <span className="text-gray-500">
+            Remaining: <span className={`font-bold ${Math.max(Number(order.customer_payable) - totalRecovered, 0) > 0 ? 'text-red-500' : 'text-green-600'}`}>
+              {fmt(Math.max(Number(order.customer_payable) - totalRecovered, 0))}
+            </span>
+          </span>
         </div>
       </div>
 
@@ -502,7 +484,7 @@ export default function RecoveryDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100">
           {[
-            { key: 'recoveries', label: 'Recoveries', count: recoveries.length },
+            { key: 'recoveries', label: 'Recoveries', count: sortedRecoveries.length },
             { key: 'activity', label: 'Activity log', count: activityLogs.length },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as 'recoveries' | 'activity')}
@@ -531,12 +513,10 @@ export default function RecoveryDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {recoveries.length === 0 ? (
+                {sortedRecoveries.length === 0 ? (
                   <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">No recovery records yet.</td></tr>
-                ) : recoveries.map((rec, idx) => (
-                  <tr key={rec.id}
-                    className={`border-b border-gray-50 hover:bg-gray-50/50 group
-                      ${rec.payment_type === 'initial' ? 'bg-blue-50/30' : ''}`}>
+                ) : sortedRecoveries.map((rec, idx) => (
+                  <tr key={rec.id} className="border-b border-gray-50 hover:bg-gray-50/50 group">
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className={`font-mono text-xs px-1.5 py-0.5 rounded font-medium
                         ${rec.payment_type === 'initial' ? 'bg-blue-100 text-blue-700' : 'bg-brand-50 text-brand-700'}`}>
@@ -544,43 +524,71 @@ export default function RecoveryDetailPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full
-                        ${rec.payment_type === 'initial'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-green-50 text-green-700'}`}>
-                        {rec.payment_type === 'initial' ? 'Initial payment' : `Recovery #${recoveries.filter((r, i) => r.payment_type === 'recovery' && i <= idx).length}`}
-                      </span>
+                      {rec.payment_type === 'initial' ? (
+                        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                          Initial Payment
+                        </span>
+                      ) : (() => {
+                        const recoveryOnlyList = recoveries
+                          .filter(r => r.payment_type !== 'initial')
+                          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                        const recNumber = recoveryOnlyList.findIndex(r => r.id === rec.id) + 1
+                        return (
+                          <span className="text-xs font-semibold px-2 py-1 rounded-full bg-brand-50 text-brand-700">
+                            Recovery #{recNumber}
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap font-bold text-gray-900">{fmt(rec.amount_paid)}</td>
                     <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(rec.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                     <td className="px-3 py-3 text-gray-500 capitalize whitespace-nowrap">{rec.payment_method === 'transfer' ? 'Bank transfer' : 'Cash'}</td>
                     <td className="px-3 py-3 text-gray-500 max-w-[140px] truncate">{rec.comments ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      {rec.file_url ? (
-                        <a href={rec.file_url} target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline font-medium">
-                          <Eye size={12} /> View
-                        </a>
-                      ) : (
-                        rec.payment_type !== 'initial' ? (
-                          <label className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 cursor-pointer transition-colors">
-                            <span>Upload</span>
-                            <input type="file" className="hidden" onChange={async e => {
-                              const file = e.target.files?.[0]
-                              if (!file) return
+                      <div className="flex flex-col gap-1">
+                        {/* Show all files from file_urls array */}
+                        {(rec.file_urls?.length > 0 ? rec.file_urls : rec.file_url ? [{ url: rec.file_url, name: rec.file_name ?? 'File', type: '' }] : []).map((f, fi) => (
+                          <a key={fi} href={f.url} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline font-medium">
+                            <Eye size={11} /> {f.name.length > 12 ? f.name.slice(0, 12) + '…' : f.name}
+                          </a>
+                        ))}
+                        {/* Upload more */}
+                        {rec.payment_type !== 'initial' && (
+                          <label className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 cursor-pointer transition-colors mt-0.5">
+                            <Upload size={11} /> Add file
+                            <input type="file" multiple className="hidden" onChange={async e => {
+                              const files = Array.from(e.target.files ?? [])
+                              if (!files.length) return
                               const supabase = createClient()
-                              const ext = file.name.split('.').pop()
-                              const path = `recoveries/${rec.id}/${Date.now()}.${ext}`
-                              const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
-                              if (!error) {
-                                const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
-                                await supabase.from('recoveries').update({ file_url: publicUrl, file_name: file.name, file_type: file.type }).eq('id', rec.id)
+                              const newFiles: { url: string; name: string; type: string }[] = []
+                              for (const file of files) {
+                                const ext = file.name.split('.').pop()
+                                const path = `recoveries/${rec.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+                                const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+                                if (!error) {
+                                  const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+                                  newFiles.push({ url: publicUrl, name: file.name, type: file.type })
+                                }
+                              }
+                              if (newFiles.length) {
+                                const existing = rec.file_urls ?? []
+                                const updated = [...existing, ...newFiles]
+                                await supabase.from('recoveries').update({
+                                  file_urls: updated,
+                                  file_url: updated[0].url,
+                                  file_name: updated[0].name,
+                                  file_type: updated[0].type,
+                                }).eq('id', rec.id)
                                 load()
                               }
                             }} />
                           </label>
-                        ) : <span className="text-gray-300 text-xs">—</span>
-                      )}
+                        )}
+                        {rec.payment_type === 'initial' && (rec.file_urls?.length ?? 0) === 0 && !rec.file_url && (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       {rec.payment_type === 'initial' ? (
@@ -613,7 +621,7 @@ export default function RecoveryDetailPage() {
                   </tr>
                 ))}
               </tbody>
-              {recoveries.length > 0 && (
+              {sortedRecoveries.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-brand-100">
                     <td colSpan={2} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">Total recovered</td>

@@ -270,7 +270,10 @@ export default function RecoveryDetailPage() {
   const totalRecovered = recoveries.reduce((s, r) => s + Number(r.amount_paid), 0)
   const recoveryPayments = recoveries.filter(r => r.payment_type === 'recovery')
   const totalRecoveryPayments = recoveryPayments.reduce((s, r) => s + Number(r.amount_paid), 0)
-  const progressPct = order ? Math.min((totalRecovered / Number(order.customer_payable)) * 100, 100) : 0
+  const totalSale = Number(order?.customer_payable ?? 0)
+  const progressPct = totalSale > 0 ? Math.min((totalRecovered / totalSale) * 100, 100) : 0
+  const initialPct = totalSale > 0 ? Math.min((Number(order?.initial_payment ?? 0) / totalSale) * 100, 100) : 0
+  const recoveryPct = totalSale > 0 ? Math.min((totalRecoveryPayments / totalSale) * 100, 100) : 0
   const statusCfg = order ? (PAYMENT_STATUS[order.payment_status as keyof typeof PAYMENT_STATUS] ?? PAYMENT_STATUS.outstanding) : PAYMENT_STATUS.outstanding
 
   if (loading) return (
@@ -359,20 +362,51 @@ export default function RecoveryDetailPage() {
       </div>
 
       {/* Progress bar */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-sm font-medium text-gray-700">Recovery progress</p>
-          <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}%</p>
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-700">Recovery progress</p>
+          <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}% of total sale</p>
         </div>
-        <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+
+        {/* Stacked progress bar */}
+        <div className="h-4 bg-gray-100 rounded-full overflow-hidden flex">
+          {/* Initial payment segment */}
           <div
-            className={`h-full rounded-full transition-all duration-500 ${progressPct >= 100 ? 'bg-green-500' : progressPct >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
-            style={{ width: `${progressPct}%` }}
+            className="h-full bg-blue-400 transition-all duration-500 relative group"
+            style={{ width: `${initialPct}%` }}
+            title={`Initial payment: ${fmt(order.initial_payment)} (${initialPct.toFixed(1)}%)`}
+          />
+          {/* Recovery payments segment */}
+          <div
+            className="h-full bg-brand-500 transition-all duration-500"
+            style={{ width: `${recoveryPct}%` }}
+            title={`Recoveries: ${fmt(totalRecoveryPayments)} (${recoveryPct.toFixed(1)}%)`}
           />
         </div>
-        <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-          <span>{fmt(totalRecovered)} recovered</span>
-          <span>{fmt(Number(order.outstanding_balance))} remaining</span>
+
+        {/* Legend */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-blue-400" />
+              <span className="text-xs text-gray-500">Initial payment <span className="font-semibold text-gray-700">{fmt(order.initial_payment)}</span> <span className="text-gray-400">({initialPct.toFixed(1)}%)</span></span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-brand-500" />
+              <span className="text-xs text-gray-500">Recoveries <span className="font-semibold text-gray-700">{fmt(totalRecoveryPayments)}</span> <span className="text-gray-400">({recoveryPct.toFixed(1)}%)</span></span>
+            </div>
+          </div>
+          <div className="text-xs text-gray-400">
+            <span className={`font-semibold ${Number(order.outstanding_balance) > 0 ? 'text-red-500' : 'text-green-600'}`}>
+              {fmt(Number(order.outstanding_balance))}
+            </span> remaining
+          </div>
+        </div>
+
+        {/* Goal marker */}
+        <div className="flex items-center justify-between text-xs text-gray-400 pt-1 border-t border-gray-100">
+          <span>Goal: <span className="font-semibold text-gray-700">{fmt(order.customer_payable)}</span> total sale amount</span>
+          <span>{fmt(totalRecovered)} recovered in total</span>
         </div>
       </div>
 
@@ -514,7 +548,7 @@ export default function RecoveryDetailPage() {
                         ${rec.payment_type === 'initial'
                           ? 'bg-blue-100 text-blue-700'
                           : 'bg-green-50 text-green-700'}`}>
-                        {rec.payment_type === 'initial' ? 'Initial payment' : `Recovery #${idx}`}
+                        {rec.payment_type === 'initial' ? 'Initial payment' : `Recovery #${recoveries.filter((r, i) => r.payment_type === 'recovery' && i <= idx).length}`}
                       </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap font-bold text-gray-900">{fmt(rec.amount_paid)}</td>

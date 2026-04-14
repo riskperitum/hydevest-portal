@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import {
   Plus, Search, Filter, Download, FileText, Pencil,
   Loader2, X, Upload, Eye, Trash2, AlertTriangle,
@@ -24,6 +25,8 @@ interface ExpenseRow {
   file_urls: { url: string; name: string; type: string }[]
   source: string
   trip_id: string | null
+  approval_status: string
+  needs_approval: boolean
   created_by: string | null
   created_at: string
   creator?: { full_name: string | null; email: string } | null
@@ -70,6 +73,7 @@ const SOURCE_COLORS: Record<string, string> = {
 }
 
 export default function ExpensifyPage() {
+  const router = useRouter()
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -427,7 +431,7 @@ export default function ExpensifyPage() {
           <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                {['Expense ID','Source','Category','Description','Amount','Currency','Amount (NGN)','Date','Trip','Created by','Attachments',''].map(h => (
+                {['Expense ID','Source','Category','Description','Amount','Currency','Amount (NGN)','Date','Approval','Trip','Created by','Attachments',''].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -436,14 +440,14 @@ export default function ExpensifyPage() {
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 12 }).map((_, j) => (
+                    {Array.from({ length: 13 }).map((_, j) => (
                       <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-16 text-center">
+                  <td colSpan={13} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
                         <Receipt size={20} className="text-gray-300" />
@@ -453,9 +457,16 @@ export default function ExpensifyPage() {
                   </td>
                 </tr>
               ) : filtered.map(expense => (
-                <tr key={expense.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
+                <tr key={expense.id}
+                  onClick={() => expense.source === 'manual' && router.push(`/portal/expensify/${expense.id}`)}
+                  className={`border-b border-gray-50 transition-colors group ${expense.source === 'manual' ? 'cursor-pointer hover:bg-brand-50/30' : 'hover:bg-gray-50/50'}`}>
                   <td className="px-3 py-3 whitespace-nowrap">
-                    <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{expense.expense_id}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{expense.expense_id}</span>
+                      {expense.source === 'manual' && expense.needs_approval && (
+                        <span title="Needs approval" className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_COLORS[expense.source] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -470,6 +481,16 @@ export default function ExpensifyPage() {
                   <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{expense.currency}</td>
                   <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">₦{Number(expense.amount_ngn).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="px-3 py-3 text-gray-500 whitespace-nowrap text-xs">{new Date(expense.expense_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {expense.source === 'manual' ? (
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full
+                        ${expense.approval_status === 'approved' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {expense.approval_status === 'approved' ? 'Approved' : 'Pending'}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     {expense.trip ? (
                       <span className="font-mono text-xs text-blue-600">{expense.trip.trip_id}</span>
@@ -490,7 +511,7 @@ export default function ExpensifyPage() {
                       </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
+                  <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                     {expense.source === 'manual' && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => {

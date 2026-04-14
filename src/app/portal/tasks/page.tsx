@@ -163,10 +163,26 @@ export default function TasksPage() {
           }).eq('id', selectedTask.record_id)
         }
       }
+      if (selectedTask.type === 'approval_request' && action === 'approved') {
+        if (selectedTask.module === 'expenses') {
+          const { data: { user } } = await supabase.auth.getUser()
+          await supabase.from('expenses').update({
+            approval_status: 'approved',
+            needs_approval: false,
+            last_approved_by: user?.id,
+            last_approved_at: new Date().toISOString(),
+          }).eq('id', selectedTask.record_id)
+        }
+      }
 
       if (selectedTask.type === 'delete_approval' && action === 'approved') {
         if (selectedTask.module === 'sales_orders') {
           await supabase.from('sales_orders').delete().eq('id', selectedTask.record_id)
+        }
+      }
+      if (selectedTask.type === 'delete_approval' && action === 'approved') {
+        if (selectedTask.module === 'expenses') {
+          await supabase.from('expenses').delete().eq('id', selectedTask.record_id)
         }
       }
       if (selectedTask.type === 'delete_approval' && action === 'approved') {
@@ -219,6 +235,9 @@ export default function TasksPage() {
     }
     if (task.module === 'recoveries' && task.record_id) {
       router.push(`/portal/recoveries/${task.record_id}`)
+    }
+    if (task.module === 'expenses' && task.record_id) {
+      router.push(`/portal/expensify/${task.record_id}`)
     }
   }
 

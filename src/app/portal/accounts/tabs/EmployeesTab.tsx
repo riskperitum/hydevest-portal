@@ -12,11 +12,12 @@ interface Employee {
   email: string
   phone: string | null
   is_active: boolean
+  blocked: boolean
   created_at: string
   roles: string
 }
 
-const blank = { full_name: '', email: '', password: '', phone: '' }
+const blank = { full_name: '', email: '', password: '', phone: '', blocked: false }
 
 export default function EmployeesTab() {
   const [data, setData] = useState<Employee[]>([])
@@ -70,6 +71,7 @@ export default function EmployeesTab() {
       email: row.email,
       password: '',
       phone: row.phone ?? '',
+      blocked: !row.is_active,
     })
     setOpen(true)
     setError(null)
@@ -102,6 +104,7 @@ export default function EmployeesTab() {
       await supabase.from('profiles').update({
         full_name: form.full_name,
         phone: form.phone || null,
+        is_active: !form.blocked,
         updated_at: new Date().toISOString(),
       }).eq('id', editRow.id)
     }
@@ -140,7 +143,7 @@ export default function EmployeesTab() {
     {
       key: 'is_active', label: 'Status', render: (r: Employee) => (
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-          {r.is_active ? 'Active' : 'Inactive'}
+          {r.is_active ? 'Active' : 'Blocked'}
         </span>
       )
     },
@@ -231,6 +234,33 @@ export default function EmployeesTab() {
                 placeholder="••••••••"
                 autoComplete="new-password"
               />
+            </div>
+          )}
+
+          {editRow && (
+            <div className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="flex items-center h-5 mt-0.5">
+                <input
+                  id="blocked"
+                  type="checkbox"
+                  checked={form.blocked}
+                  onChange={e => setForm(f => ({ ...f, blocked: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                />
+              </div>
+              <div>
+                <label htmlFor="blocked" className="text-sm font-medium text-gray-700 cursor-pointer">
+                  Block system access
+                </label>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  When checked, this user will not be able to log in to the portal.
+                </p>
+                {form.blocked && (
+                  <p className="text-xs text-red-500 font-medium mt-1">
+                    ⚠ This user will be locked out immediately after saving.
+                  </p>
+                )}
+              </div>
             </div>
           )}
           <div className="flex gap-3 pt-2">

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
-import AmountInput from '@/components/ui/AmountInput'
 
 interface SalesOrder {
   id: string
@@ -369,20 +368,49 @@ export default function SalesOrderDetailPage() {
   }) => {
     function formatDisplay(raw: string): string {
       if (!raw) return ''
-      const clean = raw.replace(/[^0-9.]/g, '')
+      const clean = String(raw).replace(/[^0-9.]/g, '')
       const parts = clean.split('.')
       const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
       if (parts.length > 1) return `${intPart}.${parts[1]}`
       return intPart
     }
+
+    const [localValue, setLocalValue] = useState(value)
+    const [display, setDisplay] = useState(formatDisplay(value))
+
+    function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+      const raw = e.target.value.replace(/,/g, '')
+      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
+      const formatted = formatDisplay(raw)
+      setDisplay(formatted)
+      setLocalValue(raw)
+    }
+
+    function handleWheel(e: React.WheelEvent<HTMLInputElement>) {
+      e.preventDefault()
+      e.currentTarget.blur()
+    }
+
+    function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+    }
+
     return (
       <div>
         <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
         {editField === fieldKey ? (
           <div className="flex gap-1.5">
-            <AmountInput value={fieldValue} onChange={setFieldValue}
-              className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0" />
-            <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
+            <input
+              type="text"
+              inputMode="decimal"
+              value={display}
+              onChange={handleChange}
+              onWheel={handleWheel}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
+            />
+            <button type="button" onClick={() => updateField(fieldKey, localValue)}
               className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
               <Check size={13} />
             </button>
@@ -393,7 +421,11 @@ export default function SalesOrderDetailPage() {
           </div>
         ) : (
           <button type="button"
-            onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
+            onClick={() => {
+              setLocalValue(value)
+              setDisplay(formatDisplay(value))
+              setEditField(fieldKey)
+            }}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value ? `₦${formatDisplay(value)}` : 'Not set'}

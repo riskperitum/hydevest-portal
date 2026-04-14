@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowLeft, Search, Filter, Download, FileText, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 interface ContainerSalesRow {
   // Container + presale info
@@ -43,6 +44,7 @@ const SALES_STATUS_CONFIG = {
 }
 
 export default function ContainerSalesReportPage() {
+  const router = useRouter()
   const [rows, setRows] = useState<ContainerSalesRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -419,7 +421,9 @@ export default function ContainerSalesReportPage() {
               ) : filtered.map(row => {
                 const statusCfg = SALES_STATUS_CONFIG[row.sales_status]
                 return (
-                  <tr key={row.container_db_id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                  <tr key={row.container_db_id}
+                    onClick={() => router.push(`/portal/reports/container-sales/${row.container_db_id}`)}
+                    className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors cursor-pointer">
                     <td className="px-3 py-3 font-mono text-xs text-gray-700 whitespace-nowrap font-medium">
                       {row.tracking_number ?? '—'}
                     </td>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 
 interface AmountInputProps {
   value: string
@@ -13,7 +13,7 @@ interface AmountInputProps {
 }
 
 export function formatAmount(raw: string): string {
-  if (!raw && raw !== '0') return ''
+  if (!raw) return ''
   const clean = String(raw).replace(/[^0-9.]/g, '')
   if (!clean) return ''
   const parts = clean.split('.')
@@ -32,36 +32,47 @@ export default function AmountInput({
   id,
 }: AmountInputProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const focused = useRef(false)
+
+  // Display is fully controlled by this component while focused
+  // When not focused, derive from the prop value
   const [display, setDisplay] = useState(formatAmount(value))
 
-  // Sync when value changes externally and input is not focused
-  useEffect(() => {
-    if (document.activeElement !== inputRef.current) {
-      setDisplay(formatAmount(value))
-    }
-  }, [value])
+  function handleFocus() {
+    focused.current = true
+  }
+
+  function handleBlur() {
+    focused.current = false
+    // Re-sync with parent value on blur
+    setDisplay(formatAmount(value))
+  }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target
     const cursorPos = input.selectionStart ?? 0
-    const oldDisplay = display
-    const rawTyped = input.value.replace(/,/g, '')
 
-    // Only allow digits and one decimal point
-    if (rawTyped !== '' && !/^\d*\.?\d*$/.test(rawTyped)) return
+    // Strip commas to get raw number
+    const raw = input.value.replace(/,/g, '')
 
-    const newDisplay = formatAmount(rawTyped)
+    // Only allow valid numeric input
+    if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
+
+    const newDisplay = formatAmount(raw)
+
+    // Calculate how many commas exist before cursor in old and new display
+    const commasBefore = (display.substring(0, cursorPos).match(/,/g) ?? []).length
+    const newCommasBefore = (newDisplay.substring(0, cursorPos).match(/,/g) ?? []).length
+    const cursorAdjust = newCommasBefore - commasBefore
+
     setDisplay(newDisplay)
-    onChange(rawTyped)
+    onChange(raw)
 
-    // Restore cursor position accounting for added/removed commas
     requestAnimationFrame(() => {
-      if (!inputRef.current) return
-      const addedCommas = (newDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
-      const oldCommas = (oldDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
-      const diff = addedCommas - oldCommas
-      const newCursor = cursorPos + diff
-      inputRef.current.setSelectionRange(newCursor, newCursor)
+      if (inputRef.current) {
+        const newCursor = cursorPos + cursorAdjust
+        inputRef.current.setSelectionRange(newCursor, newCursor)
+      }
     })
   }
 
@@ -74,9 +85,8 @@ export default function AmountInput({
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
   }
 
-  function handleBlur() {
-    setDisplay(formatAmount(value))
-  }
+  // If not focused, always show formatted prop value
+  const displayValue = focused.current ? display : formatAmount(value)
 
   return (
     <input
@@ -84,8 +94,9 @@ export default function AmountInput({
       id={id}
       type="text"
       inputMode="decimal"
-      value={display}
+      value={displayValue}
       onChange={handleChange}
+      onFocus={handleFocus}
       onBlur={handleBlur}
       onWheel={handleWheel}
       onKeyDown={handleKeyDown}

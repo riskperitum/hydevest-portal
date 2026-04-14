@@ -260,7 +260,8 @@ function CreateRecoveryPageInner() {
     })
 
     setSaving(false)
-    router.push('/portal/recoveries')
+    const returnTo = searchParams.get('returnTo')
+    router.push(returnTo ? `/portal/recoveries/${returnTo}` : '/portal/recoveries')
   }
 
   return (

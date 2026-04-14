@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
-  Plus, Search, Filter, Download, FileText,
+  Plus, Search, Filter, Download, FileText, Pencil,
   Loader2, X, Upload, Eye, Trash2, AlertTriangle,
   Receipt, TrendingDown, DollarSign, Globe
 } from 'lucide-react'
@@ -95,7 +95,23 @@ export default function ExpensifyPage() {
   const [uploadedFiles, setUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
   const [uploading, setUploading] = useState(false)
 
+  const [editExpense, setEditExpense] = useState<ExpenseRow | null>(null)
+  const [editForm, setEditForm] = useState({
+    description: '',
+    category: '',
+    amount: '',
+    currency: 'NGN',
+    exchange_rate: '1',
+    expense_date: '',
+  })
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const autoCategory = description.length > 2 ? detectCategory(description) : ''
+  const editAutoCategory = editForm.description.length > 2 ? detectCategory(editForm.description) : ''
+  const editEffectiveCategory = editForm.category || editAutoCategory
+  const editAmountNgn = editForm.currency === 'NGN'
+    ? parseFloat(editForm.amount) || 0
+    : (parseFloat(editForm.amount) || 0) * (parseFloat(editForm.exchange_rate) || 1)
   const effectiveCategory = category || autoCategory
   const amountNgn = currency === 'NGN'
     ? parseFloat(amount) || 0
@@ -193,6 +209,25 @@ export default function ExpensifyPage() {
     if (!confirm('Delete this expense?')) return
     const supabase = createClient()
     await supabase.from('expenses').delete().eq('id', id)
+    load()
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editExpense) return
+    setSavingEdit(true)
+    const supabase = createClient()
+    await supabase.from('expenses').update({
+      description: editForm.description,
+      category: editEffectiveCategory,
+      amount: parseFloat(editForm.amount),
+      currency: editForm.currency,
+      exchange_rate: parseFloat(editForm.exchange_rate) || 1,
+      amount_ngn: editAmountNgn,
+      expense_date: editForm.expense_date,
+    }).eq('id', editExpense.id)
+    setSavingEdit(false)
+    setEditExpense(null)
     load()
   }
 
@@ -457,10 +492,25 @@ export default function ExpensifyPage() {
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     {expense.source === 'manual' && (
-                      <button onClick={() => handleDelete(expense.id, expense.source)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => {
+                          setEditExpense(expense)
+                          setEditForm({
+                            description: expense.description,
+                            category: expense.category,
+                            amount: expense.amount.toString(),
+                            currency: expense.currency,
+                            exchange_rate: expense.exchange_rate.toString(),
+                            expense_date: expense.expense_date.slice(0, 10),
+                          })
+                        }} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => handleDelete(expense.id, expense.source)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     )}
                     {expense.source === 'trip' && (
                       <span className="text-xs text-gray-300 italic">view in trips</span>
@@ -649,6 +699,107 @@ export default function ExpensifyPage() {
               <button onClick={() => generateReport(reportType)}
                 className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">Generate</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit expense modal */}
+      {editExpense && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditExpense(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Edit expense</h2>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{editExpense.expense_id}</p>
+              </div>
+              <button onClick={() => setEditExpense(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleEdit}>
+              <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Description <span className="text-red-400">*</span></label>
+                  <input required value={editForm.description}
+                    onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="e.g. Fuel for truck delivery" />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700">Category <span className="text-red-400">*</span></label>
+                    {editAutoCategory && !editForm.category && (
+                      <span className="text-xs text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full font-medium">
+                        Auto-detected: {editAutoCategory}
+                      </span>
+                    )}
+                  </div>
+                  <select value={editForm.category || editAutoCategory}
+                    onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                    <option value="">Select category...</option>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount <span className="text-red-400">*</span></label>
+                    <AmountInput required value={editForm.amount}
+                      onChange={v => setEditForm(f => ({ ...f, amount: v }))}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Currency</label>
+                    <select value={editForm.currency}
+                      onChange={e => setEditForm(f => ({ ...f, currency: e.target.value, exchange_rate: e.target.value === 'NGN' ? '1' : f.exchange_rate }))}
+                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                      {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {editForm.currency !== 'NGN' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Exchange rate (to NGN)</label>
+                      <AmountInput value={editForm.exchange_rate}
+                        onChange={v => setEditForm(f => ({ ...f, exchange_rate: v }))}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (NGN) — auto</label>
+                      <div className="px-3 py-2.5 text-sm rounded-lg border bg-green-50 border-green-200 text-green-700 font-semibold">
+                        {editAmountNgn > 0 ? `₦${editAmountNgn.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Expense date</label>
+                  <input type="date" value={editForm.expense_date}
+                    onChange={e => setEditForm(f => ({ ...f, expense_date: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                </div>
+
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
+                <button type="button" onClick={() => setEditExpense(null)}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingEdit || !editForm.amount || !editEffectiveCategory}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

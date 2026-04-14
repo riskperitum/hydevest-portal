@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
@@ -366,33 +366,56 @@ export default function SalesOrderDetailPage() {
   const AmountEditableField = ({ fieldKey, label, value }: {
     fieldKey: string; label: string; value: string
   }) => {
-    function formatDisplay(raw: string): string {
+    const inputRef = useRef<HTMLInputElement>(null)
+    const [localRaw, setLocalRaw] = useState(value)
+    const [localDisplay, setLocalDisplay] = useState(formatAmount(value))
+
+    function formatAmount(raw: string): string {
       if (!raw) return ''
       const clean = String(raw).replace(/[^0-9.]/g, '')
+      if (!clean) return ''
       const parts = clean.split('.')
       const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
       if (parts.length > 1) return `${intPart}.${parts[1]}`
       return intPart
     }
 
-    const [localValue, setLocalValue] = useState(value)
-    const [display, setDisplay] = useState(formatDisplay(value))
-
     function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-      const raw = e.target.value.replace(/,/g, '')
-      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
-      const formatted = formatDisplay(raw)
-      setDisplay(formatted)
-      setLocalValue(raw)
+      const input = e.target
+      const cursorPos = input.selectionStart ?? 0
+      const oldDisplay = localDisplay
+      const rawTyped = input.value.replace(/,/g, '')
+      if (rawTyped !== '' && !/^\d*\.?\d*$/.test(rawTyped)) return
+      const newDisplay = formatAmount(rawTyped)
+      setLocalDisplay(newDisplay)
+      setLocalRaw(rawTyped)
+      requestAnimationFrame(() => {
+        if (!inputRef.current) return
+        const addedCommas = (newDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
+        const oldCommas = (oldDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
+        const diff = addedCommas - oldCommas
+        const newCursor = cursorPos + diff
+        inputRef.current.setSelectionRange(newCursor, newCursor)
+      })
     }
 
     function handleWheel(e: React.WheelEvent<HTMLInputElement>) {
       e.preventDefault()
-      e.currentTarget.blur()
+      inputRef.current?.blur()
     }
 
     function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+    }
+
+    function formatDisplayValue(raw: string): string {
+      if (!raw) return ''
+      const clean = String(raw).replace(/[^0-9.]/g, '')
+      if (!clean) return ''
+      const parts = clean.split('.')
+      const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+      if (parts.length > 1) return `${intPart}.${parts[1]}`
+      return intPart
     }
 
     return (
@@ -401,16 +424,17 @@ export default function SalesOrderDetailPage() {
         {editField === fieldKey ? (
           <div className="flex gap-1.5">
             <input
+              ref={inputRef}
               type="text"
               inputMode="decimal"
-              value={display}
+              value={localDisplay}
               onChange={handleChange}
               onWheel={handleWheel}
               onKeyDown={handleKeyDown}
               autoFocus
               className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
             />
-            <button type="button" onClick={() => updateField(fieldKey, localValue)}
+            <button type="button" onClick={() => updateField(fieldKey, localRaw)}
               className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
               <Check size={13} />
             </button>
@@ -422,13 +446,13 @@ export default function SalesOrderDetailPage() {
         ) : (
           <button type="button"
             onClick={() => {
-              setLocalValue(value)
-              setDisplay(formatDisplay(value))
+              setLocalRaw(value)
+              setLocalDisplay(formatDisplayValue(value))
               setEditField(fieldKey)
             }}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
-              {value ? `₦${formatDisplay(value)}` : 'Not set'}
+              {value ? `₦${formatDisplayValue(value)}` : 'Not set'}
             </span>
             <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
           </button>

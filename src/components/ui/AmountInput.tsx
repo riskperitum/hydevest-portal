@@ -12,9 +12,10 @@ interface AmountInputProps {
   id?: string
 }
 
-function formatDisplay(raw: string): string {
-  if (!raw) return ''
-  const clean = raw.replace(/[^0-9.]/g, '')
+export function formatAmount(raw: string): string {
+  if (!raw && raw !== '0') return ''
+  const clean = String(raw).replace(/[^0-9.]/g, '')
+  if (!clean) return ''
   const parts = clean.split('.')
   const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   if (parts.length > 1) return `${intPart}.${parts[1]}`
@@ -30,32 +31,38 @@ export default function AmountInput({
   className = '',
   id,
 }: AmountInputProps) {
-  const [display, setDisplay] = useState(() => formatDisplay(value))
   const inputRef = useRef<HTMLInputElement>(null)
-  const isFocused = useRef(false)
+  const [display, setDisplay] = useState(formatAmount(value))
 
-  // When value changes externally (e.g. when editField opens with a new value),
-  // re-format the display — but only if the input is not currently focused
+  // Sync when value changes externally and input is not focused
   useEffect(() => {
-    if (!isFocused.current) {
-      setDisplay(formatDisplay(value))
+    if (document.activeElement !== inputRef.current) {
+      setDisplay(formatAmount(value))
     }
   }, [value])
 
-  function handleFocus() {
-    isFocused.current = true
-  }
-
-  function handleBlur() {
-    isFocused.current = false
-    setDisplay(formatDisplay(value))
-  }
-
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value.replace(/,/g, '')
-    if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
-    setDisplay(formatDisplay(raw))
-    onChange(raw)
+    const input = e.target
+    const cursorPos = input.selectionStart ?? 0
+    const oldDisplay = display
+    const rawTyped = input.value.replace(/,/g, '')
+
+    // Only allow digits and one decimal point
+    if (rawTyped !== '' && !/^\d*\.?\d*$/.test(rawTyped)) return
+
+    const newDisplay = formatAmount(rawTyped)
+    setDisplay(newDisplay)
+    onChange(rawTyped)
+
+    // Restore cursor position accounting for added/removed commas
+    requestAnimationFrame(() => {
+      if (!inputRef.current) return
+      const addedCommas = (newDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
+      const oldCommas = (oldDisplay.slice(0, cursorPos).match(/,/g) ?? []).length
+      const diff = addedCommas - oldCommas
+      const newCursor = cursorPos + diff
+      inputRef.current.setSelectionRange(newCursor, newCursor)
+    })
   }
 
   function handleWheel(e: React.WheelEvent<HTMLInputElement>) {
@@ -64,10 +71,11 @@ export default function AmountInput({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    // Block up/down arrow keys
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      e.preventDefault()
-    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+  }
+
+  function handleBlur() {
+    setDisplay(formatAmount(value))
   }
 
   return (
@@ -78,14 +86,13 @@ export default function AmountInput({
       inputMode="decimal"
       value={display}
       onChange={handleChange}
-      onFocus={handleFocus}
       onBlur={handleBlur}
       onWheel={handleWheel}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
       required={required}
       disabled={disabled}
-      className={`[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${className}`}
+      className={className}
     />
   )
 }

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import AmountInput from '@/components/ui/AmountInput'
 
 interface Presale {
   id: string
@@ -277,9 +278,18 @@ export default function PresaleDetailPage() {
         <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
         {editField === fieldKey ? (
           <div className="flex gap-1.5">
-            <input type={type} value={fieldValue}
-              onChange={e => setFieldValue(e.target.value)}
+            <input
+              type="text"
+              inputMode={type === 'number' ? 'decimal' : 'text'}
+              value={type === 'number' ? fieldValue.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : fieldValue}
+              onChange={e => {
+                const raw = type === 'number' ? e.target.value.replace(/,/g, '') : e.target.value
+                if (type === 'number' && raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
+                setFieldValue(raw)
+              }}
               onBlur={() => { if (useAutosave && fieldValue !== value) updateField(fieldKey, fieldValue) }}
+              onWheel={e => { e.preventDefault(); e.currentTarget.blur() }}
+              onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
               className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
               autoFocus />
             {!useAutosave && (

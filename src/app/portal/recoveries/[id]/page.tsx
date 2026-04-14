@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import AmountInput from '@/components/ui/AmountInput'
 
 interface SalesOrder {
   id: string
@@ -689,9 +690,9 @@ export default function RecoveryDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Amount paid (₦) <span className="text-red-400">*</span></label>
-                <input required type="number" step="0.01" value={editForm.amount_paid}
-                  onChange={e => setEditForm(f => ({ ...f, amount_paid: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                <AmountInput value={editForm.amount_paid}
+                  onChange={v => setEditForm(f => ({ ...f, amount_paid: v }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment date</label>

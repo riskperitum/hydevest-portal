@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
+import PortalShell from '@/components/layout/PortalShell'
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -31,7 +32,9 @@ export default async function PortalLayout({ children }: { children: React.React
         <Header profile={profile} isSuperAdmin={isSuperAdmin} />
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
-            {children}
+            <PortalShell>
+              {children}
+            </PortalShell>
           </div>
         </main>
       </div>

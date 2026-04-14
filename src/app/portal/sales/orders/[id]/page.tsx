@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import AmountInput from '@/components/ui/AmountInput'
 
 interface SalesOrder {
   id: string
@@ -363,6 +364,47 @@ export default function SalesOrderDetailPage() {
     </div>
   )
 
+  const AmountEditableField = ({ fieldKey, label, value }: {
+    fieldKey: string; label: string; value: string
+  }) => {
+    function formatDisplay(raw: string): string {
+      if (!raw) return ''
+      const clean = raw.replace(/[^0-9.]/g, '')
+      const parts = clean.split('.')
+      const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+      if (parts.length > 1) return `${intPart}.${parts[1]}`
+      return intPart
+    }
+    return (
+      <div>
+        <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
+        {editField === fieldKey ? (
+          <div className="flex gap-1.5">
+            <AmountInput value={fieldValue} onChange={setFieldValue}
+              className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0" />
+            <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
+              className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+              <Check size={13} />
+            </button>
+            <button type="button" onClick={() => setEditField(null)}
+              className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
+              <X size={13} />
+            </button>
+          </div>
+        ) : (
+          <button type="button"
+            onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
+            className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
+            <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+              {value ? `₦${formatDisplay(value)}` : 'Not set'}
+            </span>
+            <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
+          </button>
+        )}
+      </div>
+    )
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <Loader2 className="animate-spin text-brand-600" size={28} />
@@ -561,8 +603,8 @@ export default function SalesOrderDetailPage() {
                 <p className="text-xs text-gray-400">{order.customer?.customer_id} {order.customer?.phone ? `· ${order.customer.phone}` : ''}</p>
               </div>
               {order.sale_type === 'box_sale' && (
-                <EditableField fieldKey="sale_amount" label="Sale amount (₦)"
-                  value={order.sale_amount?.toString() ?? ''} type="number" />
+                <AmountEditableField fieldKey="sale_amount" label="Sale amount (₦)"
+                  value={order.sale_amount?.toString() ?? ''} />
               )}
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Payment method</p>
@@ -578,12 +620,12 @@ export default function SalesOrderDetailPage() {
                   <option value="cash">Cash</option>
                 </select>
               </div>
-              <EditableField fieldKey="discount" label="Discount (₦)"
-                value={order.discount?.toString() ?? '0'} type="number" />
-              <EditableField fieldKey="overages" label="Overages (₦)"
-                value={order.overages?.toString() ?? '0'} type="number" />
-              <EditableField fieldKey="amount_paid" label="Amount paid (₦)"
-                value={order.amount_paid?.toString() ?? '0'} type="number" />
+              <AmountEditableField fieldKey="discount" label="Discount (₦)"
+                value={order.discount?.toString() ?? '0'} />
+              <AmountEditableField fieldKey="overages" label="Overages (₦)"
+                value={order.overages?.toString() ?? '0'} />
+              <AmountEditableField fieldKey="amount_paid" label="Amount paid (₦)"
+                value={order.amount_paid?.toString() ?? '0'} />
             </div>
 
             {/* Financial summary */}

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Search, Loader2, X, CheckCircle2, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import AmountInput from '@/components/ui/AmountInput'
 
 interface Container {
   id: string
@@ -530,9 +531,9 @@ export default function CreateSalesOrderPage() {
               {selectedPresale.sale_type === 'box_sale' && (
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Sale amount (₦) <span className="text-red-400">*</span></label>
-                  <input type="number" step="0.01" value={saleAmount} onChange={e => setSaleAmount(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    placeholder="Enter sale amount" />
+                  <AmountInput value={saleAmount} onChange={setSaleAmount}
+                    placeholder="Enter sale amount"
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   {selectedPresale.expected_sale_revenue && parseFloat(saleAmount) > 0 && parseFloat(saleAmount) < Number(selectedPresale.expected_sale_revenue) && (
                     <p className="text-xs text-amber-600 mt-1.5 font-medium flex items-center gap-1">
                       <span>{'\u26A0'}</span> Sale amount is below the expected presale revenue (��{Number(selectedPresale.expected_sale_revenue).toLocaleString()})
@@ -550,21 +551,21 @@ export default function CreateSalesOrderPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Discount (₦)</label>
-                <input type="number" step="0.01" value={discount} onChange={e => setDiscount(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  placeholder="0.00" />
+                <AmountInput value={discount} onChange={setDiscount}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Overages (₦)</label>
-                <input type="number" step="0.01" value={overages} onChange={e => setOverages(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  placeholder="0.00" />
+                <AmountInput value={overages} onChange={setOverages}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount paid / deposit (₦)</label>
-                <input type="number" step="0.01" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  placeholder="0.00" />
+                <AmountInput value={amountPaid} onChange={setAmountPaid}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
             </div>
 

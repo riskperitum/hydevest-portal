@@ -38,3 +38,21 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Disable scroll wheel on all number inputs globally */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  pointer-events: auto;
+}
+
+/* Prevent scroll from changing number input values */
+input[type=number] {
+  appearance: textfield;
+}

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, Search, Filter, Download, FileText, Pencil,
+  Plus, Search, Filter, Download, FileText, Pencil, CheckCircle2,
   Loader2, X, Upload, Eye, Trash2, AlertTriangle,
   Receipt, TrendingDown, DollarSign, Globe
 } from 'lucide-react'
@@ -110,6 +110,15 @@ export default function ExpensifyPage() {
   })
   const [savingEdit, setSavingEdit] = useState(false)
 
+  const [workflowExpense, setWorkflowExpense] = useState<ExpenseRow | null>(null)
+  const [workflowType, setWorkflowType] = useState<'approval' | 'delete' | null>(null)
+  const [workflowNote, setWorkflowNote] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [workflowOpen, setWorkflowOpen] = useState(false)
+
   const autoCategory = description.length > 2 ? detectCategory(description) : ''
   const editAutoCategory = editForm.description.length > 2 ? detectCategory(editForm.description) : ''
   const editEffectiveCategory = editForm.category || editAutoCategory
@@ -151,7 +160,13 @@ export default function ExpensifyPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
+    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
+      .then(({ data }) => setEmployees(data ?? []))
+  }, [load])
 
   function resetForm() {
     setDescription('')
@@ -232,6 +247,46 @@ export default function ExpensifyPage() {
     }).eq('id', editExpense.id)
     setSavingEdit(false)
     setEditExpense(null)
+    load()
+  }
+
+  async function submitWorkflow() {
+    if (!assignee || !workflowType || !workflowExpense) return
+    setSubmittingWorkflow(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const typeKeys = { approval: 'approval_request', delete: 'delete_approval' }
+    const typeLabels = { approval: 'Approval request', delete: 'Delete approval' }
+
+    const { data: task } = await supabase.from('tasks').insert({
+      type: typeKeys[workflowType],
+      title: `${typeLabels[workflowType]}: ${workflowExpense.expense_id}`,
+      description: workflowNote || `${typeLabels[workflowType]} for expense ${workflowExpense.expense_id}`,
+      module: 'expenses',
+      record_id: workflowExpense.id,
+      record_ref: workflowExpense.expense_id,
+      requested_by: user?.id,
+      assigned_to: assignee,
+      priority: workflowType === 'delete' ? 'high' : 'normal',
+    }).select().single()
+
+    await supabase.from('notifications').insert({
+      user_id: assignee,
+      type: `task_${typeKeys[workflowType]}`,
+      title: `New task: ${typeLabels[workflowType]}`,
+      message: `${workflowExpense.expense_id} — ${workflowExpense.description}`,
+      task_id: task?.id,
+      record_id: workflowExpense.id,
+      record_ref: workflowExpense.expense_id,
+      module: 'expenses',
+    })
+
+    setSubmittingWorkflow(false)
+    setWorkflowOpen(false)
+    setWorkflowType(null)
+    setWorkflowNote('')
+    setAssignee('')
+    setWorkflowExpense(null)
     load()
   }
 
@@ -514,20 +569,39 @@ export default function ExpensifyPage() {
                   <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                     {expense.source === 'manual' && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => {
-                          setEditExpense(expense)
-                          setEditForm({
-                            description: expense.description,
-                            category: expense.category,
-                            amount: expense.amount.toString(),
-                            currency: expense.currency,
-                            exchange_rate: expense.exchange_rate.toString(),
-                            expense_date: expense.expense_date.slice(0, 10),
-                          })
-                        }} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
+                        <button
+                          title="Edit"
+                          onClick={() => {
+                            setEditExpense(expense)
+                            setEditForm({
+                              description: expense.description,
+                              category: expense.category,
+                              amount: expense.amount.toString(),
+                              currency: expense.currency,
+                              exchange_rate: expense.exchange_rate.toString(),
+                              expense_date: expense.expense_date.slice(0, 10),
+                            })
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
                           <Pencil size={13} />
                         </button>
-                        <button onClick={() => handleDelete(expense.id, expense.source)}
+                        <button
+                          title="Request approval"
+                          onClick={() => {
+                            setWorkflowExpense(expense)
+                            setWorkflowType('approval')
+                            setWorkflowOpen(true)
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-green-50 text-gray-300 hover:text-green-600 transition-colors">
+                          <CheckCircle2 size={13} />
+                        </button>
+                        <button
+                          title="Request deletion"
+                          onClick={() => {
+                            setWorkflowExpense(expense)
+                            setWorkflowType('delete')
+                            setWorkflowOpen(true)
+                          }}
                           className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
                           <Trash2 size={13} />
                         </button>
@@ -821,6 +895,59 @@ export default function ExpensifyPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Workflow modal */}
+      {workflowOpen && workflowExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              {workflowType === 'delete' ? 'Request deletion' : 'Request approval'}
+            </h2>
+            <p className="text-xs text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">
+              {workflowExpense.expense_id} — {workflowExpense.description.slice(0, 40)}{workflowExpense.description.length > 40 ? '…' : ''}
+            </p>
+            {workflowType === 'delete' && (
+              <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+                <p className="text-xs text-red-700 font-medium">The expense will only be deleted after the assigned user approves it.</p>
+              </div>
+            )}
+            {workflowType === 'approval' && (
+              <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                <p className="text-xs text-green-700 font-medium">Once approved, this expense will be marked as approved.</p>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
+              <select required value={assignee} onChange={e => setAssignee(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <option value="">Select user...</option>
+                {employees.filter(e => e.id !== currentUserId).map(e => (
+                  <option key={e.id} value={e.id}>{e.full_name ?? e.email}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+              <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                placeholder="Add context for the assignee..." />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+                className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
+                  ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
+                {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
+              </button>
+            </div>
           </div>
         </div>
       )}

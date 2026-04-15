@@ -18,6 +18,7 @@ interface ContainerProfitRow {
   trip_title: string
   sale_type: string | null
   presale_id: string | null
+  trip_created_at: string | null
 
   // Costs
   estimated_landing_cost: number
@@ -69,6 +70,12 @@ export default function ContainerProfitReportPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 12
+
+  useEffect(() => { setCurrentPage(1) }, [search, profitFilter, salesFilter, dateFrom, dateTo])
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -89,7 +96,7 @@ export default function ContainerProfitReportPage() {
 
     const tripIds = [...new Set((containers ?? []).map(c => c.trip_id).filter(Boolean))]
     const { data: trips } = tripIds.length > 0
-      ? await supabase.from('trips').select('id, trip_id, title').in('id', tripIds)
+      ? await supabase.from('trips').select('id, trip_id, title, created_at').in('id', tripIds)
       : { data: [] }
 
     const tripMap = Object.fromEntries((trips ?? []).map(t => [t.id, t]))
@@ -187,6 +194,7 @@ export default function ContainerProfitReportPage() {
           trip_title: trip?.title ?? '—',
           sale_type: presale.sale_type,
           presale_id: presale.presale_id,
+          trip_created_at: trip?.created_at ?? null,
           estimated_landing_cost: landingCost,
           pieces_purchased: container.pieces_purchased ?? 0,
           warehouse_confirmed_pieces: whPieces,
@@ -222,10 +230,14 @@ export default function ContainerProfitReportPage() {
       r.trip_id.toLowerCase().includes(search.toLowerCase())
     const matchProfit = profitFilter === '' || r.profit_status === profitFilter
     const matchSales = salesFilter === '' || r.sales_status === salesFilter
-    return matchSearch && matchProfit && matchSales
+    const matchFrom = dateFrom === '' || !r.trip_created_at || new Date(r.trip_created_at) >= new Date(dateFrom)
+    const matchTo = dateTo === '' || !r.trip_created_at || new Date(r.trip_created_at) <= new Date(dateTo + 'T23:59:59')
+    return matchSearch && matchProfit && matchSales && matchFrom && matchTo
   })
 
-  const activeFilters = [profitFilter, salesFilter].filter(Boolean).length
+  const activeFilters = [profitFilter, salesFilter, dateFrom, dateTo].filter(Boolean).length
+  const paginatedFiltered = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
 
   // Portfolio metrics
   const totalLandingCost = filtered.reduce((s, r) => s + r.estimated_landing_cost, 0)
@@ -414,10 +426,20 @@ export default function ContainerProfitReportPage() {
                 <option value="completed">Completed</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date from</label>
+              <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setCurrentPage(1) }}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date to</label>
+              <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setCurrentPage(1) }}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
             {activeFilters > 0 && (
               <div className="flex items-end pb-0.5">
-                <button onClick={() => { setProfitFilter(''); setSalesFilter('') }}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium">Clear filters</button>
+                <button onClick={() => { setProfitFilter(''); setSalesFilter(''); setDateFrom(''); setDateTo(''); setCurrentPage(1) }}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium">Clear all</button>
               </div>
             )}
           </div>
@@ -441,8 +463,8 @@ export default function ContainerProfitReportPage() {
           <p className="text-sm text-gray-400">No containers with profit data found.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(row => {
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {paginatedFiltered.map(row => {
             const profitCfg = PROFIT_STATUS_CONFIG[row.profit_status]
             const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
             const isCompleted = row.sales_status === 'completed'
@@ -469,7 +491,12 @@ export default function ContainerProfitReportPage() {
                         <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>{salesCfg.label}</span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-1.5 font-mono">{row.tracking_number ?? '—'} · {row.trip_id}</p>
+                      <p className="text-xs text-gray-400 mt-1 font-mono truncate">{row.tracking_number ?? '—'} · {row.trip_id}</p>
+                      {row.trip_created_at && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Trip started: {new Date(row.trip_created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      )}
                     </div>
                     <div className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full border shrink-0 ${profitCfg.color}`}>
                       {profitCfg.icon}
@@ -481,13 +508,13 @@ export default function ContainerProfitReportPage() {
                   <div className="flex items-end justify-between">
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">{isCompleted ? 'Actual profit' : 'Expected profit'}</p>
-                      <p className={`text-2xl font-bold ${isPositive ? 'text-green-700' : 'text-red-600'}`}>
+                      <p className={`text-lg font-bold ${isPositive ? 'text-green-700' : 'text-red-600'}`}>
                         {isPositive ? '+' : ''}{fmt(displayProfit)}
                       </p>
                     </div>
                     <div className={`text-right`}>
                       <p className="text-xs text-gray-400 mb-0.5">Margin</p>
-                      <p className={`text-lg font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+                      <p className={`text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
                         {fmtPct(displayMargin)}
                       </p>
                     </div>
@@ -521,8 +548,8 @@ export default function ContainerProfitReportPage() {
                 {/* Footer metrics */}
                 <div className="px-5 pb-4 pt-1 grid grid-cols-3 gap-2 border-t border-gray-50">
                   <div>
-                    <p className="text-xs text-gray-400">Exp. revenue</p>
-                    <p className="text-xs font-semibold text-gray-700 truncate">{fmt(row.expected_sale_revenue)}</p>
+                    <p className="text-xs text-gray-400 text-[10px]">Exp. revenue</p>
+                    <p className="text-xs font-semibold text-gray-700 truncate text-[11px]">{fmt(row.expected_sale_revenue)}</p>
                   </div>
                   {!isCompleted && row.unearned_profit > 0 && (
                     <div>
@@ -546,6 +573,47 @@ export default function ContainerProfitReportPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3">
+          <p className="text-sm text-gray-500">
+            Showing <span className="font-semibold text-gray-700">{((currentPage - 1) * PAGE_SIZE) + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)}</span> of <span className="font-semibold text-gray-700">{filtered.length}</span> containers
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                let pageNum = i + 1
+                if (totalPages > 7) {
+                  if (currentPage <= 4) pageNum = i + 1
+                  else if (currentPage >= totalPages - 3) pageNum = totalPages - 6 + i
+                  else pageNum = currentPage - 3 + i
+                }
+                return (
+                  <button key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`w-7 h-7 text-xs font-medium rounded-lg transition-colors
+                      ${currentPage === pageNum ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                    {pageNum}
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
+              Next
+            </button>
+          </div>
         </div>
       )}
 

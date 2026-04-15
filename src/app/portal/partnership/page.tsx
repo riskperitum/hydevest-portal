@@ -13,10 +13,8 @@ interface ContainerPartnerRow {
   container_id: string
   tracking_number: string | null
   trip_id: string
-  trip_db_id: string
   trip_title: string
   container_status: string
-  sale_type: string | null
   full_quoted_landing_cost_ngn: number
   expected_sale_revenue: number
   actual_sales: number
@@ -36,16 +34,15 @@ interface ContainerPartnerRow {
 }
 
 interface PartnerSummaryRow {
-  funder_id: string
-  funder_name: string
   partner_db_id: string
+  funder_name: string
   container_count: number
   total_quoted_cost: number
-  total_received: number
-  total_topup: number
+  total_allocated: number
+  wallet_balance: number
+  wallet_allocated: number
   total_revenue_share: number
   total_profit: number
-  wallet_balance: number
 }
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -87,17 +84,17 @@ export default function PartnershipPage() {
     const partnerDbIds = [...new Set(viewData.map(r => r.partner_db_id))]
 
     const [{ data: containerData }, { data: salesOrders }, { data: presales }, { data: trips }, { data: partnerData }] = await Promise.all([
-      supabase.from('containers').select('id, status, trip_id').in('id', containerDbIds),
+      supabase.from('containers').select('id, status').in('id', containerDbIds),
       supabase.from('sales_orders').select('container_id, customer_payable').in('container_id', containerDbIds),
       supabase.from('presales').select('container_id, expected_sale_revenue, sale_type').in('container_id', containerDbIds),
       supabase.from('trips').select('id, trip_id, title').in('id', [...new Set(viewData.map(r => r.trip_id))]),
-      supabase.from('partners').select('id, wallet_balance').in('id', partnerDbIds),
+      supabase.from('partners').select('id, name, wallet_balance, wallet_allocated').in('id', partnerDbIds),
     ])
 
     const containerStatusMap = Object.fromEntries((containerData ?? []).map(c => [c.id, c.status]))
     const tripMap = Object.fromEntries((trips ?? []).map(t => [t.id, t]))
     const presaleMap = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
-    const walletMap = Object.fromEntries((partnerData ?? []).map(p => [p.id, Number(p.wallet_balance ?? 0)]))
+    const partnerMap = Object.fromEntries((partnerData ?? []).map(p => [p.id, p]))
     const revenueByContainer = (salesOrders ?? []).reduce((acc, so) => {
       acc[so.container_id] = (acc[so.container_id] ?? 0) + Number(so.customer_payable)
       return acc
@@ -124,10 +121,8 @@ export default function PartnershipPage() {
           container_id: row.container_ref,
           tracking_number: row.tracking_number,
           trip_id: trip?.trip_id ?? '—',
-          trip_db_id: row.trip_id,
           trip_title: trip?.title ?? '—',
           container_status: status,
-          sale_type: presale?.sale_type ?? null,
           full_quoted_landing_cost_ngn: Number(row.full_quoted_landing_cost_ngn),
           expected_sale_revenue: Number(presale?.expected_sale_revenue ?? 0),
           actual_sales: actualSales,
@@ -140,7 +135,7 @@ export default function PartnershipPage() {
 
       const topup = Number(row.topup_needed_ngn)
       containerMap[row.container_db_id].funders.push({
-        funder_id: row.partner_db_id,
+        funder_id: row.funder_id,
         funder_name: row.funder_name,
         percentage: Number(row.percentage),
         partner_quoted_cost_ngn: partnerCost,
@@ -154,38 +149,36 @@ export default function PartnershipPage() {
     }
 
     // Build partner summary rows
-    const partnerMap: Record<string, PartnerSummaryRow> = {}
+    const pSummary: Record<string, PartnerSummaryRow> = {}
     for (const row of viewData) {
       const actualSales = revenueByContainer[row.container_db_id] ?? 0
       const pct = Number(row.percentage) / 100
       const partnerRevShare = actualSales * pct
       const partnerCost = Number(row.partner_quoted_cost_ngn)
+      const partner = partnerMap[row.partner_db_id]
 
-      if (!partnerMap[row.partner_db_id]) {
-        partnerMap[row.partner_db_id] = {
-          funder_id: row.funder_id,
-          funder_name: row.funder_name,
+      if (!pSummary[row.partner_db_id]) {
+        pSummary[row.partner_db_id] = {
           partner_db_id: row.partner_db_id,
+          funder_name: row.funder_name,
           container_count: 0,
           total_quoted_cost: 0,
-          total_received: 0,
-          total_topup: 0,
+          total_allocated: 0,
+          wallet_balance: Number(partner?.wallet_balance ?? 0),
+          wallet_allocated: Number(partner?.wallet_allocated ?? 0),
           total_revenue_share: 0,
           total_profit: 0,
-          wallet_balance: walletMap[row.partner_db_id] ?? 0,
         }
       }
-
-      partnerMap[row.partner_db_id].container_count += 1
-      partnerMap[row.partner_db_id].total_quoted_cost += partnerCost
-      partnerMap[row.partner_db_id].total_received += Number(row.amount_received_ngn)
-      partnerMap[row.partner_db_id].total_topup += Math.max(Number(row.topup_needed_ngn), 0)
-      partnerMap[row.partner_db_id].total_revenue_share += partnerRevShare
-      partnerMap[row.partner_db_id].total_profit += partnerRevShare - partnerCost
+      pSummary[row.partner_db_id].container_count += 1
+      pSummary[row.partner_db_id].total_quoted_cost += partnerCost
+      pSummary[row.partner_db_id].total_allocated += Number(row.amount_received_ngn)
+      pSummary[row.partner_db_id].total_revenue_share += partnerRevShare
+      pSummary[row.partner_db_id].total_profit += partnerRevShare - partnerCost
     }
 
     setContainers(Object.values(containerMap))
-    setPartnerRows(Object.values(partnerMap))
+    setPartnerRows(Object.values(pSummary))
     setLoading(false)
   }, [])
 
@@ -205,26 +198,25 @@ export default function PartnershipPage() {
     search === '' || p.funder_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  // Portfolio metrics (from containers tab)
-  const totalQuotedCost = filteredContainers.reduce((s, c) => s + c.full_quoted_landing_cost_ngn, 0)
-  const totalExpectedRevenue = filteredContainers.reduce((s, c) => s + c.expected_sale_revenue, 0)
-  const totalTopupNeeded = filteredContainers.reduce((s, c) => s + c.total_topup_needed, 0)
-  const totalWalletBalance = filteredPartners.reduce((s, p) => s + p.wallet_balance, 0)
+  const totalQuotedCost = containers.reduce((s, c) => s + c.full_quoted_landing_cost_ngn, 0)
+  const totalWalletBalance = partnerRows.reduce((s, p) => s + p.wallet_balance, 0)
+  const totalAllocated = partnerRows.reduce((s, p) => s + p.wallet_allocated, 0)
+  const totalTopup = containers.reduce((s, c) => s + c.total_topup_needed, 0)
 
   return (
     <div className="space-y-5 max-w-6xl">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Partnership</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Partner-funded containers — investment, returns and top-ups</p>
+        <p className="text-sm text-gray-400 mt-0.5">Partner investments, wallets and container allocations</p>
       </div>
 
       {/* Portfolio metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Containers', value: containers.length.toString(), icon: <Package size={14} className="text-brand-600" />, color: 'text-gray-900' },
-          { label: 'Total quoted cost', value: fmt(totalQuotedCost), icon: <Wallet size={14} className="text-blue-600" />, color: 'text-blue-700' },
-          { label: 'Expected revenue', value: fmt(totalExpectedRevenue), icon: <TrendingUp size={14} className="text-green-600" />, color: 'text-green-700' },
-          { label: 'Top-up needed', value: fmt(totalTopupNeeded), icon: <AlertTriangle size={14} className={totalTopupNeeded > 0 ? 'text-amber-500' : 'text-green-500'} />, color: totalTopupNeeded > 0 ? 'text-amber-700' : 'text-green-700' },
+          { label: 'Total containers', value: containers.length.toString(), icon: <Package size={14} className="text-brand-600" />, color: 'text-gray-900' },
+          { label: 'Partner wallets total', value: fmt(totalWalletBalance), icon: <Wallet size={14} className="text-brand-600" />, color: 'text-brand-700' },
+          { label: 'Total allocated', value: fmt(totalAllocated), icon: <TrendingUp size={14} className="text-blue-600" />, color: 'text-blue-700' },
+          { label: 'Pending top-ups', value: totalTopup > 0 ? fmt(totalTopup) : 'None', icon: <AlertTriangle size={14} className={totalTopup > 0 ? 'text-amber-500' : 'text-green-500'} />, color: totalTopup > 0 ? 'text-amber-700' : 'text-green-700' },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-center gap-1.5 mb-1">{m.icon}<p className="text-xs text-gray-400">{m.label}</p></div>
@@ -233,46 +225,49 @@ export default function PartnershipPage() {
         ))}
       </div>
 
-      {/* Tabs + search */}
+      {/* Main panel with tabs */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center border-b border-gray-100 flex-wrap">
-          <div className="flex">
-            {[
-              { key: 'containers', label: 'By Container', count: containers.length },
-              { key: 'partners', label: 'By Partner', count: partnerRows.length },
-            ].map(tab => (
-              <button key={tab.key} onClick={() => { setActiveTab(tab.key as typeof activeTab); setSearch(''); setStatusFilter('') }}
-                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
-                  ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                {tab.label}
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {tab.count}
-                </span>
-              </button>
-            ))}
+
+        {/* Tab bar */}
+        <div className="flex border-b border-gray-100">
+          {[
+            { key: 'containers', label: 'By Container', count: containers.length },
+            { key: 'partners', label: 'By Partner', count: partnerRows.length },
+          ].map(tab => (
+            <button key={tab.key}
+              onClick={() => { setActiveTab(tab.key as typeof activeTab); setSearch(''); setStatusFilter('') }}
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
+                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {tab.label}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
+                ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Search + filter bar — inside the panel, below tabs */}
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder={activeTab === 'containers' ? 'Search container, trip or partner...' : 'Search partner...'}
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <div className="flex-1 px-4 py-2 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder={activeTab === 'containers' ? 'Search container, tracking, trip or partner...' : 'Search partner...'}
-                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            </div>
-            {activeTab === 'containers' && (
-              <button onClick={() => setShowFilters(v => !v)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg transition-colors
-                  ${showFilters || statusFilter ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                <Filter size={13} /> Filter
-                {statusFilter && <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">1</span>}
-              </button>
-            )}
-          </div>
+          {activeTab === 'containers' && (
+            <button onClick={() => setShowFilters(v => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs border rounded-lg transition-colors
+                ${showFilters || statusFilter ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter size={13} /> Filter
+              {statusFilter && <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">1</span>}
+            </button>
+          )}
         </div>
 
         {/* Filter row */}
         {showFilters && activeTab === 'containers' && (
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-gray-50/50">
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
               <option value="">All sales statuses</option>
@@ -292,7 +287,7 @@ export default function PartnershipPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Container','Tracking No.','Trip','Partners','Status','Full Quoted Cost','Expected Revenue','Actual Sales','Top-up Needed','Sales Status',''].map(h => (
+                  {['Container','Tracking','Trip','Partners','Status','Full Quoted Cost','Expected Revenue','Actual Sales','Top-up Needed','Sales Status',''].map(h => (
                     <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -315,7 +310,6 @@ export default function PartnershipPage() {
                   </tr>
                 ) : filteredContainers.map(row => {
                   const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
-                  const hasTopup = row.total_topup_needed > 0
                   return (
                     <tr key={row.container_db_id}
                       onClick={() => router.push(`/portal/partnership/${row.container_db_id}`)}
@@ -326,14 +320,11 @@ export default function PartnershipPage() {
                       <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{row.tracking_number ?? '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <p className="text-xs font-medium text-gray-700">{row.trip_id}</p>
-                        <p className="text-xs text-gray-400 truncate max-w-[100px]">{row.trip_title}</p>
+                        <p className="text-xs text-gray-400 truncate max-w-[90px]">{row.trip_title}</p>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          <Users size={12} className="text-gray-400" />
-                          <span className="text-xs text-gray-600 font-medium">{row.partner_count}</span>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-0.5">{row.funders.map(f => f.funder_name).join(', ')}</p>
+                        <p className="text-xs text-gray-600 font-medium">{row.partner_count} partner{row.partner_count !== 1 ? 's' : ''}</p>
+                        <p className="text-xs text-gray-400">{row.funders.map(f => f.funder_name).join(', ')}</p>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${CONTAINER_STATUS_COLOR[row.container_status] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -350,9 +341,9 @@ export default function PartnershipPage() {
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        {hasTopup
+                        {row.total_topup_needed > 0
                           ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(row.total_topup_needed)}</span>
-                          : <span className="text-xs text-green-600 font-medium">Fully funded</span>}
+                          : <span className="text-xs text-green-600 font-medium">Funded</span>}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>{salesCfg.label}</span>
@@ -374,7 +365,7 @@ export default function PartnershipPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Partner','Containers','Total investment','Amount received','Top-up needed','Revenue share','Profit','Wallet balance',''].map(h => (
+                  {['Partner','Containers','Wallet balance','Allocated to containers','Total investment','Revenue share','Profit',''].map(h => (
                     <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -383,14 +374,14 @@ export default function PartnershipPage() {
                 {loading ? (
                   Array.from({ length: 3 }).map((_, i) => (
                     <tr key={i} className="border-b border-gray-50">
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: 8 }).map((_, j) => (
                         <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                       ))}
                     </tr>
                   ))
                 ) : filteredPartners.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center">
+                    <td colSpan={8} className="px-4 py-12 text-center">
                       <Users size={24} className="text-gray-200 mx-auto mb-2" />
                       <p className="text-sm text-gray-400">No partners found.</p>
                     </td>
@@ -410,16 +401,16 @@ export default function PartnershipPage() {
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full font-medium text-gray-600">{p.container_count}</span>
                     </td>
-                    <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
-                    <td className="px-3 py-3 text-green-600 font-medium whitespace-nowrap text-xs">{fmt(p.total_received)}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      {p.total_topup > 0
-                        ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(p.total_topup)}</span>
-                        : <span className="text-xs text-green-600 font-medium">Fully funded</span>}
+                      <span className={`text-sm font-bold ${p.wallet_balance > 0 ? 'text-brand-700' : 'text-gray-400'}`}>
+                        {fmt(p.wallet_balance)}
+                      </span>
                     </td>
+                    <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap text-xs">{fmt(p.wallet_allocated)}</td>
+                    <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
                       {p.total_revenue_share > 0
-                        ? <span className="text-blue-700 font-medium">{fmt(p.total_revenue_share)}</span>
+                        ? <span className="text-green-600 font-medium">{fmt(p.total_revenue_share)}</span>
                         : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
@@ -428,11 +419,6 @@ export default function PartnershipPage() {
                             {p.total_profit >= 0 ? '+' : ''}{fmt(p.total_profit)}
                           </span>
                         : <span className="text-gray-300 text-xs">—</span>}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-bold ${p.wallet_balance > 0 ? 'text-brand-700' : 'text-gray-400'}`}>
-                        {fmt(p.wallet_balance)}
-                      </span>
                     </td>
                     <td className="px-3 py-3">
                       <ChevronRight size={14} className="text-gray-300 group-hover:text-brand-400 transition-colors" />
@@ -443,13 +429,13 @@ export default function PartnershipPage() {
               {filteredPartners.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-brand-100">
-                    <td colSpan={2} className="px-3 py-2.5 text-xs font-bold text-gray-500 uppercase">Totals</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-gray-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_quoted_cost,0))}</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_received,0))}</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-amber-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_topup,0))}</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-blue-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_revenue_share,0))}</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_profit,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-gray-500 uppercase">Totals</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-gray-700">{filteredPartners.reduce((s,p)=>s+p.container_count,0)}</td>
                     <td className="px-3 py-2.5 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.wallet_balance,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-blue-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.wallet_allocated,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-gray-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_quoted_cost,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_revenue_share,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_profit,0))}</td>
                     <td />
                   </tr>
                 </tfoot>

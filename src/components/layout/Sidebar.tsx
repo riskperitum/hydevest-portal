@@ -48,6 +48,11 @@ const NAV: NavItem[] = [
     adminOnly: false,
   },
   {
+    href: '/portal/requestbox',
+    label: 'Request Box',
+    icon: Inbox,
+  },
+  {
     href: '/portal/partner-dashboard',
     label: 'My Dashboard',
     icon: LayoutDashboard,
@@ -55,7 +60,6 @@ const NAV: NavItem[] = [
   },
   { label: 'Finance',     href: '/portal/finance',    icon: Wallet },
   { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
-  { label: 'Requestbox',  href: '/portal/requestbox', icon: Inbox },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
 ]

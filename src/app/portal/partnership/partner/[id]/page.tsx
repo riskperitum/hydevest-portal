@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Loader2, TrendingUp,
-  Wallet, AlertTriangle, Plus, ArrowDownCircle,
-  RefreshCw, Check, Activity
+  ArrowLeft, Loader2, Wallet, AlertTriangle,
+  Plus, ArrowDownCircle, RefreshCw, ChevronRight,
+  TrendingUp, Package
 } from 'lucide-react'
 import Link from 'next/link'
 import AmountInput from '@/components/ui/AmountInput'
@@ -19,17 +19,19 @@ interface Partner {
   email: string | null
   phone: string | null
   wallet_balance: number
+  wallet_allocated: number
   total_invested: number
   total_profit: number
   total_withdrawn: number
+  is_active: boolean
 }
 
-interface ContainerRow {
+interface ContainerAllocation {
+  funder_record_id: string
   container_db_id: string
   container_id: string
   tracking_number: string | null
   trip_id: string
-  trip_title: string
   percentage: number
   partner_quoted_cost_ngn: number
   amount_received_ngn: number
@@ -39,7 +41,7 @@ interface ContainerRow {
   partner_revenue_share: number
   partner_profit: number
   sales_status: string
-  funder_record_id: string
+  container_status: string
 }
 
 interface WalletTxn {
@@ -51,63 +53,58 @@ interface WalletTxn {
   created_at: string
 }
 
-interface PayoutRequest {
-  id: string
-  request_id: string
-  amount: number
-  status: string
-  notes: string | null
-  created_at: string
-}
-
-interface ReinvestRequest {
-  id: string
-  request_id: string
-  amount: number
-  status: string
-  notes: string | null
-  created_at: string
-}
-
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-export default function PartnerViewPage() {
+const TXN_TYPE_COLOR: Record<string, string> = {
+  topup:        'bg-green-50 text-green-700',
+  credit:       'bg-green-50 text-green-700',
+  debit:        'bg-red-50 text-red-600',
+  payout:       'bg-red-50 text-red-600',
+  allocation:   'bg-blue-50 text-blue-700',
+  reinvestment: 'bg-brand-50 text-brand-700',
+  sale_credit:  'bg-emerald-50 text-emerald-700',
+}
+
+export default function PartnerAdminPage() {
   const params = useParams()
   const router = useRouter()
   const partnerDbId = params.id as string
 
   const [partner, setPartner] = useState<Partner | null>(null)
-  const [containers, setContainers] = useState<ContainerRow[]>([])
+  const [allocations, setAllocations] = useState<ContainerAllocation[]>([])
   const [walletTxns, setWalletTxns] = useState<WalletTxn[]>([])
-  const [payouts, setPayouts] = useState<PayoutRequest[]>([])
-  const [reinvestments, setReinvestments] = useState<ReinvestRequest[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'containers' | 'wallet' | 'topups' | 'payouts' | 'reinvestments'>('containers')
-  const [profiles, setProfiles] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [activeTab, setActiveTab] = useState<'containers' | 'wallet'>('containers')
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
+  const [profiles, setProfiles] = useState<{ id: string; full_name: string | null; email: string }[]>([])
+  const [allContainers, setAllContainers] = useState<{ id: string; container_id: string; tracking_number: string | null }[]>([])
 
-  // Top-up modal
+  // Top-up wallet modal
   const [topupOpen, setTopupOpen] = useState(false)
-  const [topupFunderId, setTopupFunderId] = useState('')
-  const [topupContainerId, setTopupContainerId] = useState('')
   const [topupAmount, setTopupAmount] = useState('')
   const [topupNote, setTopupNote] = useState('')
   const [savingTopup, setSavingTopup] = useState(false)
 
-  // Credit wallet modal
-  const [creditOpen, setCreditOpen] = useState(false)
-  const [creditForm, setCreditForm] = useState({ container_db_id: '', amount: '', description: '' })
-  const [savingCredit, setSavingCredit] = useState(false)
+  // Allocate to container modal
+  const [allocateOpen, setAllocateOpen] = useState(false)
+  const [allocateContainerId, setAllocateContainerId] = useState('')
+  const [allocateAmount, setAllocateAmount] = useState('')
+  const [allocateNote, setAllocateNote] = useState('')
+  const [savingAllocate, setSavingAllocate] = useState(false)
 
-  // Payout modal
-  const [payoutOpen, setPayoutOpen] = useState(false)
-  const [payoutForm, setPayoutForm] = useState({ amount: '', notes: '', assignee: '' })
-  const [savingPayout, setSavingPayout] = useState(false)
+  // Credit from sale modal
+  const [saleOpen, setSaleOpen] = useState(false)
+  const [saleContainerId, setSaleContainerId] = useState('')
+  const [saleAmount, setSaleAmount] = useState('')
+  const [saleNote, setSaleNote] = useState('')
+  const [savingSale, setSavingSale] = useState(false)
 
-  // Reinvest modal
-  const [reinvestOpen, setReinvestOpen] = useState(false)
-  const [reinvestForm, setReinvestForm] = useState({ amount: '', notes: '' })
-  const [savingReinvest, setSavingReinvest] = useState(false)
+  // Deduct / payout modal
+  const [deductOpen, setDeductOpen] = useState(false)
+  const [deductAmount, setDeductAmount] = useState('')
+  const [deductNote, setDeductNote] = useState('')
+  const [deductType, setDeductType] = useState<'payout' | 'debit'>('payout')
+  const [savingDeduct, setSavingDeduct] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -116,23 +113,27 @@ export default function PartnerViewPage() {
       { data: partnerData },
       { data: viewData },
       { data: walletData },
-      { data: payoutData },
-      { data: reinvestData },
       { data: allProfiles },
+      { data: containers },
     ] = await Promise.all([
       supabase.from('partners').select('*').eq('id', partnerDbId).single(),
       supabase.from('partnership_container_view').select('*').eq('partner_db_id', partnerDbId),
       supabase.from('partner_wallet_transactions').select('id, type, amount, description, reference_ref, created_at').eq('partner_id', partnerDbId).order('created_at', { ascending: false }),
-      supabase.from('partner_payout_requests').select('id, request_id, amount, status, notes, created_at').eq('partner_id', partnerDbId).order('created_at', { ascending: false }),
-      supabase.from('partner_reinvestment_requests').select('id, request_id, amount, status, notes, created_at').eq('partner_id', partnerDbId).order('created_at', { ascending: false }),
       supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
+      supabase.from('containers').select('id, container_id, tracking_number'),
     ])
 
-    setPartner({ ...partnerData, wallet_balance: Number(partnerData?.wallet_balance ?? 0), total_invested: Number(partnerData?.total_invested ?? 0), total_profit: Number(partnerData?.total_profit ?? 0), total_withdrawn: Number(partnerData?.total_withdrawn ?? 0) })
+    setPartner({
+      ...partnerData,
+      wallet_balance: Number(partnerData?.wallet_balance ?? 0),
+      wallet_allocated: Number(partnerData?.wallet_allocated ?? 0),
+      total_invested: Number(partnerData?.total_invested ?? 0),
+      total_profit: Number(partnerData?.total_profit ?? 0),
+      total_withdrawn: Number(partnerData?.total_withdrawn ?? 0),
+    })
     setWalletTxns((walletData ?? []).map(w => ({ ...w, amount: Number(w.amount) })))
-    setPayouts((payoutData ?? []).map(p => ({ ...p, amount: Number(p.amount) })))
-    setReinvestments((reinvestData ?? []).map(r => ({ ...r, amount: Number(r.amount) })))
     setProfiles(allProfiles ?? [])
+    setAllContainers(containers ?? [])
 
     if (!viewData?.length) { setLoading(false); return }
 
@@ -141,7 +142,7 @@ export default function PartnerViewPage() {
       supabase.from('containers').select('id, status').in('id', containerDbIds),
       supabase.from('sales_orders').select('container_id, customer_payable').in('container_id', containerDbIds),
       supabase.from('presales').select('container_id, expected_sale_revenue').in('container_id', containerDbIds),
-      supabase.from('trips').select('id, trip_id, title').in('id', [...new Set(viewData.map(r => r.trip_id))]),
+      supabase.from('trips').select('id, trip_id').in('id', [...new Set(viewData.map(r => r.trip_id))]),
     ])
 
     const statusMap = Object.fromEntries((containerData ?? []).map(c => [c.id, c.status]))
@@ -152,27 +153,23 @@ export default function PartnerViewPage() {
       return acc
     }, {} as Record<string, number>)
 
-    setContainers(viewData.map(r => {
+    setAllocations(viewData.map(r => {
       const pct = Number(r.percentage) / 100
       const actualSales = revenueByContainer[r.container_db_id] ?? 0
       const partnerRevShare = actualSales * pct
       const partnerCost = Number(r.partner_quoted_cost_ngn)
-      const trip = tripMap[r.trip_id]
-      const presale = presaleMap[r.container_db_id]
-      const status = statusMap[r.container_db_id] ?? 'ordered'
       const displayVal = r.display_value_override ? Number(r.display_value_override) : partnerCost
-
+      const status = statusMap[r.container_db_id] ?? 'ordered'
+      const presale = presaleMap[r.container_db_id]
       let salesStatus = 'not_started'
       if (actualSales > 0 && status === 'completed') salesStatus = 'completed'
       else if (actualSales > 0) salesStatus = 'in_progress'
-
       return {
         funder_record_id: r.funder_id,
         container_db_id: r.container_db_id,
         container_id: r.container_ref,
         tracking_number: r.tracking_number,
-        trip_id: trip?.trip_id ?? '—',
-        trip_title: trip?.title ?? '—',
+        trip_id: (tripMap[r.trip_id])?.trip_id ?? '—',
         percentage: Number(r.percentage),
         partner_quoted_cost_ngn: partnerCost,
         amount_received_ngn: Number(r.amount_received_ngn),
@@ -182,6 +179,7 @@ export default function PartnerViewPage() {
         partner_revenue_share: partnerRevShare,
         partner_profit: partnerRevShare - partnerCost,
         sales_status: salesStatus,
+        container_status: status,
       }
     }))
 
@@ -194,159 +192,110 @@ export default function PartnerViewPage() {
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user ? { id: user.id } : null))
   }, [load])
 
-  async function saveTopup(e: React.FormEvent) {
+  async function doTopup(e: React.FormEvent) {
     e.preventDefault()
     if (!topupAmount) return
     setSavingTopup(true)
     const supabase = createClient()
     const amount = parseFloat(topupAmount)
-    const container = containers.find(c => c.container_db_id === topupContainerId)
-
-    // Update amount_received_ngn on container_funders
-    const newReceived = (container?.amount_received_ngn ?? 0) + amount
-    await supabase.from('container_funders')
-      .update({ amount_received_ngn: newReceived })
-      .eq('id', topupFunderId)
-
-    // Log wallet transaction
     await supabase.from('partner_wallet_transactions').insert({
-      partner_id: partnerDbId,
-      type: 'topup',
-      amount,
-      description: topupNote || `Top-up for ${container?.container_id ?? ''}`,
-      reference_type: 'container',
-      reference_id: topupContainerId || null,
-      reference_ref: container?.container_id ?? null,
+      partner_id: partnerDbId, type: 'topup', amount,
+      description: topupNote || 'Wallet top-up (cash received)',
       performed_by: currentUser?.id,
     })
-
-    setSavingTopup(false)
-    setTopupOpen(false)
-    setTopupAmount('')
-    setTopupNote('')
-    load()
-  }
-
-  async function creditWallet(e: React.FormEvent) {
-    e.preventDefault()
-    if (!creditForm.amount) return
-    setSavingCredit(true)
-    const supabase = createClient()
-    const amount = parseFloat(creditForm.amount)
-    const container = containers.find(c => c.container_db_id === creditForm.container_db_id)
-
-    await supabase.from('partner_wallet_transactions').insert({
-      partner_id: partnerDbId,
-      type: 'credit',
-      amount,
-      description: creditForm.description || `Container sale proceeds — ${container?.container_id ?? ''}`,
-      reference_type: 'container',
-      reference_id: creditForm.container_db_id || null,
-      reference_ref: container?.container_id ?? null,
-      performed_by: currentUser?.id,
-    })
-
     await supabase.from('partners').update({
       wallet_balance: (partner?.wallet_balance ?? 0) + amount,
     }).eq('id', partnerDbId)
-
-    setSavingCredit(false)
-    setCreditOpen(false)
-    setCreditForm({ container_db_id: '', amount: '', description: '' })
+    setSavingTopup(false); setTopupOpen(false); setTopupAmount(''); setTopupNote('')
     load()
   }
 
-  async function submitPayout(e: React.FormEvent) {
+  async function doAllocate(e: React.FormEvent) {
     e.preventDefault()
-    if (!payoutForm.amount || !payoutForm.assignee) return
-    setSavingPayout(true)
+    if (!allocateAmount || !allocateContainerId) return
+    setSavingAllocate(true)
     const supabase = createClient()
-    const amount = parseFloat(payoutForm.amount)
-    const requestId = `PAY-${Date.now().toString().slice(-6)}`
+    const amount = parseFloat(allocateAmount)
+    const container = allContainers.find(c => c.id === allocateContainerId)
 
-    const { data: req } = await supabase.from('partner_payout_requests').insert({
-      request_id: requestId,
-      partner_id: partnerDbId,
-      amount,
-      status: 'pending',
-      requested_by: currentUser?.id,
-      assigned_to: payoutForm.assignee,
-      notes: payoutForm.notes || null,
-    }).select().single()
-
-    await supabase.from('tasks').insert({
-      type: 'approval_request',
-      title: `Partner payout — ${partner?.name} (${requestId})`,
-      description: `Payout of ${fmt(amount)} for partner ${partner?.name}`,
-      module: 'partner_payouts',
-      record_id: req?.id,
-      record_ref: requestId,
-      requested_by: currentUser?.id,
-      assigned_to: payoutForm.assignee,
-      priority: 'normal',
+    // Deduct from wallet
+    await supabase.from('partner_wallet_transactions').insert({
+      partner_id: partnerDbId, type: 'allocation', amount: -amount,
+      description: allocateNote || `Allocated to container ${container?.container_id ?? ''}`,
+      reference_type: 'container', reference_id: allocateContainerId,
+      reference_ref: container?.container_id ?? null,
+      performed_by: currentUser?.id,
     })
 
-    await supabase.from('notifications').insert({
-      user_id: payoutForm.assignee,
-      type: 'task_approval_request',
-      title: `Payout request — ${partner?.name}`,
-      message: `${fmt(amount)} payout requested`,
-      record_id: req?.id,
-      module: 'partner_payouts',
-    })
+    // Update container_funders amount_received
+    await supabase.from('container_funders')
+      .update({ amount_received_ngn: amount })
+      .eq('funder_id', partnerDbId)
+      .eq('container_id', allocateContainerId)
+      .eq('funder_type', 'partner')
 
-    setSavingPayout(false)
-    setPayoutOpen(false)
-    setPayoutForm({ amount: '', notes: '', assignee: '' })
+    // Update partner wallet & allocated
+    await supabase.from('partners').update({
+      wallet_balance: Math.max((partner?.wallet_balance ?? 0) - amount, 0),
+      wallet_allocated: (partner?.wallet_allocated ?? 0) + amount,
+    }).eq('id', partnerDbId)
+
+    setSavingAllocate(false); setAllocateOpen(false); setAllocateContainerId(''); setAllocateAmount(''); setAllocateNote('')
     load()
   }
 
-  async function submitReinvest(e: React.FormEvent) {
+  async function doSaleCredit(e: React.FormEvent) {
     e.preventDefault()
-    if (!reinvestForm.amount) return
-    setSavingReinvest(true)
+    if (!saleAmount) return
+    setSavingSale(true)
     const supabase = createClient()
-    const amount = parseFloat(reinvestForm.amount)
-    const requestId = `REINV-${Date.now().toString().slice(-6)}`
-
-    await supabase.from('partner_reinvestment_requests').insert({
-      request_id: requestId,
-      partner_id: partnerDbId,
-      amount,
-      status: 'pending',
-      requested_by: currentUser?.id,
-      notes: reinvestForm.notes || null,
-    })
+    const amount = parseFloat(saleAmount)
+    const container = allocations.find(a => a.container_db_id === saleContainerId)
 
     await supabase.from('partner_wallet_transactions').insert({
-      partner_id: partnerDbId,
-      type: 'reinvestment',
-      amount: -amount,
-      description: `Reinvestment request — ${requestId}`,
-      reference_ref: requestId,
+      partner_id: partnerDbId, type: 'sale_credit', amount,
+      description: saleNote || `Container sale proceeds — ${container?.container_id ?? ''}`,
+      reference_type: 'container', reference_id: saleContainerId || null,
+      reference_ref: container?.container_id ?? null,
+      performed_by: currentUser?.id,
+    })
+
+    // Update wallet — add sale amount, reduce allocated
+    await supabase.from('partners').update({
+      wallet_balance: (partner?.wallet_balance ?? 0) + amount,
+      wallet_allocated: Math.max((partner?.wallet_allocated ?? 0) - (container?.amount_received_ngn ?? 0), 0),
+    }).eq('id', partnerDbId)
+
+    setSavingSale(false); setSaleOpen(false); setSaleContainerId(''); setSaleAmount(''); setSaleNote('')
+    load()
+  }
+
+  async function doDeduct(e: React.FormEvent) {
+    e.preventDefault()
+    if (!deductAmount) return
+    setSavingDeduct(true)
+    const supabase = createClient()
+    const amount = parseFloat(deductAmount)
+
+    await supabase.from('partner_wallet_transactions').insert({
+      partner_id: partnerDbId, type: deductType, amount: -amount,
+      description: deductNote || (deductType === 'payout' ? 'Partner payout — sent to bank account' : 'Wallet deduction'),
       performed_by: currentUser?.id,
     })
 
     await supabase.from('partners').update({
       wallet_balance: Math.max((partner?.wallet_balance ?? 0) - amount, 0),
+      total_withdrawn: deductType === 'payout' ? (partner?.total_withdrawn ?? 0) + amount : partner?.total_withdrawn,
     }).eq('id', partnerDbId)
 
-    setSavingReinvest(false)
-    setReinvestOpen(false)
-    setReinvestForm({ amount: '', notes: '' })
+    setSavingDeduct(false); setDeductOpen(false); setDeductAmount(''); setDeductNote('')
     load()
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-600" size={28} /></div>
   if (!partner) return <div className="text-center py-16 text-gray-400">Partner not found.</div>
 
-  const totalInvestment = containers.reduce((s, c) => s + c.partner_quoted_cost_ngn, 0)
-  const totalReceived = containers.reduce((s, c) => s + c.amount_received_ngn, 0)
-  const totalTopup = containers.reduce((s, c) => s + Math.max(c.topup_needed_ngn, 0), 0)
-  const totalRevShare = containers.reduce((s, c) => s + c.partner_revenue_share, 0)
-  const totalProfit = containers.reduce((s, c) => s + c.partner_profit, 0)
-
-  const PAYOUT_STATUS = { pending: 'bg-amber-50 text-amber-700', approved: 'bg-blue-50 text-blue-700', rejected: 'bg-red-50 text-red-600', paid: 'bg-green-50 text-green-700' }
+  const totalTopup = allocations.reduce((s, a) => s + Math.max(a.topup_needed_ngn, 0), 0)
 
   return (
     <div className="space-y-5 max-w-5xl">
@@ -370,49 +319,62 @@ export default function PartnerViewPage() {
             </div>
           </div>
         </div>
+        {/* Admin action buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => setCreditOpen(true)}
+          <button onClick={() => setTopupOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-green-200 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors">
-            <Plus size={14} /> Credit wallet
+            <Plus size={14} /> Top up wallet
           </button>
-          <button onClick={() => setPayoutOpen(true)} disabled={partner.wallet_balance <= 0}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors">
-            <ArrowDownCircle size={14} /> Payout
+          <button onClick={() => setAllocateOpen(true)} disabled={partner.wallet_balance <= 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-blue-200 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors">
+            <Package size={14} /> Allocate to container
           </button>
-          <button onClick={() => setReinvestOpen(true)} disabled={partner.wallet_balance <= 0}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 rounded-lg hover:bg-brand-100 disabled:opacity-50 transition-colors">
-            <RefreshCw size={14} /> Reinvest
+          <button onClick={() => setSaleOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors">
+            <TrendingUp size={14} /> Credit from sale
+          </button>
+          <button onClick={() => setDeductOpen(true)} disabled={partner.wallet_balance <= 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-red-200 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors">
+            <ArrowDownCircle size={14} /> Deduct / Payout
           </button>
         </div>
       </div>
 
-      {/* Metric cards */}
+      {/* Wallet summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Wallet balance', value: fmt(partner.wallet_balance), color: 'text-brand-700', bg: 'bg-brand-50' },
-          { label: 'Total investment', value: fmt(totalInvestment), color: 'text-blue-700', bg: 'bg-blue-50' },
-          { label: 'Top-up needed', value: totalTopup > 0 ? fmt(totalTopup) : 'Fully funded', color: totalTopup > 0 ? 'text-amber-700' : 'text-green-700', bg: totalTopup > 0 ? 'bg-amber-50' : 'bg-green-50' },
-          { label: 'Total profit', value: totalRevShare > 0 ? fmt(totalProfit) : '—', color: totalProfit >= 0 ? 'text-green-700' : 'text-red-600', bg: 'bg-white' },
+          { label: 'Available wallet', value: fmt(partner.wallet_balance), color: 'text-brand-700', bg: 'bg-brand-50', sub: 'Not yet allocated' },
+          { label: 'Allocated to containers', value: fmt(partner.wallet_allocated), color: 'text-blue-700', bg: 'bg-blue-50', sub: 'Locked in containers' },
+          { label: 'Total position', value: fmt(partner.wallet_balance + partner.wallet_allocated), color: 'text-gray-900', bg: 'bg-white', sub: 'Wallet + allocated' },
+          { label: 'Total withdrawn', value: fmt(partner.total_withdrawn), color: 'text-gray-600', bg: 'bg-gray-50', sub: 'All-time payouts' },
         ].map(m => (
           <div key={m.label} className={`${m.bg} rounded-xl border border-white shadow-sm p-4`}>
             <p className="text-xs text-gray-400 mb-1">{m.label}</p>
             <p className={`text-base font-bold truncate ${m.color}`}>{m.value}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
           </div>
         ))}
       </div>
 
+      {/* Top-up alert */}
+      {totalTopup > 0 && (
+        <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <p className="text-sm font-medium text-amber-800">
+            Partner has outstanding top-up of <span className="font-bold">{fmt(totalTopup)}</span> across allocated containers.
+          </p>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex border-b border-gray-100 overflow-x-auto">
+        <div className="flex border-b border-gray-100">
           {[
-            { key: 'containers', label: 'Containers', count: containers.length },
-            { key: 'topups', label: 'Top-ups', count: containers.filter(c => c.topup_needed_ngn > 0).length },
-            { key: 'wallet', label: 'Wallet', count: walletTxns.length },
-            { key: 'payouts', label: 'Payouts', count: payouts.length },
-            { key: 'reinvestments', label: 'Reinvestments', count: reinvestments.length },
+            { key: 'containers', label: 'Container allocations', count: allocations.length },
+            { key: 'wallet', label: 'Wallet transactions', count: walletTxns.length },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)}
-              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap
+              className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
                 ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {tab.label}
               <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
@@ -423,142 +385,94 @@ export default function PartnerViewPage() {
           ))}
         </div>
 
-        {/* Containers tab */}
+        {/* Container allocations */}
         {activeTab === 'containers' && (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  {['Container','Trip','Stake','Investment','Received','Top-up','Display value','Exp. return','Actual return','Profit','Status'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {containers.map(c => (
-                  <tr key={c.container_db_id}
-                    onClick={() => router.push(`/portal/partnership/${c.container_db_id}`)}
-                    className="border-b border-gray-50 hover:bg-brand-50/20 transition-colors cursor-pointer group">
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <p className="font-mono text-xs font-semibold text-brand-700">{c.container_id}</p>
-                      <p className="text-xs text-gray-400 font-mono">{c.tracking_number ?? '—'}</p>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <p className="text-xs font-medium text-gray-700">{c.trip_id}</p>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="text-sm font-bold text-brand-700">{c.percentage.toFixed(0)}%</span>
-                    </td>
-                    <td className="px-3 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{fmt(c.partner_quoted_cost_ngn)}</td>
-                    <td className="px-3 py-3 text-xs text-green-600 font-medium whitespace-nowrap">{fmt(c.amount_received_ngn)}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {c.topup_needed_ngn > 0
-                        ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(c.topup_needed_ngn)}</span>
-                        : <span className="text-xs text-green-600 font-medium">✓</span>}
-                    </td>
-                    <td className="px-3 py-3 text-xs text-blue-700 font-medium whitespace-nowrap">{fmt(c.display_value)}</td>
-                    <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{c.partner_expected_return > 0 ? fmt(c.partner_expected_return) : '—'}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {c.partner_revenue_share > 0
-                        ? <span className="text-xs font-semibold text-green-600">{fmt(c.partner_revenue_share)}</span>
-                        : <span className="text-gray-300 text-xs">—</span>}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {c.partner_revenue_share > 0
-                        ? <span className={`text-xs font-bold ${c.partner_profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {c.partner_profit >= 0 ? '+' : ''}{fmt(c.partner_profit)}
-                          </span>
-                        : <span className="text-gray-300 text-xs">—</span>}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full
-                        ${c.sales_status === 'completed' ? 'bg-green-50 text-green-700'
-                          : c.sales_status === 'in_progress' ? 'bg-amber-50 text-amber-700'
-                          : 'bg-gray-100 text-gray-500'}`}>
-                        {c.sales_status === 'completed' ? 'Completed' : c.sales_status === 'in_progress' ? 'In progress' : 'Not started'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Top-ups tab */}
-        {activeTab === 'topups' && (
-          <div className="overflow-x-auto">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-              <p className="text-sm text-gray-600">Containers where partner still owes funds</p>
-              {containers.some(c => c.topup_needed_ngn > 0) && (
-                <button onClick={() => {
-                  const firstTopup = containers.find(c => c.topup_needed_ngn > 0)
-                  if (firstTopup) {
-                    setTopupFunderId(firstTopup.funder_record_id)
-                    setTopupContainerId(firstTopup.container_db_id)
-                    setTopupAmount(firstTopup.topup_needed_ngn.toFixed(2))
-                    setTopupOpen(true)
-                  }
-                }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">
-                  <Plus size={12} /> Record top-up
+            {allocations.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <Package size={24} className="text-gray-200" />
+                <p className="text-sm text-gray-400">No containers allocated yet.</p>
+                <button onClick={() => setAllocateOpen(true)}
+                  className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                  <Plus size={12} /> Allocate to container
                 </button>
-              )}
-            </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  {['Container','Stake','Investment','Received','Top-up needed','Action'].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {containers.filter(c => c.topup_needed_ngn > 0).length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-green-600 font-medium">✓ All containers fully funded</td></tr>
-                ) : containers.filter(c => c.topup_needed_ngn > 0).map(c => (
-                  <tr key={c.container_db_id} className="border-b border-gray-50">
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <p className="font-mono text-xs font-semibold text-brand-700">{c.container_id}</p>
-                      <p className="text-xs text-gray-400">{c.tracking_number ?? '—'}</p>
-                    </td>
-                    <td className="px-3 py-3 text-sm font-bold text-brand-700 whitespace-nowrap">{c.percentage.toFixed(0)}%</td>
-                    <td className="px-3 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{fmt(c.partner_quoted_cost_ngn)}</td>
-                    <td className="px-3 py-3 text-xs text-green-600 font-medium whitespace-nowrap">{fmt(c.amount_received_ngn)}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full">
-                        <AlertTriangle size={12} /> {fmt(c.topup_needed_ngn)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <button onClick={() => {
-                        setTopupFunderId(c.funder_record_id)
-                        setTopupContainerId(c.container_db_id)
-                        setTopupAmount(c.topup_needed_ngn.toFixed(2))
-                        setTopupOpen(true)
-                      }}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors">
-                        <Plus size={12} /> Record top-up
-                      </button>
-                    </td>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    {['Container','Trip','Stake','Quoted cost','Allocated','Remaining','Display value','Exp. return','Actual return','Profit','Status'].map(h => (
+                      <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {allocations.map(a => (
+                    <tr key={a.container_db_id}
+                      onClick={() => router.push(`/portal/partnership/${a.container_db_id}`)}
+                      className="border-b border-gray-50 hover:bg-brand-50/20 transition-colors cursor-pointer group">
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <p className="font-mono text-xs font-semibold text-brand-700">{a.container_id}</p>
+                        <p className="text-xs text-gray-400 font-mono">{a.tracking_number ?? '—'}</p>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{a.trip_id}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="text-sm font-bold text-brand-700">{a.percentage.toFixed(0)}%</span>
+                      </td>
+                      <td className="px-3 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{fmt(a.partner_quoted_cost_ngn)}</td>
+                      <td className="px-3 py-3 text-xs text-green-600 font-medium whitespace-nowrap">{fmt(a.amount_received_ngn)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {a.topup_needed_ngn > 0
+                          ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(a.topup_needed_ngn)}</span>
+                          : <span className="text-xs text-green-600 font-medium">✓ Funded</span>}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-blue-700 font-medium whitespace-nowrap">{fmt(a.display_value)}</td>
+                      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{a.partner_expected_return > 0 ? fmt(a.partner_expected_return) : '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {a.partner_revenue_share > 0
+                          ? <span className="text-xs font-semibold text-green-600">{fmt(a.partner_revenue_share)}</span>
+                          : <span className="text-gray-300 text-xs">—</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {a.partner_revenue_share > 0
+                          ? <span className={`text-xs font-bold ${a.partner_profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {a.partner_profit >= 0 ? '+' : ''}{fmt(a.partner_profit)}
+                            </span>
+                          : <span className="text-gray-300 text-xs">—</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full
+                          ${a.sales_status === 'completed' ? 'bg-green-50 text-green-700'
+                            : a.sales_status === 'in_progress' ? 'bg-amber-50 text-amber-700'
+                            : 'bg-gray-100 text-gray-500'}`}>
+                          {a.sales_status === 'completed' ? 'Completed' : a.sales_status === 'in_progress' ? 'In progress' : 'Not started'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
-        {/* Wallet tab */}
+        {/* Wallet transactions */}
         {activeTab === 'wallet' && (
-          <div className="overflow-x-auto">
-            <div className="px-5 py-3 bg-brand-50/30 border-b border-gray-100 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-500">Current wallet balance</p>
-                <p className="text-xl font-bold text-brand-700">{fmt(partner.wallet_balance)}</p>
+          <div>
+            <div className="px-5 py-3 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-6">
+                <div>
+                  <p className="text-xs text-gray-400">Available</p>
+                  <p className="text-lg font-bold text-brand-700">{fmt(partner.wallet_balance)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Allocated</p>
+                  <p className="text-lg font-bold text-blue-700">{fmt(partner.wallet_allocated)}</p>
+                </div>
               </div>
-              <button onClick={() => setCreditOpen(true)}
+              <button onClick={() => setTopupOpen(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
-                <Plus size={12} /> Credit wallet
+                <Plus size={12} /> Top up
               </button>
             </div>
             {walletTxns.length === 0 ? (
@@ -579,12 +493,8 @@ export default function PartnerViewPage() {
                   {walletTxns.map(txn => (
                     <tr key={txn.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize
-                          ${txn.type === 'credit' ? 'bg-green-50 text-green-700'
-                            : txn.type === 'topup' ? 'bg-amber-50 text-amber-700'
-                            : txn.type === 'reinvestment' ? 'bg-brand-50 text-brand-700'
-                            : 'bg-red-50 text-red-600'}`}>
-                          {txn.type}
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${TXN_TYPE_COLOR[txn.type] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {txn.type.replace('_', ' ')}
                         </span>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
@@ -592,7 +502,7 @@ export default function PartnerViewPage() {
                           {txn.amount > 0 ? '+' : ''}{fmt(Math.abs(txn.amount))}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-xs text-gray-600 max-w-[200px] truncate">{txn.description ?? '—'}</td>
+                      <td className="px-3 py-3 text-xs text-gray-600 max-w-[220px] truncate">{txn.description ?? '—'}</td>
                       <td className="px-3 py-3 text-xs font-mono text-gray-500 whitespace-nowrap">{txn.reference_ref ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
                         {new Date(txn.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -604,265 +514,167 @@ export default function PartnerViewPage() {
             )}
           </div>
         )}
-
-        {/* Payouts tab */}
-        {activeTab === 'payouts' && (
-          <div className="overflow-x-auto">
-            <div className="px-5 py-3 border-b border-gray-100 flex justify-end">
-              <button onClick={() => setPayoutOpen(true)} disabled={partner.wallet_balance <= 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
-                <ArrowDownCircle size={12} /> New payout
-              </button>
-            </div>
-            {payouts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2">
-                <ArrowDownCircle size={24} className="text-gray-200" />
-                <p className="text-sm text-gray-400">No payout requests yet.</p>
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    {['Request ID','Amount','Status','Notes','Date'].map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {payouts.map(req => (
-                    <tr key={req.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{req.request_id}</span>
-                      </td>
-                      <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{fmt(req.amount)}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${PAYOUT_STATUS[req.status as keyof typeof PAYOUT_STATUS] ?? 'bg-gray-100 text-gray-500'}`}>
-                          {req.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-xs text-gray-500 max-w-[200px] truncate">{req.notes ?? '—'}</td>
-                      <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
-                        {new Date(req.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-
-        {/* Reinvestments tab */}
-        {activeTab === 'reinvestments' && (
-          <div className="overflow-x-auto">
-            <div className="px-5 py-3 border-b border-gray-100 flex justify-end">
-              <button onClick={() => setReinvestOpen(true)} disabled={partner.wallet_balance <= 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
-                <RefreshCw size={12} /> New reinvestment
-              </button>
-            </div>
-            {reinvestments.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2">
-                <RefreshCw size={24} className="text-gray-200" />
-                <p className="text-sm text-gray-400">No reinvestment requests yet.</p>
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    {['Request ID','Amount','Status','Notes','Date'].map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {reinvestments.map(req => (
-                    <tr key={req.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{req.request_id}</span>
-                      </td>
-                      <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{fmt(req.amount)}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full
-                          ${req.status === 'allocated' ? 'bg-green-50 text-green-700'
-                            : req.status === 'cancelled' ? 'bg-red-50 text-red-600'
-                            : 'bg-amber-50 text-amber-700'}`}>
-                          {req.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-xs text-gray-500 max-w-[200px] truncate">{req.notes ?? '—'}</td>
-                      <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
-                        {new Date(req.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Top-up modal */}
-      <Modal open={topupOpen} onClose={() => setTopupOpen(false)} title="Record top-up payment" size="sm">
-        <form onSubmit={saveTopup} className="space-y-4">
-          <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
-            <p className="text-xs text-amber-700 font-medium">
-              This records a cash payment received from the partner towards their container investment.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Container</label>
-            <select value={topupContainerId} onChange={e => {
-              const c = containers.find(c => c.container_db_id === e.target.value)
-              setTopupContainerId(e.target.value)
-              setTopupFunderId(c?.funder_record_id ?? '')
-              setTopupAmount(c?.topup_needed_ngn ? c.topup_needed_ngn.toFixed(2) : '')
-            }} className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-              <option value="">Select container...</option>
-              {containers.map(c => (
-                <option key={c.container_db_id} value={c.container_db_id}>
-                  {c.container_id} — top-up needed: {fmt(Math.max(c.topup_needed_ngn, 0))}
-                </option>
-              ))}
-            </select>
+      {/* TOP UP WALLET MODAL */}
+      <Modal open={topupOpen} onClose={() => setTopupOpen(false)} title="Top up partner wallet" size="sm">
+        <form onSubmit={doTopup} className="space-y-4">
+          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+            <p className="text-xs text-green-700 font-medium">Current balance: <span className="font-bold">{fmt(partner.wallet_balance)}</span></p>
+            <p className="text-xs text-green-600 mt-0.5">Record cash received from partner into our bank account.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount received (NGN) <span className="text-red-400">*</span></label>
-            <AmountInput required value={topupAmount} onChange={setTopupAmount}
-              placeholder="0.00"
+            <AmountInput required value={topupAmount} onChange={setTopupAmount} placeholder="0.00"
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Note</label>
             <input value={topupNote} onChange={e => setTopupNote(e.target.value)}
-              placeholder="e.g. Bank transfer received 15 Jan"
+              placeholder="e.g. Bank transfer received 15 Jan 2025"
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setTopupOpen(false)}
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
             <button type="submit" disabled={savingTopup || !topupAmount}
-              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {savingTopup ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Record top-up
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {savingTopup ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Top up wallet
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Credit wallet modal */}
-      <Modal open={creditOpen} onClose={() => setCreditOpen(false)} title="Credit partner wallet" size="sm">
-        <form onSubmit={creditWallet} className="space-y-4">
-          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
-            <p className="text-xs text-green-700 font-medium">Current balance: {fmt(partner.wallet_balance)}</p>
+      {/* ALLOCATE TO CONTAINER MODAL */}
+      <Modal open={allocateOpen} onClose={() => setAllocateOpen(false)} title="Allocate to container" size="sm">
+        <form onSubmit={doAllocate} className="space-y-4">
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+            <p className="text-xs text-blue-700 font-medium">Available wallet: <span className="font-bold">{fmt(partner.wallet_balance)}</span></p>
+            <p className="text-xs text-blue-600 mt-0.5">This deducts from the partner wallet and records the investment against the container.</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Related container (optional)</label>
-            <select value={creditForm.container_db_id} onChange={e => {
-              const c = containers.find(c => c.container_db_id === e.target.value)
-              setCreditForm(f => ({
-                ...f,
-                container_db_id: e.target.value,
-                amount: c ? c.partner_revenue_share.toFixed(2) : f.amount,
-                description: c ? `Container sale proceeds — ${c.container_id}` : f.description,
-              }))
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Container <span className="text-red-400">*</span></label>
+            <select required value={allocateContainerId} onChange={e => {
+              const a = allocations.find(a => a.container_db_id === e.target.value)
+              setAllocateContainerId(e.target.value)
+              if (a) setAllocateAmount(a.partner_quoted_cost_ngn.toFixed(2))
             }} className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-              <option value="">No container reference</option>
-              {containers.filter(c => c.partner_revenue_share > 0).map(c => (
-                <option key={c.container_db_id} value={c.container_db_id}>
-                  {c.container_id} — share: {fmt(c.partner_revenue_share)}
+              <option value="">Select container...</option>
+              {allocations.map(a => (
+                <option key={a.container_db_id} value={a.container_db_id}>
+                  {a.container_id} — {a.percentage}% stake — cost: {fmt(a.partner_quoted_cost_ngn)}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (NGN) <span className="text-red-400">*</span></label>
-            <AmountInput required value={creditForm.amount} onChange={v => setCreditForm(f => ({ ...f, amount: v }))}
-              placeholder="0.00"
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount to allocate (NGN) <span className="text-red-400">*</span></label>
+            <AmountInput required value={allocateAmount} onChange={setAllocateAmount} placeholder="0.00"
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <p className="text-xs text-gray-400 mt-1">Max available: {fmt(partner.wallet_balance)}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
-            <input value={creditForm.description} onChange={e => setCreditForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="e.g. Container sale proceeds..."
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Note</label>
+            <input value={allocateNote} onChange={e => setAllocateNote(e.target.value)}
+              placeholder="e.g. Funds allocated to container CON-0001"
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => setCreditOpen(false)}
+            <button type="button" onClick={() => setAllocateOpen(false)}
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={savingCredit || !creditForm.amount}
-              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {savingCredit ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Credit wallet
+            <button type="submit" disabled={savingAllocate || !allocateAmount || !allocateContainerId}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {savingAllocate ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />} Allocate
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Payout modal */}
-      <Modal open={payoutOpen} onClose={() => setPayoutOpen(false)} title="Request payout" size="sm">
-        <form onSubmit={submitPayout} className="space-y-4">
-          <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
-            <p className="text-xs text-brand-700 font-medium">Available balance: <span className="font-bold">{fmt(partner.wallet_balance)}</span></p>
+      {/* CREDIT FROM SALE MODAL */}
+      <Modal open={saleOpen} onClose={() => setSaleOpen(false)} title="Credit from container sale" size="sm">
+        <form onSubmit={doSaleCredit} className="space-y-4">
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
+            <p className="text-xs text-emerald-700 font-medium">Move partner's share of container sale proceeds into their wallet.</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (NGN) <span className="text-red-400">*</span></label>
-            <AmountInput required value={payoutForm.amount} onChange={v => setPayoutForm(f => ({ ...f, amount: v }))}
-              placeholder="0.00"
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <p className="text-xs text-gray-400 mt-1">Max: {fmt(partner.wallet_balance)}</p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>
-            <select required value={payoutForm.assignee} onChange={e => setPayoutForm(f => ({ ...f, assignee: e.target.value }))}
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-              <option value="">Select approver...</option>
-              {profiles.filter(p => p.id !== currentUser?.id).map(p => (
-                <option key={p.id} value={p.id}>{p.full_name ?? p.email}</option>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Container</label>
+            <select value={saleContainerId} onChange={e => {
+              const a = allocations.find(a => a.container_db_id === e.target.value)
+              setSaleContainerId(e.target.value)
+              if (a && a.partner_revenue_share > 0) setSaleAmount(a.partner_revenue_share.toFixed(2))
+            }} className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+              <option value="">No container reference</option>
+              {allocations.map(a => (
+                <option key={a.container_db_id} value={a.container_db_id}>
+                  {a.container_id} — share: {fmt(a.partner_revenue_share)}
+                </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
-            <textarea rows={2} value={payoutForm.notes} onChange={e => setPayoutForm(f => ({ ...f, notes: e.target.value }))}
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount to credit (NGN) <span className="text-red-400">*</span></label>
+            <AmountInput required value={saleAmount} onChange={setSaleAmount} placeholder="0.00"
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Note</label>
+            <input value={saleNote} onChange={e => setSaleNote(e.target.value)}
+              placeholder="e.g. Sale proceeds from CON-0001"
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => setPayoutOpen(false)}
+            <button type="button" onClick={() => setSaleOpen(false)}
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={savingPayout || !payoutForm.amount || !payoutForm.assignee}
-              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {savingPayout ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownCircle size={14} />} Submit
+            <button type="submit" disabled={savingSale || !saleAmount}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {savingSale ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />} Credit wallet
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Reinvest modal */}
-      <Modal open={reinvestOpen} onClose={() => setReinvestOpen(false)} title="Reinvest from wallet" size="sm">
-        <form onSubmit={submitReinvest} className="space-y-4">
-          <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
-            <p className="text-xs text-brand-700 font-medium">Available: <span className="font-bold">{fmt(partner.wallet_balance)}</span></p>
-            <p className="text-xs text-brand-600 mt-0.5">Funds move to reinvestment pool. Admin will allocate to a new container.</p>
+      {/* DEDUCT / PAYOUT MODAL */}
+      <Modal open={deductOpen} onClose={() => setDeductOpen(false)} title="Deduct from wallet" size="sm">
+        <form onSubmit={doDeduct} className="space-y-4">
+          <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+            <p className="text-xs text-red-700 font-medium">Available: <span className="font-bold">{fmt(partner.wallet_balance)}</span></p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'payout', label: 'Payout to bank', desc: 'Money sent to partner account' },
+                { value: 'debit', label: 'General debit', desc: 'Other deduction from wallet' },
+              ].map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => setDeductType(opt.value as 'payout' | 'debit')}
+                  className={`p-3 rounded-xl border-2 text-left transition-all
+                    ${deductType === opt.value ? 'border-red-400 bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}>
+                  <p className={`text-xs font-semibold ${deductType === opt.value ? 'text-red-700' : 'text-gray-700'}`}>{opt.label}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (NGN) <span className="text-red-400">*</span></label>
-            <AmountInput required value={reinvestForm.amount} onChange={v => setReinvestForm(f => ({ ...f, amount: v }))}
-              placeholder="0.00"
+            <AmountInput required value={deductAmount} onChange={setDeductAmount} placeholder="0.00"
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             <p className="text-xs text-gray-400 mt-1">Max: {fmt(partner.wallet_balance)}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
-            <textarea rows={2} value={reinvestForm.notes} onChange={e => setReinvestForm(f => ({ ...f, notes: e.target.value }))}
-              placeholder="Any preferences..."
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Note</label>
+            <input value={deductNote} onChange={e => setDeductNote(e.target.value)}
+              placeholder={deductType === 'payout' ? 'e.g. Sent to partner bank account 15 Jan' : 'Reason for deduction'}
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => setReinvestOpen(false)}
+            <button type="button" onClick={() => setDeductOpen(false)}
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={savingReinvest || !reinvestForm.amount}
-              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {savingReinvest ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Reinvest
+            <button type="submit" disabled={savingDeduct || !deductAmount}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {savingDeduct ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownCircle size={14} />}
+              {deductType === 'payout' ? 'Confirm payout' : 'Deduct'}
             </button>
           </div>
         </form>

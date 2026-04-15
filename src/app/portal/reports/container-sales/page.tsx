@@ -461,21 +461,6 @@ export default function ContainerSalesReportPage() {
                 )
               })}
             </tbody>
-            {filtered.length > 0 && (
-              <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-brand-100">
-                  <td colSpan={5} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">
-                    Totals — {filtered.length} container{filtered.length !== 1 ? 's' : ''}
-                  </td>
-                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(totalExpected)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-blue-700 whitespace-nowrap">{fmt(totalSales)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(totalRecovery)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-red-500 whitespace-nowrap">{fmt(totalReceivables)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-amber-600 whitespace-nowrap">{fmt(totalUnsold)}</td>
-                  <td className="px-3 py-3" />
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
       </div>

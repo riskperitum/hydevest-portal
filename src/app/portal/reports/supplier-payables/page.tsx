@@ -341,18 +341,6 @@ export default function SupplierPayablesPage() {
                 )
               })}
             </tbody>
-            {filtered.length > 0 && (
-              <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-brand-100">
-                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">Totals — {filtered.length} trips</td>
-                  <td className="px-3 py-3 text-xs font-bold text-gray-700">{filtered.reduce((s,r)=>s+r.container_count,0)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">{fmtUSD(totalCost)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">{fmtUSD(totalPaid)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-red-500 whitespace-nowrap">{fmtUSD(totalOutstanding)}</td>
-                  <td colSpan={3} />
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
       </div>

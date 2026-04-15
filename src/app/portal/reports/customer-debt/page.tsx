@@ -395,17 +395,6 @@ export default function CustomerDebtReportPage() {
                 )
               })}
             </tbody>
-            {filtered.length > 0 && (
-              <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-brand-100">
-                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">Totals — {filtered.length} customers</td>
-                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(totalPayable)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(totalRecovered)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-red-500 whitespace-nowrap">{fmt(totalOutstanding)}</td>
-                  <td colSpan={3} />
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
       </div>

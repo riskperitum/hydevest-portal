@@ -35,6 +35,19 @@ interface ContainerPartnerRow {
   sales_status: 'not_started' | 'in_progress' | 'completed'
 }
 
+interface PartnerSummaryRow {
+  funder_id: string
+  funder_name: string
+  partner_db_id: string
+  container_count: number
+  total_quoted_cost: number
+  total_received: number
+  total_topup: number
+  total_revenue_share: number
+  total_profit: number
+  wallet_balance: number
+}
+
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const SALES_STATUS_CONFIG = {
@@ -52,7 +65,9 @@ const CONTAINER_STATUS_COLOR: Record<string, string> = {
 
 export default function PartnershipPage() {
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState<'containers' | 'partners'>('containers')
   const [containers, setContainers] = useState<ContainerPartnerRow[]>([])
+  const [partnerRows, setPartnerRows] = useState<PartnerSummaryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -61,7 +76,6 @@ export default function PartnershipPage() {
   const load = useCallback(async () => {
     const supabase = createClient()
 
-    // Load partnership view
     const { data: viewData } = await supabase
       .from('partnership_container_view')
       .select('*')
@@ -69,26 +83,27 @@ export default function PartnershipPage() {
 
     if (!viewData?.length) { setLoading(false); return }
 
-    // Get unique container IDs
     const containerDbIds = [...new Set(viewData.map(r => r.container_db_id))]
+    const partnerDbIds = [...new Set(viewData.map(r => r.partner_db_id))]
 
-    // Load container statuses, trips, presales, sales
-    const [{ data: containerData }, { data: salesOrders }, { data: presales }, { data: trips }] = await Promise.all([
+    const [{ data: containerData }, { data: salesOrders }, { data: presales }, { data: trips }, { data: partnerData }] = await Promise.all([
       supabase.from('containers').select('id, status, trip_id').in('id', containerDbIds),
       supabase.from('sales_orders').select('container_id, customer_payable').in('container_id', containerDbIds),
       supabase.from('presales').select('container_id, expected_sale_revenue, sale_type').in('container_id', containerDbIds),
       supabase.from('trips').select('id, trip_id, title').in('id', [...new Set(viewData.map(r => r.trip_id))]),
+      supabase.from('partners').select('id, wallet_balance').in('id', partnerDbIds),
     ])
 
     const containerStatusMap = Object.fromEntries((containerData ?? []).map(c => [c.id, c.status]))
     const tripMap = Object.fromEntries((trips ?? []).map(t => [t.id, t]))
     const presaleMap = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+    const walletMap = Object.fromEntries((partnerData ?? []).map(p => [p.id, Number(p.wallet_balance ?? 0)]))
     const revenueByContainer = (salesOrders ?? []).reduce((acc, so) => {
       acc[so.container_id] = (acc[so.container_id] ?? 0) + Number(so.customer_payable)
       return acc
     }, {} as Record<string, number>)
 
-    // Group by container
+    // Build container rows
     const containerMap: Record<string, ContainerPartnerRow> = {}
     for (const row of viewData) {
       const actualSales = revenueByContainer[row.container_db_id] ?? 0
@@ -97,7 +112,6 @@ export default function PartnershipPage() {
       const pct = Number(row.percentage) / 100
       const partnerRevShare = actualSales * pct
       const partnerCost = Number(row.partner_quoted_cost_ngn)
-      const partnerProfit = partnerRevShare - partnerCost
 
       if (!containerMap[row.container_db_id]) {
         const status = containerStatusMap[row.container_db_id] ?? 'ordered'
@@ -133,19 +147,51 @@ export default function PartnershipPage() {
         amount_received_ngn: Number(row.amount_received_ngn),
         topup_needed_ngn: topup,
         partner_revenue_share: partnerRevShare,
-        partner_profit: partnerProfit,
+        partner_profit: partnerRevShare - partnerCost,
       })
       containerMap[row.container_db_id].partner_count += 1
       containerMap[row.container_db_id].total_topup_needed += Math.max(topup, 0)
     }
 
+    // Build partner summary rows
+    const partnerMap: Record<string, PartnerSummaryRow> = {}
+    for (const row of viewData) {
+      const actualSales = revenueByContainer[row.container_db_id] ?? 0
+      const pct = Number(row.percentage) / 100
+      const partnerRevShare = actualSales * pct
+      const partnerCost = Number(row.partner_quoted_cost_ngn)
+
+      if (!partnerMap[row.partner_db_id]) {
+        partnerMap[row.partner_db_id] = {
+          funder_id: row.funder_id,
+          funder_name: row.funder_name,
+          partner_db_id: row.partner_db_id,
+          container_count: 0,
+          total_quoted_cost: 0,
+          total_received: 0,
+          total_topup: 0,
+          total_revenue_share: 0,
+          total_profit: 0,
+          wallet_balance: walletMap[row.partner_db_id] ?? 0,
+        }
+      }
+
+      partnerMap[row.partner_db_id].container_count += 1
+      partnerMap[row.partner_db_id].total_quoted_cost += partnerCost
+      partnerMap[row.partner_db_id].total_received += Number(row.amount_received_ngn)
+      partnerMap[row.partner_db_id].total_topup += Math.max(Number(row.topup_needed_ngn), 0)
+      partnerMap[row.partner_db_id].total_revenue_share += partnerRevShare
+      partnerMap[row.partner_db_id].total_profit += partnerRevShare - partnerCost
+    }
+
     setContainers(Object.values(containerMap))
+    setPartnerRows(Object.values(partnerMap))
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const filtered = containers.filter(c => {
+  const filteredContainers = containers.filter(c => {
     const matchSearch = search === '' ||
       c.container_id.toLowerCase().includes(search.toLowerCase()) ||
       (c.tracking_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
@@ -155,11 +201,15 @@ export default function PartnershipPage() {
     return matchSearch && matchStatus
   })
 
-  // Portfolio metrics
-  const totalQuotedCost = filtered.reduce((s, c) => s + c.full_quoted_landing_cost_ngn, 0)
-  const totalExpectedRevenue = filtered.reduce((s, c) => s + c.expected_sale_revenue, 0)
-  const totalActualSales = filtered.reduce((s, c) => s + c.actual_sales, 0)
-  const totalTopupNeeded = filtered.reduce((s, c) => s + c.total_topup_needed, 0)
+  const filteredPartners = partnerRows.filter(p =>
+    search === '' || p.funder_name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  // Portfolio metrics (from containers tab)
+  const totalQuotedCost = filteredContainers.reduce((s, c) => s + c.full_quoted_landing_cost_ngn, 0)
+  const totalExpectedRevenue = filteredContainers.reduce((s, c) => s + c.expected_sale_revenue, 0)
+  const totalTopupNeeded = filteredContainers.reduce((s, c) => s + c.total_topup_needed, 0)
+  const totalWalletBalance = filteredPartners.reduce((s, p) => s + p.wallet_balance, 0)
 
   return (
     <div className="space-y-5 max-w-6xl">
@@ -171,7 +221,7 @@ export default function PartnershipPage() {
       {/* Portfolio metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Containers', value: filtered.length.toString(), icon: <Package size={14} className="text-brand-600" />, color: 'text-gray-900' },
+          { label: 'Containers', value: containers.length.toString(), icon: <Package size={14} className="text-brand-600" />, color: 'text-gray-900' },
           { label: 'Total quoted cost', value: fmt(totalQuotedCost), icon: <Wallet size={14} className="text-blue-600" />, color: 'text-blue-700' },
           { label: 'Expected revenue', value: fmt(totalExpectedRevenue), icon: <TrendingUp size={14} className="text-green-600" />, color: 'text-green-700' },
           { label: 'Top-up needed', value: fmt(totalTopupNeeded), icon: <AlertTriangle size={14} className={totalTopupNeeded > 0 ? 'text-amber-500' : 'text-green-500'} />, color: totalTopupNeeded > 0 ? 'text-amber-700' : 'text-green-700' },
@@ -183,238 +233,230 @@ export default function PartnershipPage() {
         ))}
       </div>
 
-      {/* Search + filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by container, tracking number, trip or partner..."
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      {/* Tabs + search */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex items-center border-b border-gray-100 flex-wrap">
+          <div className="flex">
+            {[
+              { key: 'containers', label: 'By Container', count: containers.length },
+              { key: 'partners', label: 'By Partner', count: partnerRows.length },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => { setActiveTab(tab.key as typeof activeTab); setSearch(''); setStatusFilter('') }}
+                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
+                  ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                {tab.label}
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
+                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
           </div>
-          <button onClick={() => setShowFilters(v => !v)}
-            className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
-              ${showFilters || statusFilter ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            <Filter size={15} /> Filters
-            {statusFilter && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">1</span>}
-          </button>
-        </div>
-        {showFilters && (
-          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Sales status</label>
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="">All statuses</option>
-                <option value="not_started">Not started</option>
-                <option value="in_progress">In progress</option>
-                <option value="completed">Sales completed</option>
-              </select>
+          <div className="flex-1 px-4 py-2 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder={activeTab === 'containers' ? 'Search container, tracking, trip or partner...' : 'Search partner...'}
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
+            {activeTab === 'containers' && (
+              <button onClick={() => setShowFilters(v => !v)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg transition-colors
+                  ${showFilters || statusFilter ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                <Filter size={13} /> Filter
+                {statusFilter && <span className="bg-brand-600 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">1</span>}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter row */}
+        {showFilters && activeTab === 'containers' && (
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+              <option value="">All sales statuses</option>
+              <option value="not_started">Not started</option>
+              <option value="in_progress">In progress</option>
+              <option value="completed">Sales completed</option>
+            </select>
             {statusFilter && (
-              <div className="flex items-end pb-0.5">
-                <button onClick={() => setStatusFilter('')}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium">Clear</button>
-              </div>
+              <button onClick={() => setStatusFilter('')} className="text-xs text-red-500 hover:text-red-700 font-medium">Clear</button>
             )}
           </div>
         )}
-      </div>
 
-      {/* Container table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {['Container','Tracking No.','Trip','Partners','Container Status','Full Quoted Cost','Expected Revenue','Actual Sales','Total Top-up Needed','Sales Status',''].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 11 }).map((_, j) => (
-                      <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
-                    ))}
-                  </tr>
-                ))
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="px-4 py-16 text-center">
-                    <Package size={24} className="text-gray-200 mx-auto mb-2" />
-                    <p className="text-sm text-gray-400">No partner-funded containers found.</p>
-                  </td>
+        {/* CONTAINERS TAB */}
+        {activeTab === 'containers' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {['Container','Tracking No.','Trip','Partners','Status','Full Quoted Cost','Expected Revenue','Actual Sales','Top-up Needed','Sales Status',''].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                  ))}
                 </tr>
-              ) : filtered.map(row => {
-                const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
-                const hasTopup = row.total_topup_needed > 0
-                return (
-                  <tr key={row.container_db_id}
-                    onClick={() => router.push(`/portal/partnership/${row.container_db_id}`)}
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      {Array.from({ length: 11 }).map((_, j) => (
+                        <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
+                      ))}
+                    </tr>
+                  ))
+                ) : filteredContainers.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="px-4 py-12 text-center">
+                      <Package size={24} className="text-gray-200 mx-auto mb-2" />
+                      <p className="text-sm text-gray-400">No partner-funded containers found.</p>
+                    </td>
+                  </tr>
+                ) : filteredContainers.map(row => {
+                  const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
+                  const hasTopup = row.total_topup_needed > 0
+                  return (
+                    <tr key={row.container_db_id}
+                      onClick={() => router.push(`/portal/partnership/${row.container_db_id}`)}
+                      className="border-b border-gray-50 hover:bg-brand-50/20 transition-colors cursor-pointer group">
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
+                      </td>
+                      <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{row.tracking_number ?? '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <p className="text-xs font-medium text-gray-700">{row.trip_id}</p>
+                        <p className="text-xs text-gray-400 truncate max-w-[100px]">{row.trip_title}</p>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Users size={12} className="text-gray-400" />
+                          <span className="text-xs text-gray-600 font-medium">{row.partner_count}</span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">{row.funders.map(f => f.funder_name).join(', ')}</p>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${CONTAINER_STATUS_COLOR[row.container_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {row.container_status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmt(row.full_quoted_landing_cost_ngn)}</td>
+                      <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap text-xs">
+                        {row.expected_sale_revenue > 0 ? fmt(row.expected_sale_revenue) : '—'}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap text-xs">
+                        {row.actual_sales > 0
+                          ? <span className="text-green-600 font-medium">{fmt(row.actual_sales)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {hasTopup
+                          ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(row.total_topup_needed)}</span>
+                          : <span className="text-xs text-green-600 font-medium">Fully funded</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>{salesCfg.label}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <ChevronRight size={14} className="text-gray-300 group-hover:text-brand-400 transition-colors" />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* PARTNERS TAB */}
+        {activeTab === 'partners' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {['Partner','Containers','Total investment','Amount received','Top-up needed','Revenue share','Profit','Wallet balance',''].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      {Array.from({ length: 9 }).map((_, j) => (
+                        <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
+                      ))}
+                    </tr>
+                  ))
+                ) : filteredPartners.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-12 text-center">
+                      <Users size={24} className="text-gray-200 mx-auto mb-2" />
+                      <p className="text-sm text-gray-400">No partners found.</p>
+                    </td>
+                  </tr>
+                ) : filteredPartners.map(p => (
+                  <tr key={p.partner_db_id}
+                    onClick={() => router.push(`/portal/partnership/partner/${p.partner_db_id}`)}
                     className="border-b border-gray-50 hover:bg-brand-50/20 transition-colors cursor-pointer group">
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
-                    </td>
-                    <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{row.tracking_number ?? '—'}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <p className="text-xs font-medium text-gray-700">{row.trip_id}</p>
-                      <p className="text-xs text-gray-400 truncate max-w-[100px]">{row.trip_title}</p>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <Users size={12} className="text-gray-400" />
-                        <span className="text-xs text-gray-600 font-medium">{row.partner_count}</span>
-                      </div>
-                      <div className="text-xs text-gray-400 mt-0.5">
-                        {row.funders.map(f => f.funder_name).join(', ')}
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0">
+                          <span className="text-brand-700 text-xs font-bold">{p.funder_name[0].toUpperCase()}</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-brand-700">{p.funder_name}</span>
                       </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${CONTAINER_STATUS_COLOR[row.container_status] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {row.container_status}
-                      </span>
+                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full font-medium text-gray-600">{p.container_count}</span>
                     </td>
-                    <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmt(row.full_quoted_landing_cost_ngn)}</td>
-                    <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap text-xs">
-                      {row.expected_sale_revenue > 0 ? fmt(row.expected_sale_revenue) : '—'}
+                    <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
+                    <td className="px-3 py-3 text-green-600 font-medium whitespace-nowrap text-xs">{fmt(p.total_received)}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {p.total_topup > 0
+                        ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(p.total_topup)}</span>
+                        : <span className="text-xs text-green-600 font-medium">Fully funded</span>}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {row.actual_sales > 0
-                        ? <span className="text-green-600 font-medium">{fmt(row.actual_sales)}</span>
+                      {p.total_revenue_share > 0
+                        ? <span className="text-blue-700 font-medium">{fmt(p.total_revenue_share)}</span>
                         : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      {hasTopup ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                          <AlertTriangle size={10} /> {fmt(row.total_topup_needed)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-green-600 font-medium">Fully funded</span>
-                      )}
+                      {p.total_revenue_share > 0
+                        ? <span className={`text-xs font-bold ${p.total_profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {p.total_profit >= 0 ? '+' : ''}{fmt(p.total_profit)}
+                          </span>
+                        : <span className="text-gray-300 text-xs">—</span>}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>
-                        {salesCfg.label}
+                      <span className={`text-xs font-bold ${p.wallet_balance > 0 ? 'text-brand-700' : 'text-gray-400'}`}>
+                        {fmt(p.wallet_balance)}
                       </span>
                     </td>
                     <td className="px-3 py-3">
                       <ChevronRight size={14} className="text-gray-300 group-hover:text-brand-400 transition-colors" />
                     </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Partner summary section */}
-      <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">Partner summary view</h2>
-        <PartnerSummaryTable containers={filtered} />
-      </div>
-    </div>
-  )
-}
-
-function PartnerSummaryTable({ containers }: { containers: ContainerPartnerRow[] }) {
-  const router = useRouter()
-
-  // Aggregate per partner
-  const partnerMap: Record<string, {
-    funder_id: string
-    funder_name: string
-    container_count: number
-    total_quoted_cost: number
-    total_received: number
-    total_topup: number
-    total_revenue_share: number
-    total_profit: number
-  }> = {}
-
-  for (const c of containers) {
-    for (const f of c.funders) {
-      if (!partnerMap[f.funder_id]) {
-        partnerMap[f.funder_id] = {
-          funder_id: f.funder_id,
-          funder_name: f.funder_name,
-          container_count: 0,
-          total_quoted_cost: 0,
-          total_received: 0,
-          total_topup: 0,
-          total_revenue_share: 0,
-          total_profit: 0,
-        }
-      }
-      partnerMap[f.funder_id].container_count += 1
-      partnerMap[f.funder_id].total_quoted_cost += f.partner_quoted_cost_ngn
-      partnerMap[f.funder_id].total_received += f.amount_received_ngn
-      partnerMap[f.funder_id].total_topup += Math.max(f.topup_needed_ngn, 0)
-      partnerMap[f.funder_id].total_revenue_share += f.partner_revenue_share
-      partnerMap[f.funder_id].total_profit += f.partner_profit
-    }
-  }
-
-  const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const partners = Object.values(partnerMap)
-  if (!partners.length) return null
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-100">
-              {['Partner','Containers','Total investment','Amount received','Top-up needed','Revenue share','Profit',''].map(h => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {partners.map(p => (
-              <tr key={p.funder_id}
-                onClick={() => router.push(`/portal/partnership/partner/${p.funder_id}`)}
-                className="border-b border-gray-50 hover:bg-brand-50/20 transition-colors cursor-pointer group">
-                <td className="px-3 py-3 whitespace-nowrap">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0">
-                      <span className="text-brand-700 text-xs font-bold">{p.funder_name[0].toUpperCase()}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-gray-900 group-hover:text-brand-700">{p.funder_name}</span>
-                  </div>
-                </td>
-                <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">
-                  <span className="bg-gray-100 px-2 py-0.5 rounded-full font-medium">{p.container_count}</span>
-                </td>
-                <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
-                <td className="px-3 py-3 text-green-600 font-medium whitespace-nowrap text-xs">{fmt(p.total_received)}</td>
-                <td className="px-3 py-3 whitespace-nowrap">
-                  {p.total_topup > 0
-                    ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full"><AlertTriangle size={10} />{fmt(p.total_topup)}</span>
-                    : <span className="text-xs text-green-600 font-medium">Fully funded</span>}
-                </td>
-                <td className="px-3 py-3 whitespace-nowrap text-xs">
-                  {p.total_revenue_share > 0
-                    ? <span className="text-blue-700 font-medium">{fmt(p.total_revenue_share)}</span>
-                    : <span className="text-gray-300">—</span>}
-                </td>
-                <td className="px-3 py-3 whitespace-nowrap">
-                  {p.total_revenue_share > 0 ? (
-                    <span className={`text-xs font-bold ${p.total_profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {p.total_profit >= 0 ? '+' : ''}{fmt(p.total_profit)}
-                    </span>
-                  ) : <span className="text-gray-300 text-xs">—</span>}
-                </td>
-                <td className="px-3 py-3">
-                  <ChevronRight size={14} className="text-gray-300 group-hover:text-brand-400 transition-colors" />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                ))}
+              </tbody>
+              {filteredPartners.length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 border-t-2 border-brand-100">
+                    <td colSpan={2} className="px-3 py-2.5 text-xs font-bold text-gray-500 uppercase">Totals</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-gray-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_quoted_cost,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_received,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-amber-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_topup,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-blue-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_revenue_share,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_profit,0))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.wallet_balance,0))}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

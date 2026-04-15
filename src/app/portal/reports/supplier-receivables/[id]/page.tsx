@@ -13,23 +13,33 @@ import Link from 'next/link'
 import React from 'react'
 import AmountInput from '@/components/ui/AmountInput'
 
-interface Receivable {
-  id: string
-  container_id: string
-  tracking_number: string | null
+interface TripReceivable {
+  trip_db_id: string
   trip_id: string
   trip_title: string
-  trip_db_id: string
   supplier_name: string | null
+  container_count: number
+  total_missing_pieces: number
+  total_gross_value_usd: number
+  total_effective_value_usd: number
+  total_applied_usd: number
+  total_written_off_usd: number
+  total_remaining_usd: number
+  status: string
+}
+
+interface ContainerRow {
+  receivable_id: string
+  container_id: string
+  tracking_number: string | null
+  pieces_purchased: number | null
+  supplier_loaded_pieces: number | null
   missing_pieces: number
   unit_price_usd: number
   gross_value_usd: number
   agreed_value_usd: number | null
-  total_applied_usd: number
-  total_written_off_usd: number
   remaining_usd: number
   status: string
-  notes: string | null
 }
 
 interface AllocationRow {
@@ -43,7 +53,6 @@ interface AllocationRow {
   created_at: string
   requested_by_name: string | null
   approved_by_name: string | null
-  approved_at: string | null
 }
 
 interface WriteoffRow {
@@ -122,39 +131,41 @@ const ALLOCATION_STATUS = {
   rejected: { label: 'Rejected',         color: 'bg-red-50 text-red-600' },
 }
 
+const CONTAINER_STATUS = {
+  open:              { label: 'Open',              color: 'bg-red-50 text-red-600' },
+  partially_applied: { label: 'Partial',           color: 'bg-amber-50 text-amber-700' },
+  fully_applied:     { label: 'Fully applied',     color: 'bg-green-50 text-green-700' },
+  written_off:       { label: 'Written off',       color: 'bg-gray-100 text-gray-500' },
+}
+
 function SupplierReceivablesDrilldownInner() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const router = useRouter()
-  const receivableId = params.id as string
+  const tripId = params.id as string
 
-  const [receivable, setReceivable] = useState<Receivable | null>(null)
+  const [tripReceivable, setTripReceivable] = useState<TripReceivable | null>(null)
+  const [containers, setContainers] = useState<ContainerRow[]>([])
   const [allocations, setAllocations] = useState<AllocationRow[]>([])
   const [writeoffs, setWriteoffs] = useState<WriteoffRow[]>([])
   const [activity, setActivity] = useState<ActivityRow[]>([])
   const [notes, setNotes] = useState<NoteRow[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
-  const [trips, setTrips] = useState<Trip[]>([])
+  const [otherTrips, setOtherTrips] = useState<Trip[]>([])
   const [loading, setLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<Profile | null>(null)
-  const [activeTab, setActiveTab] = useState<'allocations' | 'writeoffs' | 'activity' | 'notes'>('allocations')
+  const [activeTab, setActiveTab] = useState<'containers' | 'allocations' | 'writeoffs' | 'activity' | 'notes'>('containers')
 
-  // Reallocation modal state
+  // Reallocation modal
   const [reallocateOpen, setReallocateOpen] = useState(searchParams.get('action') === 'reallocate')
   const [allocForm, setAllocForm] = useState({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
   const [savingAlloc, setSavingAlloc] = useState(false)
 
-  // Write-off modal state
+  // Write-off modal
   const [writeoffOpen, setWriteoffOpen] = useState(false)
   const [writeoffForm, setWriteoffForm] = useState({ amount_usd: '', reason: '', assignee: '' })
   const [savingWriteoff, setSavingWriteoff] = useState(false)
 
-  // Agreed value edit
-  const [editAgreed, setEditAgreed] = useState(false)
-  const [agreedValue, setAgreedValue] = useState('')
-  const [savingAgreed, setSavingAgreed] = useState(false)
-
-  // Notes state
+  // Notes
   const [newNote, setNewNote] = useState('')
   const [replyingTo, setReplyingTo] = useState<NoteRow | null>(null)
   const [replyText, setReplyText] = useState('')
@@ -170,60 +181,84 @@ function SupplierReceivablesDrilldownInner() {
   const load = useCallback(async () => {
     const supabase = createClient()
 
-    const [
-      { data: rec },
-      { data: allocs },
-      { data: woffs },
-      { data: acts },
-      { data: noteData },
-      { data: allProfiles },
-      { data: allTrips },
-    ] = await Promise.all([
-      supabase.from('supplier_receivables').select(`
+    // Load trip-level aggregated data
+    const { data: tripData } = await supabase
+      .from('supplier_receivables_by_trip')
+      .select('*')
+      .eq('trip_db_id', tripId)
+      .single()
+
+    // Load individual container receivables for this trip
+    const { data: containerRecs } = await supabase
+      .from('supplier_receivables')
+      .select(`
         id, missing_pieces, unit_price_usd, gross_value_usd,
-        agreed_value_usd, total_applied_usd, total_written_off_usd,
-        remaining_usd, status, notes,
-        container:containers(container_id, tracking_number),
-        trip:trips(id, trip_id, title),
-        supplier:suppliers(name)
-      `).eq('id', receivableId).single(),
-      supabase.from('supplier_receivable_allocations').select(`
-        id, amount_usd, percentage, status, notes, created_at, approved_at,
-        target_trip:trips!supplier_receivable_allocations_target_trip_id_fkey(trip_id, title),
-        requester:profiles!supplier_receivable_allocations_requested_by_fkey(full_name, email),
-        approver:profiles!supplier_receivable_allocations_approved_by_fkey(full_name, email)
-      `).eq('receivable_id', receivableId).order('created_at', { ascending: false }),
-      supabase.from('supplier_receivable_writeoffs').select(`
-        id, amount_usd, reason, created_at,
-        writer:profiles!supplier_receivable_writeoffs_written_off_by_fkey(full_name, email)
-      `).eq('receivable_id', receivableId).order('created_at', { ascending: false }),
-      supabase.from('supplier_receivable_activity').select(`
-        id, action, details, amount_usd, created_at,
-        performer:profiles!supplier_receivable_activity_performed_by_fkey(full_name, email)
-      `).eq('receivable_id', receivableId).order('created_at', { ascending: false }),
-      supabase.from('supplier_receivable_notes').select('*, creator:profiles!supplier_receivable_notes_created_by_fkey(id, full_name, email)').eq('receivable_id', receivableId).order('created_at', { ascending: true }),
+        agreed_value_usd, remaining_usd, status,
+        container:containers(container_id, tracking_number, pieces_purchased),
+        presale:presales!presales_container_id_fkey(supplier_loaded_pieces)
+      `)
+      .eq('trip_id', tripId)
+      .order('created_at')
+
+    // Load all allocations for receivables in this trip
+    const receivableIds = (containerRecs ?? []).map(r => r.id)
+
+    const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, { data: allProfiles }, { data: allTrips }] = await Promise.all([
+      receivableIds.length > 0
+        ? supabase.from('supplier_receivable_allocations').select(`
+            id, amount_usd, percentage, status, notes, created_at,
+            target_trip:trips!supplier_receivable_allocations_target_trip_id_fkey(id, trip_id, title),
+            requester:profiles!supplier_receivable_allocations_requested_by_fkey(full_name, email),
+            approver:profiles!supplier_receivable_allocations_approved_by_fkey(full_name, email)
+          `).in('receivable_id', receivableIds).order('created_at', { ascending: false })
+        : { data: [] },
+      receivableIds.length > 0
+        ? supabase.from('supplier_receivable_writeoffs').select(`
+            id, amount_usd, reason, created_at,
+            writer:profiles!supplier_receivable_writeoffs_written_off_by_fkey(full_name, email)
+          `).in('receivable_id', receivableIds).order('created_at', { ascending: false })
+        : { data: [] },
+      receivableIds.length > 0
+        ? supabase.from('supplier_receivable_activity').select(`
+            id, action, details, amount_usd, created_at,
+            performer:profiles!supplier_receivable_activity_performed_by_fkey(full_name, email)
+          `).in('receivable_id', receivableIds).order('created_at', { ascending: false })
+        : { data: [] },
+      supabase.from('supplier_receivable_notes').select(`
+        *, creator:profiles!supplier_receivable_notes_created_by_fkey(id, full_name, email)
+      `).eq('trip_id', tripId).order('created_at', { ascending: true }),
       supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
-      supabase.from('trips').select('id, trip_id, title').order('created_at', { ascending: false }),
+      supabase.from('trips').select('id, trip_id, title').neq('id', tripId).order('created_at', { ascending: false }),
     ])
 
-    setReceivable({
-      id: receivableId,
-      container_id: (rec?.container as any)?.container_id ?? '—',
-      tracking_number: (rec?.container as any)?.tracking_number ?? null,
-      trip_id: (rec?.trip as any)?.trip_id ?? '—',
-      trip_title: (rec?.trip as any)?.title ?? '—',
-      trip_db_id: (rec?.trip as any)?.id ?? '',
-      supplier_name: (rec?.supplier as any)?.name ?? null,
-      missing_pieces: rec?.missing_pieces ?? 0,
-      unit_price_usd: Number(rec?.unit_price_usd ?? 0),
-      gross_value_usd: Number(rec?.gross_value_usd ?? 0),
-      agreed_value_usd: rec?.agreed_value_usd ? Number(rec.agreed_value_usd) : null,
-      total_applied_usd: Number(rec?.total_applied_usd ?? 0),
-      total_written_off_usd: Number(rec?.total_written_off_usd ?? 0),
-      remaining_usd: Number(rec?.remaining_usd ?? 0),
-      status: rec?.status ?? 'open',
-      notes: rec?.notes ?? null,
+    setTripReceivable({
+      trip_db_id: tripId,
+      trip_id: tripData?.trip_id ?? '—',
+      trip_title: tripData?.trip_title ?? '—',
+      supplier_name: tripData?.supplier_name ?? null,
+      container_count: Number(tripData?.container_count ?? 0),
+      total_missing_pieces: Number(tripData?.total_missing_pieces ?? 0),
+      total_gross_value_usd: Number(tripData?.total_gross_value_usd ?? 0),
+      total_effective_value_usd: Number(tripData?.total_effective_value_usd ?? 0),
+      total_applied_usd: Number(tripData?.total_applied_usd ?? 0),
+      total_written_off_usd: Number(tripData?.total_written_off_usd ?? 0),
+      total_remaining_usd: Number(tripData?.total_remaining_usd ?? 0),
+      status: tripData?.status ?? 'open',
     })
+
+    setContainers((containerRecs ?? []).map(r => ({
+      receivable_id: r.id,
+      container_id: (r.container as any)?.container_id ?? '—',
+      tracking_number: (r.container as any)?.tracking_number ?? null,
+      pieces_purchased: (r.container as any)?.pieces_purchased ?? null,
+      supplier_loaded_pieces: (r.presale as any)?.supplier_loaded_pieces ?? null,
+      missing_pieces: r.missing_pieces,
+      unit_price_usd: Number(r.unit_price_usd),
+      gross_value_usd: Number(r.gross_value_usd),
+      agreed_value_usd: r.agreed_value_usd ? Number(r.agreed_value_usd) : null,
+      remaining_usd: Number(r.remaining_usd ?? 0),
+      status: r.status,
+    })))
 
     setAllocations((allocs ?? []).map(a => ({
       id: a.id,
@@ -236,7 +271,6 @@ function SupplierReceivablesDrilldownInner() {
       created_at: a.created_at,
       requested_by_name: (a.requester as any)?.full_name ?? (a.requester as any)?.email ?? null,
       approved_by_name: (a.approver as any)?.full_name ?? (a.approver as any)?.email ?? null,
-      approved_at: a.approved_at,
     })))
 
     setWriteoffs((woffs ?? []).map(w => ({
@@ -265,9 +299,9 @@ function SupplierReceivablesDrilldownInner() {
     })
     setNotes(topLevel)
     setProfiles(allProfiles ?? [])
-    setTrips((allTrips ?? []).filter(t => t.id !== (rec?.trip as any)?.id))
+    setOtherTrips(allTrips ?? [])
     setLoading(false)
-  }, [receivableId])
+  }, [tripId])
 
   useEffect(() => {
     load()
@@ -279,28 +313,16 @@ function SupplierReceivablesDrilldownInner() {
     })
   }, [load])
 
-  async function logActivity(action: string, details?: string, amountUsd?: number) {
+  async function logActivity(receivableIds: string[], action: string, details?: string, amountUsd?: number) {
     const supabase = createClient()
-    await supabase.from('supplier_receivable_activity').insert({
-      receivable_id: receivableId,
-      action,
-      details: details ?? null,
-      amount_usd: amountUsd ?? null,
-      performed_by: currentUser?.id,
-    })
-  }
-
-  async function saveAgreedValue(e: React.FormEvent) {
-    e.preventDefault()
-    if (!agreedValue) return
-    setSavingAgreed(true)
-    const supabase = createClient()
-    const val = parseFloat(agreedValue)
-    await supabase.from('supplier_receivables').update({ agreed_value_usd: val }).eq('id', receivableId)
-    await logActivity('Agreed value set', `Set agreed value to ${fmtUSD(val)}`, val)
-    setSavingAgreed(false)
-    setEditAgreed(false)
-    load()
+    for (const id of receivableIds) {
+      await supabase.from('supplier_receivable_activity').insert({
+        receivable_id: id, action,
+        details: details ?? null,
+        amount_usd: amountUsd ?? null,
+        performed_by: currentUser?.id,
+      })
+    }
   }
 
   async function submitReallocation(e: React.FormEvent) {
@@ -311,9 +333,12 @@ function SupplierReceivablesDrilldownInner() {
     const amount = parseFloat(allocForm.amount_usd)
     const pct = allocForm.percentage ? parseFloat(allocForm.percentage) : null
 
-    // Create allocation record
+    // Use first open receivable for this trip as the reference
+    const firstReceivable = containers.find(c => c.status !== 'fully_applied' && c.status !== 'written_off')
+    if (!firstReceivable) return
+
     const { data: alloc } = await supabase.from('supplier_receivable_allocations').insert({
-      receivable_id: receivableId,
+      receivable_id: firstReceivable.receivable_id,
       target_trip_id: allocForm.target_trip_id,
       amount_usd: amount,
       percentage: pct,
@@ -322,32 +347,31 @@ function SupplierReceivablesDrilldownInner() {
       requested_by: currentUser?.id,
     }).select().single()
 
-    // Create task for approval
-    const targetTrip = trips.find(t => t.id === allocForm.target_trip_id)
+    const targetTrip = otherTrips.find(t => t.id === allocForm.target_trip_id)
     const { data: task } = await supabase.from('tasks').insert({
       type: 'approval_request',
-      title: `Supplier receivable reallocation — ${receivable?.container_id}`,
-      description: `Reallocation of ${fmtUSD(amount)} from ${receivable?.container_id} to trip ${targetTrip?.trip_id ?? ''}`,
+      title: `Supplier receivable reallocation — ${tripReceivable?.trip_id}`,
+      description: `Reallocation of ${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to trip ${targetTrip?.trip_id ?? ''}`,
       module: 'supplier_receivables',
-      record_id: receivableId,
-      record_ref: receivable?.container_id ?? '',
+      record_id: tripId,
+      record_ref: tripReceivable?.trip_id ?? '',
       requested_by: currentUser?.id,
       assigned_to: allocForm.assignee,
       priority: 'normal',
     }).select().single()
 
-    // Notify assignee
     await supabase.from('notifications').insert({
       user_id: allocForm.assignee,
       type: 'task_approval_request',
       title: 'New task: Reallocation approval',
-      message: `${receivable?.container_id} — ${fmtUSD(amount)} to ${targetTrip?.trip_id ?? ''}`,
+      message: `${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to ${targetTrip?.trip_id ?? ''}`,
       task_id: task?.id,
-      record_id: receivableId,
+      record_id: tripId,
       module: 'supplier_receivables',
     })
 
     await logActivity(
+      [firstReceivable.receivable_id],
       'Reallocation requested',
       `${fmtUSD(amount)} to trip ${targetTrip?.trip_id ?? ''}${pct ? ` (${pct}%)` : ''}`,
       amount
@@ -364,16 +388,15 @@ function SupplierReceivablesDrilldownInner() {
     if (!alloc) return
     const supabase = createClient()
 
-    // Update allocation status
     await supabase.from('supplier_receivable_allocations').update({
       status: 'approved',
       approved_by: currentUser?.id,
       approved_at: new Date().toISOString(),
     }).eq('id', allocId)
 
-    // Auto-create trip_expense record
-    const targetTrip = trips.find(t => t.trip_id === alloc.target_trip_id) ??
-      (await supabase.from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()).data
+    // Find the target trip ID
+    const { data: targetTrip } = await supabase
+      .from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()
 
     if (targetTrip) {
       const { data: expense } = await supabase.from('trip_expenses').insert({
@@ -381,30 +404,52 @@ function SupplierReceivablesDrilldownInner() {
         category: 'container',
         currency: 'USD',
         amount: alloc.amount_usd,
-        description: `Supplier receivable reallocation from ${receivable?.container_id} (${receivable?.tracking_number ?? ''})`,
+        description: `Supplier receivable reallocation from trip ${tripReceivable?.trip_id}`,
         expense_date: new Date().toISOString().split('T')[0],
         created_by: currentUser?.id,
       }).select().single()
 
-      // Link expense to allocation
       if (expense) {
         await supabase.from('supplier_receivable_allocations').update({ trip_expense_id: expense.id }).eq('id', allocId)
       }
     }
 
-    // Update receivable totals
-    const newApplied = Number(receivable?.total_applied_usd ?? 0) + alloc.amount_usd
-    const effectiveValue = receivable?.agreed_value_usd ?? receivable?.gross_value_usd ?? 0
-    const newRemaining = effectiveValue - newApplied - Number(receivable?.total_written_off_usd ?? 0)
-    const newStatus = newRemaining <= 0 ? 'fully_applied'
-      : newApplied > 0 ? 'partially_applied' : 'open'
+    // Update all container receivables for this trip proportionally
+    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
+    for (const container of containers) {
+      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
+      const containerAmount = alloc.amount_usd * proportion
+      const newApplied = Number(container.remaining_usd) - containerAmount
+      await supabase.from('supplier_receivables')
+        .update({
+          total_applied_usd: supabase.rpc as any,
+        }).eq('id', container.receivable_id)
+    }
 
-    await supabase.from('supplier_receivables').update({
-      total_applied_usd: newApplied,
-      status: newStatus,
-    }).eq('id', receivableId)
+    // Simpler approach — just update total_applied on each receivable
+    for (const container of containers) {
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
+        .eq('id', container.receivable_id).single()
+      if (!rec) continue
+      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
+      const containerAmount = alloc.amount_usd * proportion
+      const newApplied = Number(rec.total_applied_usd) + containerAmount
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
+      const newStatus = newRemaining <= 0 ? 'fully_applied' : newApplied > 0 ? 'partially_applied' : 'open'
+      await supabase.from('supplier_receivables').update({
+        total_applied_usd: newApplied,
+        status: newStatus,
+      }).eq('id', container.receivable_id)
+    }
 
-    await logActivity('Reallocation approved', `${fmtUSD(alloc.amount_usd)} applied to trip ${alloc.target_trip_id}`, alloc.amount_usd)
+    await logActivity(
+      containers.map(c => c.receivable_id),
+      'Reallocation approved',
+      `${fmtUSD(alloc.amount_usd)} applied to trip ${alloc.target_trip_id}`,
+      alloc.amount_usd
+    )
     load()
   }
 
@@ -414,23 +459,23 @@ function SupplierReceivablesDrilldownInner() {
     setSavingWriteoff(true)
     const supabase = createClient()
     const amount = parseFloat(writeoffForm.amount_usd)
+    const firstReceivable = containers[0]
+    if (!firstReceivable) return
 
-    // Create write-off record
     await supabase.from('supplier_receivable_writeoffs').insert({
-      receivable_id: receivableId,
+      receivable_id: firstReceivable.receivable_id,
       amount_usd: amount,
       reason: writeoffForm.reason || null,
       written_off_by: currentUser?.id,
     })
 
-    // Create approval task
     const { data: task } = await supabase.from('tasks').insert({
       type: 'approval_request',
-      title: `Write-off approval — ${receivable?.container_id}`,
-      description: `Write-off of ${fmtUSD(amount)} for supplier receivable on ${receivable?.container_id}`,
+      title: `Write-off approval — ${tripReceivable?.trip_id}`,
+      description: `Write-off of ${fmtUSD(amount)} for trip ${tripReceivable?.trip_id}`,
       module: 'supplier_receivables',
-      record_id: receivableId,
-      record_ref: receivable?.container_id ?? '',
+      record_id: tripId,
+      record_ref: tripReceivable?.trip_id ?? '',
       requested_by: currentUser?.id,
       assigned_to: writeoffForm.assignee,
       priority: 'high',
@@ -440,31 +485,44 @@ function SupplierReceivablesDrilldownInner() {
       user_id: writeoffForm.assignee,
       type: 'task_approval_request',
       title: 'New task: Write-off approval',
-      message: `Write-off of ${fmtUSD(amount)} — ${receivable?.container_id}`,
+      message: `Write-off of ${fmtUSD(amount)} — trip ${tripReceivable?.trip_id}`,
       task_id: task?.id,
-      record_id: receivableId,
+      record_id: tripId,
       module: 'supplier_receivables',
     })
 
-    // Update receivable totals
-    const newWrittenOff = Number(receivable?.total_written_off_usd ?? 0) + amount
-    const effectiveValue = receivable?.agreed_value_usd ?? receivable?.gross_value_usd ?? 0
-    const newRemaining = effectiveValue - Number(receivable?.total_applied_usd ?? 0) - newWrittenOff
-    const newStatus = newRemaining <= 0 ? 'written_off' : receivable?.status ?? 'open'
+    // Update receivables proportionally
+    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
+    for (const container of containers) {
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
+        .eq('id', container.receivable_id).single()
+      if (!rec) continue
+      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
+      const containerAmount = amount * proportion
+      const newWrittenOff = Number(rec.total_written_off_usd) + containerAmount
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const newRemaining = effectiveVal - Number(rec.total_applied_usd) - newWrittenOff
+      const newStatus = newRemaining <= 0 ? 'written_off' : 'partially_applied'
+      await supabase.from('supplier_receivables').update({
+        total_written_off_usd: newWrittenOff,
+        status: newStatus,
+      }).eq('id', container.receivable_id)
+    }
 
-    await supabase.from('supplier_receivables').update({
-      total_written_off_usd: newWrittenOff,
-      status: newStatus,
-    }).eq('id', receivableId)
-
-    await logActivity('Write-off submitted', writeoffForm.reason || 'No reason provided', amount)
+    await logActivity(
+      [firstReceivable.receivable_id],
+      'Write-off submitted',
+      writeoffForm.reason || 'No reason provided',
+      amount
+    )
     setSavingWriteoff(false)
     setWriteoffOpen(false)
     setWriteoffForm({ amount_usd: '', reason: '', assignee: '' })
     load()
   }
 
-  // Notes functions
+  // Notes helpers
   function extractMentions(text: string): { id: string; name: string }[] {
     const mentioned: { id: string; name: string }[] = []
     text.split(/\s+/).forEach(word => {
@@ -499,7 +557,7 @@ function SupplierReceivablesDrilldownInner() {
     setTimeout(() => (target === 'note' ? noteInputRef : replyInputRef).current?.focus(), 0)
   }
 
-  async function notifyMentions(mentions: { id: string; name: string }[], noteId: string, noteText: string) {
+  async function notifyMentions(mentions: { id: string; name: string }[], noteText: string) {
     if (!mentions.length || !currentUser) return
     const supabase = createClient()
     for (const mention of mentions) {
@@ -508,8 +566,8 @@ function SupplierReceivablesDrilldownInner() {
         user_id: mention.id,
         type: 'note_mention',
         title: `${currentUser.full_name ?? currentUser.email} mentioned you`,
-        message: `In a supplier receivable note: "${noteText.slice(0, 60)}${noteText.length > 60 ? '…' : ''}"`,
-        record_id: receivableId,
+        message: `In a supplier receivable note for ${tripReceivable?.trip_id}: "${noteText.slice(0, 60)}${noteText.length > 60 ? '…' : ''}"`,
+        record_id: tripId,
         module: 'supplier_receivables',
       })
     }
@@ -521,10 +579,10 @@ function SupplierReceivablesDrilldownInner() {
     setSavingNote(true)
     const supabase = createClient()
     const mentions = extractMentions(newNote)
-    const { data: note } = await supabase.from('supplier_receivable_notes').insert({
-      receivable_id: receivableId, note: newNote.trim(), mentions, created_by: currentUser?.id,
-    }).select().single()
-    if (note) await notifyMentions(mentions, note.id, newNote)
+    await supabase.from('supplier_receivable_notes').insert({
+      trip_id: tripId, note: newNote.trim(), mentions, created_by: currentUser?.id,
+    })
+    await notifyMentions(mentions, newNote)
     setNewNote('')
     setSavingNote(false)
     load()
@@ -536,10 +594,10 @@ function SupplierReceivablesDrilldownInner() {
     setSavingReply(true)
     const supabase = createClient()
     const mentions = extractMentions(replyText)
-    const { data: note } = await supabase.from('supplier_receivable_notes').insert({
-      receivable_id: receivableId, note: replyText.trim(), parent_id: replyingTo.id, mentions, created_by: currentUser?.id,
-    }).select().single()
-    if (note) await notifyMentions(mentions, note.id, replyText)
+    await supabase.from('supplier_receivable_notes').insert({
+      trip_id: tripId, note: replyText.trim(), parent_id: replyingTo.id, mentions, created_by: currentUser?.id,
+    })
+    await notifyMentions(mentions, replyText)
     setReplyText('')
     setReplyingTo(null)
     setSavingReply(false)
@@ -619,12 +677,13 @@ function SupplierReceivablesDrilldownInner() {
   )
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-600" size={28} /></div>
-  if (!receivable) return <div className="text-center py-16 text-gray-400">Receivable not found.</div>
+  if (!tripReceivable) return <div className="text-center py-16 text-gray-400">Trip not found.</div>
 
-  const effectiveValue = receivable.agreed_value_usd ?? receivable.gross_value_usd
-  const progressPct = effectiveValue > 0
-    ? Math.min(((receivable.total_applied_usd + receivable.total_written_off_usd) / effectiveValue) * 100, 100)
+  const progressPct = tripReceivable.total_gross_value_usd > 0
+    ? Math.min(((tripReceivable.total_applied_usd + tripReceivable.total_written_off_usd) / tripReceivable.total_gross_value_usd) * 100, 100)
     : 0
+
+  const canAct = tripReceivable.status !== 'fully_applied' && tripReceivable.status !== 'written_off'
 
   return (
     <div className="space-y-5 max-w-5xl">
@@ -638,30 +697,29 @@ function SupplierReceivablesDrilldownInner() {
           </Link>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{receivable.container_id}</span>
-              <span className="font-mono text-xs text-gray-500">{receivable.tracking_number ?? '—'}</span>
+              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{tripReceivable.trip_id}</span>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full border
-                ${receivable.status === 'fully_applied' ? 'bg-green-50 text-green-700 border-green-200'
-                  : receivable.status === 'partially_applied' ? 'bg-amber-50 text-amber-700 border-amber-200'
-                  : receivable.status === 'written_off' ? 'bg-gray-100 text-gray-500 border-gray-200'
+                ${tripReceivable.status === 'fully_applied' ? 'bg-green-50 text-green-700 border-green-200'
+                  : tripReceivable.status === 'partially_applied' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : tripReceivable.status === 'written_off' ? 'bg-gray-100 text-gray-500 border-gray-200'
                   : 'bg-red-50 text-red-600 border-red-200'}`}>
-                {receivable.status === 'fully_applied' ? 'Fully applied'
-                  : receivable.status === 'partially_applied' ? 'Partially applied'
-                  : receivable.status === 'written_off' ? 'Written off' : 'Open'}
+                {tripReceivable.status === 'fully_applied' ? 'Fully applied'
+                  : tripReceivable.status === 'partially_applied' ? 'Partially applied'
+                  : tripReceivable.status === 'written_off' ? 'Written off' : 'Open'}
               </span>
             </div>
-            <h1 className="text-lg font-semibold text-gray-900 mt-0.5">{receivable.trip_title}</h1>
-            <p className="text-xs text-gray-400">{receivable.trip_id} · {receivable.supplier_name ?? '—'}</p>
+            <h1 className="text-lg font-semibold text-gray-900 mt-0.5">{tripReceivable.trip_title}</h1>
+            <p className="text-xs text-gray-400">{tripReceivable.supplier_name ?? '—'} · {tripReceivable.container_count} container{tripReceivable.container_count !== 1 ? 's' : ''}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {receivable.status !== 'fully_applied' && receivable.status !== 'written_off' && (
+        <div className="flex items-center gap-2">
+          {canAct && (
             <button onClick={() => setReallocateOpen(true)}
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
               <ArrowRightLeft size={14} /> Apply to trip
             </button>
           )}
-          {receivable.remaining_usd > 0 && (
+          {tripReceivable.total_remaining_usd > 0 && (
             <button onClick={() => setWriteoffOpen(true)}
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-red-200 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors">
               <XCircle size={14} /> Write off
@@ -671,13 +729,12 @@ function SupplierReceivablesDrilldownInner() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Missing pieces', value: receivable.missing_pieces.toLocaleString(), color: 'text-red-600', sub: `@ $${receivable.unit_price_usd.toFixed(2)}/pc` },
-          { label: 'Gross value', value: fmtUSD(receivable.gross_value_usd), color: 'text-gray-900', sub: 'Original claim' },
-          { label: 'Agreed value', value: receivable.agreed_value_usd ? fmtUSD(receivable.agreed_value_usd) : 'Not set', color: receivable.agreed_value_usd ? 'text-blue-700' : 'text-gray-400', sub: 'Negotiated amount' },
-          { label: 'Applied', value: receivable.total_applied_usd > 0 ? fmtUSD(receivable.total_applied_usd) : '—', color: 'text-green-700', sub: 'To other trips' },
-          { label: 'Remaining', value: receivable.remaining_usd > 0 ? fmtUSD(receivable.remaining_usd) : '—', color: receivable.remaining_usd > 0 ? 'text-red-600' : 'text-green-600', sub: 'To be applied' },
+          { label: 'Total missing pieces', value: tripReceivable.total_missing_pieces.toLocaleString(), color: 'text-red-600', sub: `across ${tripReceivable.container_count} container${tripReceivable.container_count !== 1 ? 's' : ''}` },
+          { label: 'Gross value (USD)', value: fmtUSD(tripReceivable.total_gross_value_usd), color: 'text-gray-900', sub: 'Original claim' },
+          { label: 'Applied (USD)', value: tripReceivable.total_applied_usd > 0 ? fmtUSD(tripReceivable.total_applied_usd) : '—', color: 'text-green-700', sub: 'To other trips' },
+          { label: 'Remaining (USD)', value: tripReceivable.total_remaining_usd > 0 ? fmtUSD(tripReceivable.total_remaining_usd) : '—', color: tripReceivable.total_remaining_usd > 0 ? 'text-red-600' : 'text-green-600', sub: 'To be applied' },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <p className="text-xs text-gray-400 mb-1">{m.label}</p>
@@ -687,49 +744,27 @@ function SupplierReceivablesDrilldownInner() {
         ))}
       </div>
 
-      {/* Progress bar + agreed value editor */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+      {/* Progress bar */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-700">Resolution progress</p>
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}%</p>
-            <button onClick={() => { setEditAgreed(true); setAgreedValue(receivable.agreed_value_usd?.toString() ?? receivable.gross_value_usd.toString()) }}
-              className="p-1 rounded text-gray-400 hover:text-brand-600 transition-colors" title="Set agreed value">
-              <Pencil size={13} />
-            </button>
-          </div>
+          <p className="text-sm font-bold text-brand-600">{progressPct.toFixed(1)}%</p>
         </div>
         <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
           <div className={`h-full rounded-full transition-all duration-500 ${progressPct >= 100 ? 'bg-green-500' : progressPct >= 60 ? 'bg-brand-500' : 'bg-amber-400'}`}
             style={{ width: `${progressPct}%` }} />
         </div>
         <div className="flex justify-between text-xs text-gray-400">
-          <span>Applied + written off: <span className="font-semibold text-gray-700">{fmtUSD(receivable.total_applied_usd + receivable.total_written_off_usd)}</span></span>
-          <span>Effective value: <span className="font-semibold text-gray-700">{fmtUSD(effectiveValue)}</span></span>
+          <span>Applied + written off: <span className="font-semibold text-gray-700">{fmtUSD(tripReceivable.total_applied_usd + tripReceivable.total_written_off_usd)}</span></span>
+          <span>Total gross: <span className="font-semibold text-gray-700">{fmtUSD(tripReceivable.total_gross_value_usd)}</span></span>
         </div>
-
-        {/* Agreed value inline editor */}
-        {editAgreed && (
-          <form onSubmit={saveAgreedValue} className="flex items-center gap-2 pt-2 border-t border-gray-100">
-            <p className="text-xs font-medium text-gray-600 shrink-0">Set agreed value (USD):</p>
-            <AmountInput value={agreedValue} onChange={setAgreedValue}
-              className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            <button type="submit" disabled={savingAgreed}
-              className="px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
-              {savingAgreed ? <Loader2 size={13} className="animate-spin" /> : 'Save'}
-            </button>
-            <button type="button" onClick={() => setEditAgreed(false)}
-              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
-              Cancel
-            </button>
-          </form>
-        )}
       </div>
 
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100 overflow-x-auto">
           {[
+            { key: 'containers', label: 'Containers', count: containers.length },
             { key: 'allocations', label: 'Allocations', count: allocations.length },
             { key: 'writeoffs', label: 'Write-offs', count: writeoffs.length },
             { key: 'activity', label: 'Activity', count: activity.length },
@@ -747,6 +782,51 @@ function SupplierReceivablesDrilldownInner() {
           ))}
         </div>
 
+        {/* Containers tab */}
+        {activeTab === 'containers' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  {['Container','Tracking No.','Pieces Purchased','Supplier Loaded','Missing Pieces','Unit Price (USD)','Gross Value (USD)','Remaining (USD)','Status'].map(h => (
+                    <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {containers.length === 0 ? (
+                  <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-400">No containers found.</td></tr>
+                ) : containers.map(c => {
+                  const sCfg = CONTAINER_STATUS[c.status as keyof typeof CONTAINER_STATUS] ?? CONTAINER_STATUS.open
+                  return (
+                    <tr key={c.receivable_id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{c.container_id}</span>
+                      </td>
+                      <td className="px-3 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{c.tracking_number ?? '—'}</td>
+                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.pieces_purchased?.toLocaleString() ?? '—'}</td>
+                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.supplier_loaded_pieces?.toLocaleString() ?? '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="text-xs font-semibold text-red-600">{c.missing_pieces.toLocaleString()}</span>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">${c.unit_price_usd.toFixed(2)}</td>
+                      <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmtUSD(c.gross_value_usd)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-bold ${c.remaining_usd > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                          {c.remaining_usd > 0 ? fmtUSD(c.remaining_usd) : '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sCfg.color}`}>{sCfg.label}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* Allocations tab */}
         {activeTab === 'allocations' && (
           <div className="overflow-x-auto">
@@ -754,16 +834,18 @@ function SupplierReceivablesDrilldownInner() {
               <div className="flex flex-col items-center justify-center py-12 gap-2">
                 <ArrowRightLeft size={24} className="text-gray-200" />
                 <p className="text-sm text-gray-400">No allocations yet.</p>
-                <button onClick={() => setReallocateOpen(true)}
-                  className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-                  <Plus size={12} /> Apply to a trip
-                </button>
+                {canAct && (
+                  <button onClick={() => setReallocateOpen(true)}
+                    className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                    <Plus size={12} /> Apply to a trip
+                  </button>
+                )}
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['Target trip','Amount (USD)','Percentage','Status','Requested by','Approved by','Notes','Date','Actions'].map(h => (
+                    {['Target trip','Amount (USD)','%','Status','Requested by','Notes','Date',''].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -783,7 +865,6 @@ function SupplierReceivablesDrilldownInner() {
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sCfg.color}`}>{sCfg.label}</span>
                         </td>
                         <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{a.requested_by_name ?? '—'}</td>
-                        <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{a.approved_by_name ?? '—'}</td>
                         <td className="px-3 py-3 text-xs text-gray-400 max-w-[150px] truncate">{a.notes ?? '—'}</td>
                         <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">{timeAgo(a.created_at)}</td>
                         <td className="px-3 py-3 whitespace-nowrap">
@@ -850,9 +931,7 @@ function SupplierReceivablesDrilldownInner() {
                 {activity.map(log => (
                   <div key={log.id} className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
                     <div className="w-7 h-7 rounded-full bg-brand-50 flex items-center justify-center shrink-0 mt-0.5">
-                      <span className="text-brand-600 text-xs font-semibold">
-                        {(log.performer_name ?? 'S')[0].toUpperCase()}
-                      </span>
+                      <span className="text-brand-600 text-xs font-semibold">{(log.performer_name ?? 'S')[0].toUpperCase()}</span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-700">
@@ -873,7 +952,6 @@ function SupplierReceivablesDrilldownInner() {
         {/* Notes tab */}
         {activeTab === 'notes' && (
           <div className="p-5 space-y-4">
-            {/* @ mention dropdown */}
             {mentionOpen && filteredMentions.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-200 shadow-xl py-1 max-w-xs">
                 <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Mention a team member</p>
@@ -891,8 +969,6 @@ function SupplierReceivablesDrilldownInner() {
                 ))}
               </div>
             )}
-
-            {/* Composer */}
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
               <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                 <MessageSquare size={14} className="text-brand-600" /> New note
@@ -914,8 +990,6 @@ function SupplierReceivablesDrilldownInner() {
                 </div>
               </form>
             </div>
-
-            {/* Thread */}
             {notes.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 gap-2 border-2 border-dashed border-gray-100 rounded-xl">
                 <MessageSquare size={24} className="text-gray-200" />
@@ -939,7 +1013,7 @@ function SupplierReceivablesDrilldownInner() {
               <div>
                 <h2 className="text-base font-semibold text-gray-900">Apply to another trip</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Remaining: <span className="font-semibold text-brand-600">{fmtUSD(receivable.remaining_usd)}</span>
+                  Remaining: <span className="font-semibold text-brand-600">{fmtUSD(tripReceivable.total_remaining_usd)}</span>
                 </p>
               </div>
               <button onClick={() => setReallocateOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">✕</button>
@@ -947,7 +1021,7 @@ function SupplierReceivablesDrilldownInner() {
             <form onSubmit={submitReallocation} className="px-6 py-5 space-y-4">
               <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
                 <p className="text-xs text-brand-700 font-medium">
-                  This will create a container payment trip expense on the target trip once approved.
+                  Once approved, this creates a container payment trip expense on the target trip automatically.
                 </p>
               </div>
               <div>
@@ -955,7 +1029,7 @@ function SupplierReceivablesDrilldownInner() {
                 <select required value={allocForm.target_trip_id} onChange={e => setAllocForm(f => ({ ...f, target_trip_id: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                   <option value="">Select a trip...</option>
-                  {trips.map(t => (
+                  {otherTrips.map(t => (
                     <option key={t.id} value={t.id}>{t.trip_id} — {t.title}</option>
                   ))}
                 </select>
@@ -965,21 +1039,20 @@ function SupplierReceivablesDrilldownInner() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (USD) <span className="text-red-400">*</span></label>
                   <AmountInput required value={allocForm.amount_usd}
                     onChange={v => {
-                      const pct = receivable.gross_value_usd > 0
-                        ? ((parseFloat(v) / receivable.gross_value_usd) * 100).toFixed(1)
+                      const pct = tripReceivable.total_gross_value_usd > 0
+                        ? ((parseFloat(v) / tripReceivable.total_gross_value_usd) * 100).toFixed(1)
                         : ''
                       setAllocForm(f => ({ ...f, amount_usd: v, percentage: pct }))
                     }}
                     placeholder="0.00"
                     className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                  <p className="text-xs text-gray-400 mt-1">Max: {fmtUSD(receivable.remaining_usd)}</p>
+                  <p className="text-xs text-gray-400 mt-1">Max: {fmtUSD(tripReceivable.total_remaining_usd)}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Percentage</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Percentage — auto</label>
                   <div className="px-3 py-2.5 text-sm rounded-lg border bg-gray-50 border-gray-200 text-gray-600 font-medium">
                     {allocForm.percentage ? `${allocForm.percentage}%` : '—'}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Auto-calculated</p>
                 </div>
               </div>
               <div>
@@ -987,7 +1060,7 @@ function SupplierReceivablesDrilldownInner() {
                 <textarea rows={2} value={allocForm.notes}
                   onChange={e => setAllocForm(f => ({ ...f, notes: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-                  placeholder="e.g. Agreed amount after negotiation with supplier..." />
+                  placeholder="e.g. Agreed amount after negotiation..." />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>
@@ -1022,9 +1095,7 @@ function SupplierReceivablesDrilldownInner() {
               <button onClick={() => setWriteoffOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">✕</button>
             </div>
             <div className="p-3 bg-red-50 rounded-lg border border-red-100">
-              <p className="text-xs text-red-700 font-medium">
-                Write-offs require approval and are permanently recorded for audit purposes.
-              </p>
+              <p className="text-xs text-red-700 font-medium">Write-offs require approval and are permanently recorded for audit.</p>
             </div>
             <form onSubmit={submitWriteoff} className="space-y-4">
               <div>
@@ -1033,14 +1104,14 @@ function SupplierReceivablesDrilldownInner() {
                   onChange={v => setWriteoffForm(f => ({ ...f, amount_usd: v }))}
                   placeholder="0.00"
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                <p className="text-xs text-gray-400 mt-1">Remaining: {fmtUSD(receivable.remaining_usd)}</p>
+                <p className="text-xs text-gray-400 mt-1">Remaining: {fmtUSD(tripReceivable.total_remaining_usd)}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Reason</label>
                 <textarea rows={3} value={writeoffForm.reason}
                   onChange={e => setWriteoffForm(f => ({ ...f, reason: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-                  placeholder="e.g. Supplier agreed to waive remaining $500 due to long-standing relationship..." />
+                  placeholder="e.g. Supplier agreed to waive remaining balance..." />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>

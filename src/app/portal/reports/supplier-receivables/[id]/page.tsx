@@ -189,31 +189,30 @@ function SupplierReceivablesDrilldownInner() {
       .eq('trip_db_id', tripId)
       .single()
 
-    // Load ALL containers for this trip (not just those with receivables)
+    // Load ALL containers for this trip
     const { data: allTripContainers } = await supabase
       .from('containers')
-      .select(`
-        id, container_id, tracking_number, pieces_purchased, unit_price_usd,
-        presale:presales!presales_container_id_fkey(supplier_loaded_pieces)
-      `)
+      .select('id, container_id, tracking_number, pieces_purchased, unit_price_usd')
       .eq('trip_id', tripId)
       .order('created_at')
 
-    // Load receivables separately for matching
+    // Load presales separately for supplier_loaded_pieces
+    const containerDbIds = (allTripContainers ?? []).map(c => c.id)
+    const { data: presaleData } = containerDbIds.length > 0
+      ? await supabase.from('presales')
+          .select('container_id, supplier_loaded_pieces')
+          .in('container_id', containerDbIds)
+      : { data: [] }
+    const presaleMap = Object.fromEntries((presaleData ?? []).map(p => [p.container_id, p]))
+
+    // Load receivables for this trip
     const { data: containerRecs } = await supabase
       .from('supplier_receivables')
-      .select(`
-        id, missing_pieces, unit_price_usd, gross_value_usd,
-        agreed_value_usd, remaining_usd, status,
-        container:containers(id, container_id, tracking_number, pieces_purchased),
-        presale:presales!presales_container_id_fkey(supplier_loaded_pieces)
-      `)
+      .select('id, container_id, missing_pieces, unit_price_usd, gross_value_usd, agreed_value_usd, remaining_usd, status')
       .eq('trip_id', tripId)
       .order('created_at')
-
-    // Map receivables by container id for quick lookup
     const receivableByContainerId = Object.fromEntries(
-      (containerRecs ?? []).map(r => [(r.container as any)?.id, r])
+      (containerRecs ?? []).map(r => [r.container_id, r])
     )
 
     // Load all allocations for receivables in this trip
@@ -264,7 +263,8 @@ function SupplierReceivablesDrilldownInner() {
 
     setContainers((allTripContainers ?? []).map(c => {
       const rec = receivableByContainerId[c.id]
-      const supplierLoaded = (c.presale as any)?.supplier_loaded_pieces ?? null
+      const presale = presaleMap[c.id]
+      const supplierLoaded = presale?.supplier_loaded_pieces ?? null
       const piecesP = c.pieces_purchased ?? 0
       const missingPieces = rec
         ? rec.missing_pieces
@@ -818,9 +818,9 @@ function SupplierReceivablesDrilldownInner() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  {['Container','Tracking No.','Pieces Purchased','Supplier Loaded','Missing Pieces','Unit Price (USD)','Gross Value (USD)','Remaining (USD)','Status'].map(h => (
-                    <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                <tr className="border-b border-gray-100">
+                  {['Container','Tracking No.','Pieces Purchased','Supplier Loaded','Missing','Unit Price','Gross Value (USD)','Remaining (USD)','Status'].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -829,31 +829,41 @@ function SupplierReceivablesDrilldownInner() {
                   <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-400">No containers found.</td></tr>
                 ) : containers.map(c => {
                   const sCfg = CONTAINER_STATUS[c.status as keyof typeof CONTAINER_STATUS] ?? CONTAINER_STATUS.open
+                  const hasIssue = c.missing_pieces > 0
                   return (
-                    <tr key={c.receivable_id || c.container_id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{c.container_id}</span>
+                    <tr key={c.container_id}
+                      className={`border-b border-gray-50 transition-colors ${hasIssue ? 'hover:bg-red-50/20' : 'hover:bg-gray-50/30'}`}>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className={`font-mono text-xs px-2 py-0.5 rounded font-medium ${hasIssue ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-500'}`}>
+                          {c.container_id}
+                        </span>
                       </td>
-                      <td className="px-3 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{c.tracking_number ?? '—'}</td>
-                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.pieces_purchased?.toLocaleString() ?? '—'}</td>
-                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.supplier_loaded_pieces?.toLocaleString() ?? '—'}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">
+                      <td className="px-3 py-2.5 font-mono text-xs text-gray-400 whitespace-nowrap">{c.tracking_number ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">{c.pieces_purchased?.toLocaleString() ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        {c.supplier_loaded_pieces != null ? (
+                          <span className={`font-medium ${c.supplier_loaded_pieces < (c.pieces_purchased ?? 0) ? 'text-amber-600' : 'text-gray-600'}`}>
+                            {c.supplier_loaded_pieces.toLocaleString()}
+                          </span>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         {c.missing_pieces > 0
-                          ? <span className="text-xs font-semibold text-red-600">{c.missing_pieces.toLocaleString()}</span>
+                          ? <span className="text-xs font-bold text-red-500">{c.missing_pieces.toLocaleString()}</span>
                           : <span className="text-gray-300 text-xs">—</span>}
                       </td>
-                      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">${c.unit_price_usd.toFixed(2)}</td>
-                      <td className="px-3 py-3 text-xs whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">${c.unit_price_usd.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
                         {c.gross_value_usd > 0
-                          ? <span className="font-semibold text-gray-900">{fmtUSD(c.gross_value_usd)}</span>
+                          ? <span className="font-medium text-gray-700">{fmtUSD(c.gross_value_usd)}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         {c.remaining_usd > 0
-                          ? <span className="text-xs font-bold text-red-500">{fmtUSD(c.remaining_usd)}</span>
+                          ? <span className="text-xs font-semibold text-red-500">{fmtUSD(c.remaining_usd)}</span>
                           : <span className="text-gray-300 text-xs">—</span>}
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sCfg.color}`}>{sCfg.label}</span>
                       </td>
                     </tr>

@@ -136,6 +136,7 @@ const CONTAINER_STATUS = {
   partially_applied: { label: 'Partial',           color: 'bg-amber-50 text-amber-700' },
   fully_applied:     { label: 'Fully applied',     color: 'bg-green-50 text-green-700' },
   written_off:       { label: 'Written off',       color: 'bg-gray-100 text-gray-500' },
+  no_receivable:     { label: 'No difference',     color: 'bg-gray-50 text-gray-400' },
 }
 
 function SupplierReceivablesDrilldownInner() {
@@ -188,17 +189,32 @@ function SupplierReceivablesDrilldownInner() {
       .eq('trip_db_id', tripId)
       .single()
 
-    // Load individual container receivables for this trip
+    // Load ALL containers for this trip (not just those with receivables)
+    const { data: allTripContainers } = await supabase
+      .from('containers')
+      .select(`
+        id, container_id, tracking_number, pieces_purchased, unit_price_usd,
+        presale:presales!presales_container_id_fkey(supplier_loaded_pieces)
+      `)
+      .eq('trip_id', tripId)
+      .order('created_at')
+
+    // Load receivables separately for matching
     const { data: containerRecs } = await supabase
       .from('supplier_receivables')
       .select(`
         id, missing_pieces, unit_price_usd, gross_value_usd,
         agreed_value_usd, remaining_usd, status,
-        container:containers(container_id, tracking_number, pieces_purchased),
+        container:containers(id, container_id, tracking_number, pieces_purchased),
         presale:presales!presales_container_id_fkey(supplier_loaded_pieces)
       `)
       .eq('trip_id', tripId)
       .order('created_at')
+
+    // Map receivables by container id for quick lookup
+    const receivableByContainerId = Object.fromEntries(
+      (containerRecs ?? []).map(r => [(r.container as any)?.id, r])
+    )
 
     // Load all allocations for receivables in this trip
     const receivableIds = (containerRecs ?? []).map(r => r.id)
@@ -246,19 +262,27 @@ function SupplierReceivablesDrilldownInner() {
       status: tripData?.status ?? 'open',
     })
 
-    setContainers((containerRecs ?? []).map(r => ({
-      receivable_id: r.id,
-      container_id: (r.container as any)?.container_id ?? '—',
-      tracking_number: (r.container as any)?.tracking_number ?? null,
-      pieces_purchased: (r.container as any)?.pieces_purchased ?? null,
-      supplier_loaded_pieces: (r.presale as any)?.supplier_loaded_pieces ?? null,
-      missing_pieces: r.missing_pieces,
-      unit_price_usd: Number(r.unit_price_usd),
-      gross_value_usd: Number(r.gross_value_usd),
-      agreed_value_usd: r.agreed_value_usd ? Number(r.agreed_value_usd) : null,
-      remaining_usd: Number(r.remaining_usd ?? 0),
-      status: r.status,
-    })))
+    setContainers((allTripContainers ?? []).map(c => {
+      const rec = receivableByContainerId[c.id]
+      const supplierLoaded = (c.presale as any)?.supplier_loaded_pieces ?? null
+      const piecesP = c.pieces_purchased ?? 0
+      const missingPieces = rec
+        ? rec.missing_pieces
+        : (supplierLoaded != null && piecesP > supplierLoaded ? piecesP - supplierLoaded : 0)
+      return {
+        receivable_id: rec?.id ?? '',
+        container_id: c.container_id,
+        tracking_number: c.tracking_number,
+        pieces_purchased: piecesP,
+        supplier_loaded_pieces: supplierLoaded,
+        missing_pieces: missingPieces,
+        unit_price_usd: Number(c.unit_price_usd ?? 0),
+        gross_value_usd: rec ? Number(rec.gross_value_usd) : 0,
+        agreed_value_usd: rec?.agreed_value_usd ? Number(rec.agreed_value_usd) : null,
+        remaining_usd: rec ? Number(rec.remaining_usd ?? 0) : 0,
+        status: rec ? rec.status : 'no_receivable',
+      }
+    }))
 
     setAllocations((allocs ?? []).map(a => ({
       id: a.id,
@@ -334,7 +358,12 @@ function SupplierReceivablesDrilldownInner() {
     const pct = allocForm.percentage ? parseFloat(allocForm.percentage) : null
 
     // Use first open receivable for this trip as the reference
-    const firstReceivable = containers.find(c => c.status !== 'fully_applied' && c.status !== 'written_off')
+    const firstReceivable = containers.find(c =>
+      c.receivable_id &&
+      c.status !== 'fully_applied' &&
+      c.status !== 'written_off' &&
+      c.status !== 'no_receivable'
+    )
     if (!firstReceivable) return
 
     const { data: alloc } = await supabase.from('supplier_receivable_allocations').insert({
@@ -371,7 +400,7 @@ function SupplierReceivablesDrilldownInner() {
     })
 
     await logActivity(
-      [firstReceivable.receivable_id],
+      [firstReceivable.receivable_id].filter(Boolean),
       'Reallocation requested',
       `${fmtUSD(amount)} to trip ${targetTrip?.trip_id ?? ''}${pct ? ` (${pct}%)` : ''}`,
       amount
@@ -416,7 +445,8 @@ function SupplierReceivablesDrilldownInner() {
 
     // Update all container receivables for this trip proportionally
     const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
-    for (const container of containers) {
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    for (const container of receivableContainers) {
       const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
       const containerAmount = alloc.amount_usd * proportion
       const newApplied = Number(container.remaining_usd) - containerAmount
@@ -427,7 +457,7 @@ function SupplierReceivablesDrilldownInner() {
     }
 
     // Simpler approach — just update total_applied on each receivable
-    for (const container of containers) {
+    for (const container of receivableContainers) {
       const { data: rec } = await supabase.from('supplier_receivables')
         .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
         .eq('id', container.receivable_id).single()
@@ -445,7 +475,7 @@ function SupplierReceivablesDrilldownInner() {
     }
 
     await logActivity(
-      containers.map(c => c.receivable_id),
+      receivableContainers.map(c => c.receivable_id).filter(Boolean),
       'Reallocation approved',
       `${fmtUSD(alloc.amount_usd)} applied to trip ${alloc.target_trip_id}`,
       alloc.amount_usd
@@ -459,7 +489,7 @@ function SupplierReceivablesDrilldownInner() {
     setSavingWriteoff(true)
     const supabase = createClient()
     const amount = parseFloat(writeoffForm.amount_usd)
-    const firstReceivable = containers[0]
+    const firstReceivable = containers.find(c => c.receivable_id)
     if (!firstReceivable) return
 
     await supabase.from('supplier_receivable_writeoffs').insert({
@@ -493,7 +523,8 @@ function SupplierReceivablesDrilldownInner() {
 
     // Update receivables proportionally
     const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
-    for (const container of containers) {
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    for (const container of receivableContainers) {
       const { data: rec } = await supabase.from('supplier_receivables')
         .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
         .eq('id', container.receivable_id).single()
@@ -799,7 +830,7 @@ function SupplierReceivablesDrilldownInner() {
                 ) : containers.map(c => {
                   const sCfg = CONTAINER_STATUS[c.status as keyof typeof CONTAINER_STATUS] ?? CONTAINER_STATUS.open
                   return (
-                    <tr key={c.receivable_id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                    <tr key={c.receivable_id || c.container_id} className="border-b border-gray-50 hover:bg-gray-50/50">
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{c.container_id}</span>
                       </td>
@@ -807,14 +838,20 @@ function SupplierReceivablesDrilldownInner() {
                       <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.pieces_purchased?.toLocaleString() ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap font-medium">{c.supplier_loaded_pieces?.toLocaleString() ?? '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs font-semibold text-red-600">{c.missing_pieces.toLocaleString()}</span>
+                        {c.missing_pieces > 0
+                          ? <span className="text-xs font-semibold text-red-600">{c.missing_pieces.toLocaleString()}</span>
+                          : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">${c.unit_price_usd.toFixed(2)}</td>
-                      <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmtUSD(c.gross_value_usd)}</td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap">
+                        {c.gross_value_usd > 0
+                          ? <span className="font-semibold text-gray-900">{fmtUSD(c.gross_value_usd)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`text-xs font-bold ${c.remaining_usd > 0 ? 'text-red-500' : 'text-green-600'}`}>
-                          {c.remaining_usd > 0 ? fmtUSD(c.remaining_usd) : '—'}
-                        </span>
+                        {c.remaining_usd > 0
+                          ? <span className="text-xs font-bold text-red-500">{fmtUSD(c.remaining_usd)}</span>
+                          : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sCfg.color}`}>{sCfg.label}</span>
@@ -1039,14 +1076,25 @@ function SupplierReceivablesDrilldownInner() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (USD) <span className="text-red-400">*</span></label>
                   <AmountInput required value={allocForm.amount_usd}
                     onChange={v => {
+                      const parsed = parseFloat(v) || 0
+                      const maxVal = tripReceivable.total_remaining_usd
+                      const capped = parsed > maxVal ? maxVal.toFixed(2) : v
                       const pct = tripReceivable.total_gross_value_usd > 0
-                        ? ((parseFloat(v) / tripReceivable.total_gross_value_usd) * 100).toFixed(1)
+                        ? (((parseFloat(capped) || 0) / tripReceivable.total_gross_value_usd) * 100).toFixed(1)
                         : ''
-                      setAllocForm(f => ({ ...f, amount_usd: v, percentage: pct }))
+                      setAllocForm(f => ({ ...f, amount_usd: capped, percentage: pct }))
                     }}
                     placeholder="0.00"
-                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                  <p className="text-xs text-gray-400 mt-1">Max: {fmtUSD(tripReceivable.total_remaining_usd)}</p>
+                    className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500
+                      ${allocForm.amount_usd && parseFloat(allocForm.amount_usd) > tripReceivable.total_remaining_usd
+                        ? 'border-red-300 bg-red-50'
+                        : 'border-gray-200'}`} />
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-xs text-gray-400">Max: <span className="font-semibold text-brand-600">{fmtUSD(tripReceivable.total_remaining_usd)}</span></p>
+                    {allocForm.amount_usd && parseFloat(allocForm.amount_usd) >= tripReceivable.total_remaining_usd && (
+                      <p className="text-xs text-amber-600 font-medium">Full remaining amount</p>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Percentage — auto</label>

@@ -15,6 +15,8 @@ interface ReceivableRow {
   container_id: string
   container_db_id: string
   tracking_number: string | null
+  pieces_purchased: number | null
+  supplier_loaded_pieces: number | null
   trip_id: string
   trip_title: string
   trip_created_at: string | null
@@ -65,11 +67,29 @@ export default function SupplierReceivablesPage() {
       `)
       .order('created_at', { ascending: false })
 
+    // Fetch pieces_purchased and supplier_loaded_pieces from presales
+    const containerIds = (receivables ?? []).map(r => (r.container as any)?.id).filter(Boolean)
+    const { data: presaleData } = containerIds.length > 0
+      ? await supabase.from('presales')
+          .select('container_id, supplier_loaded_pieces')
+          .in('container_id', containerIds)
+      : { data: [] }
+    const { data: containerData } = containerIds.length > 0
+      ? await supabase.from('containers')
+          .select('id, pieces_purchased')
+          .in('id', containerIds)
+      : { data: [] }
+
+    const presaleMap = Object.fromEntries((presaleData ?? []).map(p => [p.container_id, p]))
+    const containerPiecesMap = Object.fromEntries((containerData ?? []).map(c => [c.id, c.pieces_purchased]))
+
     setRows((receivables ?? []).map(r => ({
       id: r.id,
       container_id: (r.container as any)?.container_id ?? '—',
       container_db_id: (r.container as any)?.id ?? '',
       tracking_number: (r.container as any)?.tracking_number ?? null,
+      pieces_purchased: containerPiecesMap[(r.container as any)?.id] ?? null,
+      supplier_loaded_pieces: presaleMap[(r.container as any)?.id]?.supplier_loaded_pieces ?? null,
       trip_id: (r.trip as any)?.trip_id ?? '—',
       trip_title: (r.trip as any)?.title ?? '—',
       trip_created_at: (r.trip as any)?.created_at ?? null,
@@ -282,7 +302,7 @@ export default function SupplierReceivablesPage() {
           <table className="w-full text-sm min-w-[1000px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                {['Container','Tracking No.','Trip','Supplier','Trip Date','Missing Pieces','Unit Price','Gross Value','Agreed Value','Applied','Written Off','Remaining','Status',''].map(h => (
+                {['Container','Tracking No.','Trip','Supplier','Trip Date','Pieces Purchased','Supplier Loaded','Missing Pieces','Unit Price','Gross Value','Agreed Value','Applied','Written Off','Remaining','Status',''].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -298,7 +318,7 @@ export default function SupplierReceivablesPage() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-16 text-center">
+                  <td colSpan={16} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <ArrowRightLeft size={24} className="text-gray-200" />
                       <p className="text-sm text-gray-400">No supplier receivables found.</p>
@@ -314,6 +334,21 @@ export default function SupplierReceivablesPage() {
                       <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{row.tracking_number ?? '—'}</td>
+                    <td className="px-3 py-3 text-gray-700 whitespace-nowrap font-medium text-xs">
+                      {row.pieces_purchased?.toLocaleString() ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {row.supplier_loaded_pieces != null ? (
+                        <div>
+                          <span className="text-xs font-medium text-gray-700">{row.supplier_loaded_pieces.toLocaleString()}</span>
+                          {row.pieces_purchased != null && row.supplier_loaded_pieces < row.pieces_purchased && (
+                            <span className="ml-1.5 text-xs text-red-500 font-medium">
+                              ({(row.pieces_purchased - row.supplier_loaded_pieces).toLocaleString()} short)
+                            </span>
+                          )}
+                        </div>
+                      ) : <span className="text-gray-300 text-xs">—</span>}
+                    </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <p className="text-xs font-medium text-gray-700">{row.trip_id}</p>
                       <p className="text-xs text-gray-400 truncate max-w-[100px]">{row.trip_title}</p>

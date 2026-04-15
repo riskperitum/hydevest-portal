@@ -71,6 +71,11 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
 
   function handleNotifClick(notif: Notification) {
     markRead(notif.id)
+    if (notif.type === 'note_mention' && notif.record_id) {
+      router.push(`/portal/reports/customer-debt/${notif.record_id}?tab=notes`)
+      setNotifOpen(false)
+      return
+    }
     if (notif.task_id) {
       router.push('/portal/tasks')
     } else if (notif.module === 'trips' && notif.record_id) {

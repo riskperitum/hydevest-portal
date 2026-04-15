@@ -334,21 +334,6 @@ export default function SupplierReceivablesPage() {
                       <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{row.tracking_number ?? '—'}</td>
-                    <td className="px-3 py-3 text-gray-700 whitespace-nowrap font-medium text-xs">
-                      {row.pieces_purchased?.toLocaleString() ?? '—'}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {row.supplier_loaded_pieces != null ? (
-                        <div>
-                          <span className="text-xs font-medium text-gray-700">{row.supplier_loaded_pieces.toLocaleString()}</span>
-                          {row.pieces_purchased != null && row.supplier_loaded_pieces < row.pieces_purchased && (
-                            <span className="ml-1.5 text-xs text-red-500 font-medium">
-                              ({(row.pieces_purchased - row.supplier_loaded_pieces).toLocaleString()} short)
-                            </span>
-                          )}
-                        </div>
-                      ) : <span className="text-gray-300 text-xs">—</span>}
-                    </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <p className="text-xs font-medium text-gray-700">{row.trip_id}</p>
                       <p className="text-xs text-gray-400 truncate max-w-[100px]">{row.trip_title}</p>
@@ -358,6 +343,12 @@ export default function SupplierReceivablesPage() {
                       {row.trip_created_at
                         ? new Date(row.trip_created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
                         : '—'}
+                    </td>
+                    <td className="px-3 py-3 text-gray-700 whitespace-nowrap font-medium text-xs">
+                      {row.pieces_purchased?.toLocaleString() ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 text-gray-700 whitespace-nowrap text-xs font-medium">
+                      {row.supplier_loaded_pieces?.toLocaleString() ?? '—'}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-xs font-semibold text-red-600">{row.missing_pieces.toLocaleString()}</span>

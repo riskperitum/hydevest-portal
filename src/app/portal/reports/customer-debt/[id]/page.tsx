@@ -208,32 +208,63 @@ export default function CustomerDebtDrilldownPage() {
       </div>
 
       {/* Last payment flash */}
-      {lastPayment && (
-        <div className={`flex items-center gap-3 p-4 rounded-xl border
-          ${new Date().getTime() - new Date(lastPayment.payment_date).getTime() < 7 * 24 * 60 * 60 * 1000
-            ? 'bg-green-50 border-green-200'
-            : new Date().getTime() - new Date(lastPayment.payment_date).getTime() < 30 * 24 * 60 * 60 * 1000
-            ? 'bg-blue-50 border-blue-200'
-            : 'bg-amber-50 border-amber-200'}`}>
-          <Clock size={16} className={
-            new Date().getTime() - new Date(lastPayment.payment_date).getTime() < 7 * 24 * 60 * 60 * 1000
-              ? 'text-green-600'
-              : new Date().getTime() - new Date(lastPayment.payment_date).getTime() < 30 * 24 * 60 * 60 * 1000
-              ? 'text-blue-600'
-              : 'text-amber-600'
-          } />
-          <p className="text-sm font-medium text-gray-700">
-            Last payment of <span className="font-bold text-gray-900">{fmt(lastPayment.amount_paid)}</span> was made{' '}
-            <span className="font-semibold">{timeAgo(lastPayment.payment_date)}</span>
-            {' '}· {new Date(lastPayment.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
-        </div>
-      )}
+      {lastPayment ? (() => {
+        const now = new Date()
+        const saleDate = orders.length > 0
+          ? new Date(Math.min(...orders.map(o => new Date(o.created_at).getTime())))
+          : null
+        const lastPaymentDate = new Date(lastPayment.payment_date)
+        const daysSinceSale = saleDate
+          ? Math.floor((now.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24))
+          : 0
+        const daysSincePayment = Math.floor((now.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24))
+        const needsUrgentCall = totalOutstanding > 0 && daysSinceSale > 15 && daysSincePayment > 5
 
-      {!lastPayment && (
+        return (
+          <div className={`flex items-start gap-3 p-4 rounded-xl border
+            ${needsUrgentCall
+              ? 'bg-red-50 border-red-300'
+              : daysSincePayment <= 7
+              ? 'bg-green-50 border-green-200'
+              : daysSincePayment <= 30
+              ? 'bg-blue-50 border-blue-200'
+              : 'bg-amber-50 border-amber-200'}`}>
+            <div className="shrink-0 mt-0.5">
+              {needsUrgentCall
+                ? <AlertTriangle size={16} className="text-red-600" />
+                : daysSincePayment <= 7
+                ? <CheckCircle2 size={16} className="text-green-600" />
+                : <Clock size={16} className={daysSincePayment <= 30 ? 'text-blue-600' : 'text-amber-600'} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-semibold mb-0.5
+                ${needsUrgentCall ? 'text-red-800' : 'text-gray-800'}`}>
+                {needsUrgentCall
+                  ? '⚠ Action required — customer needs to be called'
+                  : 'Last payment received'}
+              </p>
+              <p className={`text-sm ${needsUrgentCall ? 'text-red-700' : 'text-gray-600'}`}>
+                Last payment of <span className="font-bold">{fmt(lastPayment.amount_paid)}</span> was made{' '}
+                <span className="font-semibold">{timeAgo(lastPayment.payment_date)}</span>
+                {' '}· {new Date(lastPayment.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
+              {needsUrgentCall && (
+                <p className="text-xs text-red-600 mt-1 font-medium">
+                  Sale is {daysSinceSale} days old · Last payment was {daysSincePayment} days ago · Outstanding balance: {fmt(totalOutstanding)}
+                </p>
+              )}
+            </div>
+          </div>
+        )
+      })() : (
         <div className="flex items-center gap-3 p-4 rounded-xl border bg-red-50 border-red-200">
           <AlertTriangle size={16} className="text-red-500" />
-          <p className="text-sm font-medium text-red-700">No payments recorded for this customer yet.</p>
+          <div>
+            <p className="text-sm font-semibold text-red-800">No payments recorded — customer needs to be called</p>
+            {totalOutstanding > 0 && (
+              <p className="text-xs text-red-600 mt-0.5">Outstanding balance: {fmt(totalOutstanding)}</p>
+            )}
+          </div>
         </div>
       )}
 

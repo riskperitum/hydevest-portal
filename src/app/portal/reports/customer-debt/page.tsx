@@ -18,6 +18,9 @@ interface CustomerDebtRow {
   payment_status: 'paid' | 'partial' | 'outstanding'
   last_payment_date: string | null
   last_payment_amount: number | null
+  days_since_first_sale: number
+  days_since_last_payment: number
+  needs_urgent_call: boolean
 }
 
 const PAYMENT_STATUS_CONFIG = {
@@ -54,7 +57,7 @@ export default function CustomerDebtReportPage() {
     const supabase = createClient()
 
     const [{ data: orders }, { data: recoveries }, { data: customers }] = await Promise.all([
-      supabase.from('sales_orders').select('id, customer_id, customer_payable, outstanding_balance, payment_status'),
+      supabase.from('sales_orders').select('id, customer_id, customer_payable, outstanding_balance, payment_status, created_at'),
       supabase.from('recoveries').select('sales_order_id, amount_paid, payment_date, payment_type'),
       supabase.from('customers').select('id, customer_id, name, phone, is_active').eq('is_active', true),
     ])
@@ -91,6 +94,18 @@ export default function CustomerDebtReportPage() {
         if (totalOutstanding <= 0) paymentStatus = 'paid'
         else if (totalRecovered > 0) paymentStatus = 'partial'
 
+        const now = new Date()
+        const firstSaleDate = custOrders.length > 0
+          ? new Date(Math.min(...custOrders.map(o => new Date(o.created_at ?? Date.now()).getTime())))
+          : null
+        const daysSinceFirstSale = firstSaleDate
+          ? Math.floor((now.getTime() - firstSaleDate.getTime()) / (1000 * 60 * 60 * 24))
+          : 0
+        const daysSinceLastPayment = lastPayment
+          ? Math.floor((now.getTime() - new Date(lastPayment.payment_date).getTime()) / (1000 * 60 * 60 * 24))
+          : 999
+        const needsUrgentCall = Math.max(totalOutstanding, 0) > 0 && daysSinceFirstSale > 15 && daysSinceLastPayment > 5
+
         return {
           customer_db_id: customer.id,
           customer_id: customer.customer_id,
@@ -103,6 +118,9 @@ export default function CustomerDebtReportPage() {
           payment_status: paymentStatus,
           last_payment_date: lastPayment?.payment_date ?? null,
           last_payment_amount: lastPayment ? Number(lastPayment.amount_paid) : null,
+          days_since_first_sale: daysSinceFirstSale,
+          days_since_last_payment: daysSinceLastPayment,
+          needs_urgent_call: needsUrgentCall,
         }
       })
       .filter(Boolean) as CustomerDebtRow[]
@@ -323,9 +341,20 @@ export default function CustomerDebtReportPage() {
                 return (
                   <tr key={row.customer_db_id}
                     onClick={() => router.push(`/portal/reports/customer-debt/${row.customer_db_id}`)}
-                    className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors cursor-pointer group">
+                    className={`border-b border-gray-50 hover:bg-brand-50/30 transition-colors cursor-pointer group
+                      ${row.needs_urgent_call ? 'bg-red-50/40 border-l-4 border-l-red-500' : ''}`}>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <p className="font-semibold text-gray-900 group-hover:text-brand-700">{row.customer_name}</p>
+                      <div className="flex items-center gap-2">
+                        {row.needs_urgent_call && (
+                          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" title="Needs urgent call" />
+                        )}
+                        <p className={`font-semibold ${row.needs_urgent_call ? 'text-red-700' : 'text-gray-900 group-hover:text-brand-700'}`}>
+                          {row.customer_name}
+                        </p>
+                      </div>
+                      {row.needs_urgent_call && (
+                        <p className="text-xs text-red-500 font-medium mt-0.5">Needs urgent call</p>
+                      )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="font-mono text-xs text-gray-500">{row.customer_id}</span>

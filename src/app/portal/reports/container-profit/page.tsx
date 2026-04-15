@@ -34,6 +34,9 @@ interface ContainerProfitRow {
   total_recovery_to_date: number
   pieces_sold: number
   pieces_remaining: number
+  pallets_total: number
+  pallets_sold: number
+  pallets_remaining: number
 
   // Profit calculations
   expected_profit: number
@@ -142,6 +145,10 @@ export default function ContainerProfitReportPage() {
         let piecesSold = 0
         let piecesRemaining = whPieces
 
+        const palletsTotal = pallets.reduce((s, pd) => s + pd.number_of_pallets, 0)
+        const palletsSold = pallets.reduce((s, pd) => s + pd.pallets_sold, 0)
+        const palletsRemaining = palletsTotal - palletsSold
+
         if (presale.sale_type === 'box_sale') {
           piecesSold = orders.length > 0 ? whPieces : 0
           piecesRemaining = orders.length > 0 ? 0 : whPieces
@@ -204,6 +211,9 @@ export default function ContainerProfitReportPage() {
           total_recovery_to_date: recoveryToDate,
           pieces_sold: piecesSold,
           pieces_remaining: piecesRemaining,
+          pallets_total: palletsTotal,
+          pallets_sold: palletsSold,
+          pallets_remaining: palletsRemaining,
           expected_profit: expectedProfit,
           expected_profit_margin: expectedProfitMargin,
           actual_profit: actualProfit,
@@ -553,14 +563,18 @@ export default function ContainerProfitReportPage() {
                   </div>
                   {!isCompleted && row.unearned_profit > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400">Unearned</p>
-                      <p className="text-xs font-semibold text-amber-600 truncate">{fmt(row.unearned_profit)}</p>
+                      <p className="text-xs text-gray-400 text-[10px]">Unearned</p>
+                      <p className="text-xs font-semibold text-amber-600 truncate text-[11px]">{fmt(row.unearned_profit)}</p>
                     </div>
                   )}
                   <div>
-                    <p className="text-xs text-gray-400">{row.sale_type === 'split_sale' ? 'Pieces left' : 'Type'}</p>
-                    <p className="text-xs font-semibold text-gray-700">
-                      {row.sale_type === 'split_sale' ? row.pieces_remaining.toLocaleString() : 'Box sale'}
+                    <p className="text-[10px] text-gray-400">
+                      {row.sale_type === 'split_sale' ? 'Pallets left' : 'Type'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-gray-700">
+                      {row.sale_type === 'split_sale'
+                        ? `${row.pallets_remaining} / ${row.pallets_total}`
+                        : 'Box sale'}
                     </p>
                   </div>
                   <div>

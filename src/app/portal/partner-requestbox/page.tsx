@@ -98,11 +98,26 @@ export default function PartnerRequestBoxPage() {
     if (!partnerData) { setLoading(false); return }
     setPartner({ ...partnerData, wallet_balance: Number(partnerData.wallet_balance ?? 0) })
 
-    // Load staff profiles for tagging (exclude partner roles)
+    // Load only non-partner profiles for tagging
+    const { data: partnerRoleData } = await supabase
+      .from('user_roles')
+      .select('user_id, roles(name)')
+
+    const partnerUserIds = (partnerRoleData ?? [])
+      .filter((r: any) => {
+        const roles = r.roles as { name?: string } | { name?: string }[] | null
+        if (!roles) return false
+        const role = Array.isArray(roles) ? roles[0] : roles
+        return role?.name === 'partner'
+      })
+      .map((r: any) => r.user_id)
+
     const { data: staffData } = await supabase
       .from('profiles')
       .select('id, full_name, email')
       .eq('is_active', true)
+      .not('id', 'in', `(${partnerUserIds.length > 0 ? partnerUserIds.join(',') : '00000000-0000-0000-0000-000000000000'})`)
+
     setStaffProfiles(staffData ?? [])
 
     const { data: msgData } = await supabase

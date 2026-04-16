@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Plus, Loader2, Eye, RotateCcw, Check,
-  ChevronDown, ChevronUp, AlertCircle, BookOpen
+  ChevronDown, ChevronUp, AlertCircle, BookOpen, RefreshCw
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import AmountInput from '@/components/ui/AmountInput'
+import AutoJournalEngine from './AutoJournalEngine'
 
 interface Journal {
   id: string
@@ -69,6 +70,7 @@ export default function JournalsTab({
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
+  const [showAutoJournal, setShowAutoJournal] = useState(false)
 
   // New journal modal
   const [newOpen, setNewOpen] = useState(false)
@@ -255,16 +257,33 @@ export default function JournalsTab({
   return (
     <div className="p-5 space-y-4">
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-sm font-semibold text-gray-800">Journal entries</h2>
           <p className="text-xs text-gray-400 mt-0.5">Double-entry bookkeeping ledger</p>
         </div>
-        <button onClick={() => { setNewOpen(true); setJournalForm(f => ({ ...f, period_id: selectedPeriod })) }}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Plus size={14} /> New journal entry
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowAutoJournal(v => !v)}
+            className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors
+              ${showAutoJournal ? 'bg-blue-600 text-white border-blue-600' : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>
+            <RefreshCw size={14} /> Auto-journal
+          </button>
+          <button onClick={() => { setNewOpen(true); setJournalForm(f => ({ ...f, period_id: selectedPeriod })) }}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+            <Plus size={14} /> New journal entry
+          </button>
+        </div>
       </div>
+
+      {/* Auto-journal engine */}
+      {showAutoJournal && (
+        <div className="bg-white rounded-xl border border-gray-100 p-5">
+          <AutoJournalEngine
+            selectedPeriod={selectedPeriod}
+            onComplete={() => { load(); setShowAutoJournal(false) }}
+          />
+        </div>
+      )}
 
       {/* Journal list */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">

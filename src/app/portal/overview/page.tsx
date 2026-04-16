@@ -1,482 +1,383 @@
-"use client";
+'use client'
 
-import { useState, useMemo } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
-import {
-  TrendingUp,
-  ShoppingCart,
-  Package,
-  DollarSign,
-  Users,
-  Receipt,
-  Plus,
-  ArrowUpRight,
-  ArrowDownRight,
-  Plane,
-  CreditCard,
-  BarChart3,
-} from "lucide-react";
+  Package, TrendingUp, Wallet, AlertCircle,
+  ShoppingCart, BarChart3, Users, ArrowUpRight,
+  ArrowDownRight, Clock, CheckCircle2, RefreshCw,
+  ChevronRight
+} from 'lucide-react'
 
-const trendData = [
-  { month: "Nov", revenue: 0, recovered: 0 },
-  { month: "Dec", revenue: 12000000, recovered: 4000000 },
-  { month: "Jan", revenue: 45000000, recovered: 18000000 },
-  { month: "Feb", revenue: 98000000, recovered: 52000000 },
-  { month: "Mar", revenue: 180000000, recovered: 89000000 },
-  { month: "Apr", revenue: 221000000, recovered: 92000000 },
-];
+interface KPI {
+  label: string
+  value: string
+  sub: string
+  icon: React.ReactNode
+  color: string
+  bg: string
+  trend?: 'up' | 'down' | 'neutral'
+  href?: string
+}
 
-const pieData = [
-  { name: "Direct", value: 55, color: "#55249e" },
-  { name: "Presale", value: 30, color: "#8554d1" },
-  { name: "Partner", value: 15, color: "#c4aaec" },
-];
+const fmt    = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-const recentTrips = [
-  {
-    title: "Tinuolabo",
-    desc: "1st set of wet salted container",
-    location: "Colombia",
-    supplier: "Miguel M",
-    status: "active",
-    end: "2026-04-22",
-  },
-  {
-    title: "Deniyi",
-    desc: "4th self ordered trip from Colombia",
-    location: "Colombia",
-    supplier: "Miguel M",
-    status: "active",
-    end: "2026-05-01",
-  },
-  {
-    title: "Bosipo",
-    desc: "3rd self order trip from Colombia",
-    location: "Colombia",
-    supplier: "Miguel M",
-    status: "transit",
-    end: "2026-04-16",
-  },
-];
-
-const quickActions = [
-  {
-    label: "New trip",
-    icon: <Plane size={16} />,
-    href: "/portal/purchase/trips",
-    variant: "outline" as const,
-  },
-  {
-    label: "New presale",
-    icon: <ShoppingCart size={16} />,
-    href: "/portal/sales/presale",
-    variant: "outline" as const,
-  },
-  {
-    label: "New sale",
-    icon: <TrendingUp size={16} />,
-    href: "/portal/sales/orders",
-    variant: "solid" as const,
-  },
-  {
-    label: "Record payment",
-    icon: <CreditCard size={16} />,
-    href: "/portal/finance",
-    variant: "outline" as const,
-  },
-];
-
-const statusColors: Record<string, string> = {
-  active: "bg-green-50 text-green-700",
-  transit: "bg-amber-50 text-amber-700",
-  completed: "bg-gray-100 text-gray-600",
-};
-
-function fmt(n: number) {
-  if (n >= 1000000) return `₦${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `₦${(n / 1000).toFixed(0)}K`;
-  return `₦${n}`;
+function timeAgo(date: string): string {
+  const diff = Math.floor((new Date().getTime() - new Date(date).getTime()) / 60000)
+  if (diff < 1) return 'just now'
+  if (diff < 60) return `${diff}m ago`
+  const hrs = Math.floor(diff / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
 }
 
 export default function OverviewPage() {
-  const [hoveredKpi, setHoveredKpi] = useState<string | null>(null);
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [userName, setUserName] = useState('')
 
-  const todayLabel = useMemo(
-    () =>
-      new Date().toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }),
-    [],
-  );
+  // KPI data
+  const [activeContainers, setActiveContainers] = useState(0)
+  const [totalRevenue, setTotalRevenue] = useState(0)
+  const [totalOutstanding, setTotalOutstanding] = useState(0)
+  const [totalRecovered, setTotalRecovered] = useState(0)
+  const [pendingTasks, setPendingTasks] = useState(0)
+  const [partnerWallets, setPartnerWallets] = useState(0)
+  const [supplierPayables, setSupplierPayables] = useState(0)
+  const [containerInventoryValue, setContainerInventoryValue] = useState(0)
+  const [grossMargin, setGrossMargin] = useState(0)
 
-  const kpis = [
-    {
-      label: "Total revenue",
-      value: "₦221.6M",
-      change: "+18%",
-      up: true,
-      icon: <DollarSign size={18} />,
-      color: "brand",
-    },
-    {
-      label: "Recovered",
-      value: "₦92.4M",
-      change: "+12%",
-      up: true,
-      icon: <TrendingUp size={18} />,
-      color: "green",
-    },
-    {
-      label: "Outstanding",
-      value: "₦129.2M",
-      change: "-5%",
-      up: false,
-      icon: <BarChart3 size={18} />,
-      color: "amber",
-    },
-    {
-      label: "Active trips",
-      value: "5",
-      change: "+2",
-      up: true,
-      icon: <Plane size={18} />,
-      color: "blue",
-    },
-    {
-      label: "Partners",
-      value: "8",
-      change: "+1",
-      up: true,
-      icon: <Users size={18} />,
-      color: "brand",
-    },
-    {
-      label: "Pending expenses",
-      value: "3",
-      change: "-2",
-      up: true,
-      icon: <Receipt size={18} />,
-      color: "red",
-    },
-  ];
+  // Recent activity
+  const [recentSales, setRecentSales] = useState<any[]>([])
+  const [recentRecoveries, setRecentRecoveries] = useState<any[]>([])
+  const [pendingTaskList, setPendingTaskList] = useState<any[]>([])
 
-  const colorMap: Record<string, { bg: string; icon: string; badge: string }> =
+  const load = useCallback(async () => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data: profile } = await supabase
+      .from('profiles').select('full_name').eq('id', user.id).single()
+    setUserName(profile?.full_name?.split(' ')[0] ?? 'there')
+
+    const [
+      { data: containers },
+      { data: salesOrders },
+      { data: recoveries },
+      { data: tasks },
+      { data: partners },
+      { data: tripExpenses },
+      { data: recentSalesData },
+      { data: recentRecovData },
+      { data: pendingTaskData },
+    ] = await Promise.all([
+      supabase.from('containers').select('id, status, estimated_landing_cost'),
+      supabase.from('sales_orders').select('customer_payable, outstanding_balance'),
+      supabase.from('recoveries').select('amount_paid'),
+      supabase.from('tasks').select('id').eq('status', 'pending'),
+      supabase.from('partners').select('wallet_balance, wallet_allocated'),
+      supabase.from('trip_expenses').select('amount_ngn, category').eq('category', 'container'),
+      supabase.from('sales_orders')
+        .select(`
+          id, customer_payable, created_at,
+          customer:customers!sales_orders_customer_id_fkey(name),
+          container:containers!sales_orders_container_id_fkey(container_id)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabase.from('recoveries')
+        .select(`
+          id, amount_paid, payment_date,
+          sales_order:sales_orders!recoveries_sales_order_id_fkey(
+            customer:customers!sales_orders_customer_id_fkey(name)
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabase.from('tasks')
+        .select(`
+          id, task_id, title, module, priority, created_at,
+          requested_by_profile:profiles!tasks_requested_by_fkey(full_name)
+        `)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(5),
+    ])
+
+    // KPIs
+    const active = (containers ?? []).filter(c => c.status !== 'completed').length
+    const invValue = (containers ?? []).filter(c => c.status !== 'completed')
+      .reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
+
+    const revenue = (salesOrders ?? []).reduce((s, so) => s + Number(so.customer_payable), 0)
+    const outstanding = (salesOrders ?? []).reduce((s, so) => s + Number(so.outstanding_balance ?? 0), 0)
+    const recovered = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
+    const wallets = (partners ?? []).reduce((s, p) => s + Number(p.wallet_balance ?? 0) + Number(p.wallet_allocated ?? 0), 0)
+    const supplierPaid = (tripExpenses ?? []).reduce((s, te) => s + Number(te.amount_ngn ?? 0), 0)
+    const margin = revenue > 0 ? ((revenue - supplierPaid) / revenue) * 100 : 0
+
+    setActiveContainers(active)
+    setContainerInventoryValue(invValue)
+    setTotalRevenue(revenue)
+    setTotalOutstanding(outstanding)
+    setTotalRecovered(recovered)
+    setPendingTasks((tasks ?? []).length)
+    setPartnerWallets(wallets)
+    setSupplierPayables(supplierPaid)
+    setGrossMargin(margin)
+    setRecentSales(recentSalesData ?? [])
+    setRecentRecoveries(recentRecovData ?? [])
+    setPendingTaskList(pendingTaskData ?? [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const recoveryRate = totalRevenue > 0 ? (totalRecovered / totalRevenue) * 100 : 0
+
+  const kpis: KPI[] = [
     {
-      brand: {
-        bg: "bg-brand-50",
-        icon: "text-brand-600",
-        badge: "bg-brand-100 text-brand-700",
-      },
-      green: {
-        bg: "bg-green-50",
-        icon: "text-green-600",
-        badge: "bg-green-100 text-green-700",
-      },
-      amber: {
-        bg: "bg-amber-50",
-        icon: "text-amber-600",
-        badge: "bg-amber-100 text-amber-700",
-      },
-      blue: {
-        bg: "bg-blue-50",
-        icon: "text-blue-600",
-        badge: "bg-blue-100 text-blue-700",
-      },
-      red: {
-        bg: "bg-red-50",
-        icon: "text-red-500",
-        badge: "bg-red-100 text-red-600",
-      },
-    };
+      label: 'Active containers',
+      value: activeContainers.toString(),
+      sub: `${fmt(containerInventoryValue)} inventory value`,
+      icon: <Package size={18} className="text-blue-600" />,
+      color: 'text-blue-700', bg: 'bg-blue-50',
+      trend: 'neutral', href: '/portal/purchase/containers',
+    },
+    {
+      label: 'Total sales revenue',
+      value: fmt(totalRevenue),
+      sub: `${recoveryRate.toFixed(0)}% recovered`,
+      icon: <TrendingUp size={18} className="text-green-600" />,
+      color: 'text-green-700', bg: 'bg-green-50',
+      trend: 'up', href: '/portal/sales/orders',
+    },
+    {
+      label: 'Outstanding receivables',
+      value: fmt(totalOutstanding),
+      sub: `${fmt(totalRecovered)} collected so far`,
+      icon: <Clock size={18} className={totalOutstanding > 0 ? 'text-amber-600' : 'text-green-600'} />,
+      color: totalOutstanding > 0 ? 'text-amber-700' : 'text-green-700',
+      bg: totalOutstanding > 0 ? 'bg-amber-50' : 'bg-green-50',
+      trend: totalOutstanding > 0 ? 'down' : 'neutral',
+      href: '/portal/reports/customer-debt',
+    },
+    {
+      label: 'Partner wallets',
+      value: fmt(partnerWallets),
+      sub: 'Total partner positions',
+      icon: <Wallet size={18} className="text-brand-600" />,
+      color: 'text-brand-700', bg: 'bg-brand-50',
+      trend: 'neutral', href: '/portal/partnership',
+    },
+    {
+      label: 'Pending tasks',
+      value: pendingTasks.toString(),
+      sub: 'Awaiting your action',
+      icon: <AlertCircle size={18} className={pendingTasks > 0 ? 'text-red-500' : 'text-green-600'} />,
+      color: pendingTasks > 0 ? 'text-red-600' : 'text-green-700',
+      bg: pendingTasks > 0 ? 'bg-red-50' : 'bg-green-50',
+      trend: pendingTasks > 0 ? 'down' : 'neutral',
+      href: '/portal/tasks',
+    },
+    {
+      label: 'Gross margin',
+      value: `${grossMargin.toFixed(1)}%`,
+      sub: `${fmt(supplierPayables)} cost of sales`,
+      icon: <BarChart3 size={18} className={grossMargin >= 20 ? 'text-green-600' : 'text-amber-600'} />,
+      color: grossMargin >= 20 ? 'text-green-700' : 'text-amber-700',
+      bg: grossMargin >= 20 ? 'bg-green-50' : 'bg-amber-50',
+      trend: grossMargin >= 20 ? 'up' : 'down',
+      href: '/portal/reports/container-profit',
+    },
+  ]
+
+  const PRIORITY_COLOR: Record<string, string> = {
+    urgent: 'bg-red-50 text-red-600',
+    high:   'bg-amber-50 text-amber-700',
+    normal: 'bg-blue-50 text-blue-600',
+    low:    'bg-gray-100 text-gray-500',
+  }
+
+  const MODULE_LABEL: Record<string, string> = {
+    trips: 'Trip', containers: 'Container', presales: 'Presale',
+    sales_orders: 'Sales', recoveries: 'Recovery', expenses: 'Expense',
+    supplier_receivables: 'Supplier rec.', partner_payouts: 'Partner payout',
+  }
 
   return (
-    <div className="space-y-6 max-w-[1400px]">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 max-w-7xl">
+
+      {/* Welcome */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Overview</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{todayLabel}</p>
+          <h1 className="text-xl font-semibold text-gray-900">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {userName} 👋</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
         </div>
-        <Link
-          href="/portal/purchase/trips/new"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          <Plus size={16} /> New trip
-        </Link>
+        <button onClick={load} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+          <RefreshCw size={16} />
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        {kpis.map((kpi) => {
-          const c = colorMap[kpi.color];
-          return (
-            <div
-              key={kpi.label}
-              onMouseEnter={() => setHoveredKpi(kpi.label)}
-              onMouseLeave={() => setHoveredKpi(null)}
-              className={`bg-white rounded-xl border transition-all duration-200 p-4 cursor-default
-                ${
-                  hoveredKpi === kpi.label
-                    ? "border-brand-200 shadow-md -translate-y-0.5"
-                    : "border-gray-100 shadow-sm"
-                }`}
-            >
-              <div
-                className={`inline-flex p-2 rounded-lg ${c.bg} ${c.icon} mb-3`}
-              >
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {kpis.map(kpi => (
+          <button key={kpi.label}
+            onClick={() => kpi.href && router.push(kpi.href)}
+            className={`${kpi.bg} rounded-xl border border-white shadow-sm p-5 text-left hover:shadow-md transition-all group ${kpi.href ? 'cursor-pointer' : 'cursor-default'}`}>
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-white/60 flex items-center justify-center shrink-0">
                 {kpi.icon}
               </div>
-              <p className="text-xl font-semibold text-gray-900 leading-none">
-                {kpi.value}
-              </p>
-              <p className="text-xs text-gray-500 mt-1 mb-2">{kpi.label}</p>
-              <span
-                className={`inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full ${c.badge}`}
-              >
-                {kpi.up ? (
-                  <ArrowUpRight size={11} />
-                ) : (
-                  <ArrowDownRight size={11} />
-                )}
-                {kpi.change}
-              </span>
+              {kpi.href && <ChevronRight size={14} className="text-gray-300 group-hover:text-gray-500 transition-colors mt-1 shrink-0" />}
             </div>
-          );
-        })}
+            <p className={`text-xl font-bold truncate ${kpi.color}`}>{loading ? '—' : kpi.value}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{kpi.label}</p>
+            <p className="text-xs text-gray-400 mt-1 truncate">{loading ? '...' : kpi.sub}</p>
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">
-                Debt vs recovery trend
-              </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Revenue collected vs outstanding
-              </p>
-            </div>
-            <div className="flex items-center gap-4 text-xs text-gray-500">
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-brand-500 inline-block rounded" />{" "}
-                Revenue
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-green-400 inline-block rounded" />{" "}
-                Recovered
-              </span>
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart
-              data={trendData}
-              margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#55249e" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#55249e" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gRec" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-              <XAxis
-                dataKey="month"
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v) => fmt(Number(v))}
-              />
-              <Tooltip
-                contentStyle={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                formatter={(value) => [fmt(Number(value)), ""]}
-              />
-              <Area
-                type="monotone"
-                dataKey="revenue"
-                stroke="#55249e"
-                strokeWidth={2}
-                fill="url(#gRev)"
-              />
-              <Area
-                type="monotone"
-                dataKey="recovered"
-                stroke="#22c55e"
-                strokeWidth={2}
-                fill="url(#gRec)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+      {/* Recovery progress */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-800">Recovery progress</h2>
+          <button onClick={() => router.push('/portal/reports/customer-debt')}
+            className="text-xs text-brand-600 hover:underline">View details →</button>
         </div>
-
-        <div className="flex flex-col gap-5">
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="text-sm font-semibold text-gray-900 mb-3">
-              Quick actions
-            </h2>
-            <div className="space-y-2">
-              {quickActions.map((a) => (
-                <Link
-                  key={a.label}
-                  href={a.href}
-                  className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                    ${
-                      a.variant === "solid"
-                        ? "bg-brand-600 text-white hover:bg-brand-700"
-                        : "border border-gray-200 text-gray-700 hover:bg-gray-50"
-                    }`}
-                >
-                  {a.icon} {a.label}
-                </Link>
-              ))}
-            </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>Collected: <span className="font-semibold text-green-700">{fmt(totalRecovered)}</span></span>
+            <span>Outstanding: <span className="font-semibold text-amber-700">{fmt(totalOutstanding)}</span></span>
+            <span>Total billed: <span className="font-semibold text-gray-700">{fmt(totalRevenue)}</span></span>
           </div>
-
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex-1">
-            <h2 className="text-sm font-semibold text-gray-900 mb-3">
-              Sale method ratio
-            </h2>
-            <div className="flex items-center gap-4">
-              <PieChart width={80} height={80}>
-                <Pie
-                  data={pieData}
-                  cx={35}
-                  cy={35}
-                  innerRadius={22}
-                  outerRadius={38}
-                  dataKey="value"
-                  strokeWidth={0}
-                >
-                  {pieData.map((entry, i) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-              <div className="space-y-1.5 flex-1 min-w-0">
-                {pieData.map((p) => (
-                  <div key={p.name} className="flex items-center gap-2 text-xs">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ background: p.color }}
-                    />
-                    <span className="text-gray-600">{p.name}</span>
-                    <span className="font-medium text-gray-900 ml-auto">
-                      {p.value}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${recoveryRate >= 80 ? 'bg-green-500' : recoveryRate >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
+              style={{ width: `${Math.min(recoveryRate, 100)}%` }} />
           </div>
+          <p className="text-xs text-gray-400 text-right">{recoveryRate.toFixed(1)}% of total revenue collected</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">Recent trips</h2>
-            <Link
-              href="/portal/purchase/trips"
-              className="text-xs text-brand-600 hover:underline flex items-center gap-1"
-            >
-              View all <ArrowUpRight size={12} />
-            </Link>
+      {/* Three column activity section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        {/* Recent sales */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">Recent sales</h3>
+            <button onClick={() => router.push('/portal/sales/orders')} className="text-xs text-brand-600 hover:underline">All →</button>
           </div>
-          <div className="space-y-0">
-            {recentTrips.map((trip, i) => (
-              <div
-                key={`${trip.title}-${i}`}
-                className={`flex items-center gap-4 py-3 ${
-                  i < recentTrips.length - 1 ? "border-b border-gray-50" : ""
-                }`}
-              >
-                <div className="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center shrink-0">
-                  <Plane size={14} className="text-brand-600" />
+          <div className="divide-y divide-gray-50">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="p-3 animate-pulse flex gap-3">
+                  <div className="h-3 bg-gray-100 rounded flex-1" />
+                  <div className="h-3 bg-gray-100 rounded w-20" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">
-                    {trip.title}
+              ))
+            ) : recentSales.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-400">No sales yet</div>
+            ) : recentSales.map(sale => (
+              <div key={sale.id} className="px-4 py-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">
+                    {(sale.customer as any)?.name ?? '—'}
                   </p>
-                  <p className="text-xs text-gray-400 truncate">{trip.desc}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {(sale.container as any)?.container_id ?? '—'} · {timeAgo(sale.created_at)}
+                  </p>
                 </div>
-                <div className="text-right shrink-0">
-                  <span
-                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[trip.status]}`}
-                  >
-                    {trip.status}
-                  </span>
-                  <p className="text-xs text-gray-400 mt-1">{trip.end}</p>
-                </div>
+                <span className="text-xs font-semibold text-green-700 shrink-0">
+                  {fmt(Number(sale.customer_payable))}
+                </span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">
-            Container summary
-          </h2>
-          <div className="space-y-4">
-            {[
-              {
-                label: "Containers in transit",
-                value: "9",
-                icon: <Package size={16} className="text-brand-600" />,
-              },
-              {
-                label: "Total containers",
-                value: "12",
-                icon: <Package size={16} className="text-blue-500" />,
-              },
-              {
-                label: "Total sales",
-                value: "30",
-                icon: <TrendingUp size={16} className="text-green-600" />,
-              },
-              {
-                label: "Active partners",
-                value: "8",
-                icon: <Users size={16} className="text-amber-600" />,
-              },
-            ].map((s) => (
-              <div key={s.label} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
-                  {s.icon}
+        {/* Recent recoveries */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">Recent recoveries</h3>
+            <button onClick={() => router.push('/portal/recoveries')} className="text-xs text-brand-600 hover:underline">All →</button>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="p-3 animate-pulse flex gap-3">
+                  <div className="h-3 bg-gray-100 rounded flex-1" />
+                  <div className="h-3 bg-gray-100 rounded w-20" />
                 </div>
-                <div className="flex-1">
-                  <p className="text-xs text-gray-500">{s.label}</p>
+              ))
+            ) : recentRecoveries.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-400">No recoveries yet</div>
+            ) : recentRecoveries.map(rec => (
+              <div key={rec.id} className="px-4 py-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">
+                    {(rec.sales_order as any)?.customer?.name ?? '—'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {rec.payment_date
+                      ? new Date(rec.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                      : '—'}
+                  </p>
                 </div>
-                <p className="text-lg font-semibold text-gray-900">{s.value}</p>
+                <span className="text-xs font-semibold text-brand-700 shrink-0">
+                  {fmt(Number(rec.amount_paid))}
+                </span>
               </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Pending tasks */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">Pending tasks</h3>
+            <button onClick={() => router.push('/portal/tasks')} className="text-xs text-brand-600 hover:underline">All →</button>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="p-3 animate-pulse flex gap-3">
+                  <div className="h-3 bg-gray-100 rounded flex-1" />
+                  <div className="h-3 bg-gray-100 rounded w-20" />
+                </div>
+              ))
+            ) : pendingTaskList.length === 0 ? (
+              <div className="p-6 text-center">
+                <CheckCircle2 size={20} className="text-green-300 mx-auto mb-1" />
+                <p className="text-xs text-gray-400">All clear!</p>
+              </div>
+            ) : pendingTaskList.map(task => (
+              <button key={task.id}
+                onClick={() => router.push('/portal/tasks')}
+                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-gray-800 truncate">{task.title}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded capitalize ${PRIORITY_COLOR[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {task.priority}
+                      </span>
+                      <span className="text-xs text-gray-400">{MODULE_LABEL[task.module] ?? task.module}</span>
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 shrink-0">{timeAgo(task.created_at)}</span>
+                </div>
+              </button>
             ))}
           </div>
         </div>
       </div>
     </div>
-  );
+  )
 }
+

@@ -85,7 +85,7 @@ export default function PartnershipPage() {
 
     const [{ data: containerData }, { data: salesOrders }, { data: presales }, { data: trips }, { data: partnerData }] = await Promise.all([
       supabase.from('containers').select('id, status').in('id', containerDbIds),
-      supabase.from('sales_orders').select('container_id, customer_payable').in('container_id', containerDbIds),
+      supabase.from('sales_orders').select('container_id, customer_payable, payment_status').in('container_id', containerDbIds),
       supabase.from('presales').select('container_id, expected_sale_revenue, sale_type').in('container_id', containerDbIds),
       supabase.from('trips').select('id, trip_id, title').in('id', [...new Set(viewData.map(r => r.trip_id))]),
       supabase.from('partners').select('id, name, wallet_balance, wallet_allocated').in('id', partnerDbIds),
@@ -100,6 +100,13 @@ export default function PartnershipPage() {
       return acc
     }, {} as Record<string, number>)
 
+    const paymentStatusByContainer = (salesOrders ?? []).reduce((acc, so) => {
+      if (!acc[so.container_id] || acc[so.container_id] === 'paid') {
+        acc[so.container_id] = so.payment_status
+      }
+      return acc
+    }, {} as Record<string, string>)
+
     // Build container rows
     const containerMap: Record<string, ContainerPartnerRow> = {}
     for (const row of viewData) {
@@ -112,8 +119,9 @@ export default function PartnershipPage() {
 
       if (!containerMap[row.container_db_id]) {
         const status = containerStatusMap[row.container_db_id] ?? 'ordered'
+        const paymentStatus = paymentStatusByContainer[row.container_db_id] ?? paymentStatusByContainer[row?.container_db_id]
         let salesStatus: ContainerPartnerRow['sales_status'] = 'not_started'
-        if (actualSales > 0 && status === 'completed') salesStatus = 'completed'
+        if (actualSales > 0 && paymentStatus === 'paid') salesStatus = 'completed'
         else if (actualSales > 0) salesStatus = 'in_progress'
 
         containerMap[row.container_db_id] = {
@@ -182,7 +190,11 @@ export default function PartnershipPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    queueMicrotask(() => {
+      void load()
+    })
+  }, [load])
 
   const filteredContainers = containers.filter(c => {
     const matchSearch = search === '' ||
@@ -198,7 +210,6 @@ export default function PartnershipPage() {
     search === '' || p.funder_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const totalQuotedCost = containers.reduce((s, c) => s + c.full_quoted_landing_cost_ngn, 0)
   const totalWalletBalance = partnerRows.reduce((s, p) => s + p.wallet_balance, 0)
   const totalAllocated = partnerRows.reduce((s, p) => s + p.wallet_allocated, 0)
   const totalTopup = containers.reduce((s, c) => s + c.total_topup_needed, 0)

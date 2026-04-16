@@ -171,6 +171,13 @@ export default function PartnerAdminPage() {
       return acc
     }, {} as Record<string, number>)
 
+    const paymentStatusByContainer = (salesOrders ?? []).reduce((acc, so) => {
+      if (!acc[so.container_id] || acc[so.container_id] === 'paid') {
+        acc[so.container_id] = so.payment_status
+      }
+      return acc
+    }, {} as Record<string, string>)
+
     // Total recoveries per sales order → per container
     const salesOrderContainerMap = Object.fromEntries((salesOrders ?? []).map(so => [so.id, so.container_id]))
     const recoveredByContainer = (recoveries ?? []).reduce((acc, r) => {
@@ -195,8 +202,9 @@ export default function PartnerAdminPage() {
       // Max creditable = partner's share of actual recoveries - what has already been credited
       const maxCreditable    = Math.max(partnerRecovered - partnerCredited, 0)
 
+      const paymentStatus = paymentStatusByContainer[r.container_db_id]
       let salesStatus = 'not_started'
-      if (actualSales > 0 && status === 'completed') salesStatus = 'completed'
+      if (actualSales > 0 && paymentStatus === 'paid') salesStatus = 'completed'
       else if (actualSales > 0) salesStatus = 'in_progress'
 
       return {

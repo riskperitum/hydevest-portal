@@ -219,7 +219,7 @@ export default function PartnerDashboardPage() {
     const containerDbIds = viewData.map(r => r.container_db_id)
     const [{ data: containerData }, { data: salesOrders }, { data: presales }, { data: trips }] = await Promise.all([
       supabase.from('containers').select('id, status').in('id', containerDbIds),
-      supabase.from('sales_orders').select('container_id, customer_payable').in('container_id', containerDbIds),
+      supabase.from('sales_orders').select('container_id, customer_payable, payment_status, outstanding_balance').in('container_id', containerDbIds),
       supabase.from('presales').select('container_id, expected_sale_revenue').in('container_id', containerDbIds),
       supabase.from('trips').select('id, title').in('id', [...new Set(viewData.map(r => r.trip_id))]),
     ])
@@ -232,6 +232,14 @@ export default function PartnerDashboardPage() {
       return acc
     }, {} as Record<string, number>)
 
+    const paymentStatusByContainer = (salesOrders ?? []).reduce((acc, so) => {
+      // Mark as paid only if all orders for this container are paid
+      if (!acc[so.container_id] || acc[so.container_id] === 'paid') {
+        acc[so.container_id] = so.payment_status
+      }
+      return acc
+    }, {} as Record<string, string>)
+
     const mappedContainers = viewData.map(r => {
       const pct             = Number(r.percentage) / 100
       const actualSales     = revenueByContainer[r.container_db_id] ?? 0
@@ -242,8 +250,9 @@ export default function PartnerDashboardPage() {
       const presale         = presaleMap[r.container_db_id]
       const trip            = tripMap[r.trip_id]
 
+      const paymentStatus = paymentStatusByContainer[r.container_db_id]
       let salesStatus = 'not_started'
-      if (actualSales > 0 && status === 'completed') salesStatus = 'completed'
+      if (actualSales > 0 && paymentStatus === 'paid') salesStatus = 'completed'
       else if (actualSales > 0) salesStatus = 'in_progress'
 
       return {

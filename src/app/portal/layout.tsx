@@ -1,3 +1,4 @@
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import Sidebar from '@/components/layout/Sidebar'
@@ -21,9 +22,33 @@ export default async function PortalLayout({ children }: { children: React.React
     .select('roles(name)')
     .eq('user_id', user.id)
 
+  function roleNameFromRow(row: { roles?: unknown }): string | undefined {
+    const roles = row.roles as { name?: string } | { name?: string }[] | null | undefined
+    if (!roles) return undefined
+    const r = Array.isArray(roles) ? roles[0] : roles
+    return r?.name
+  }
+
   const isSuperAdmin = (roleData ?? []).some(
-    (r: any) => r.roles?.name === 'super_admin'
+    (r) => roleNameFromRow(r) === 'super_admin'
   )
+
+  // If user has partner role, redirect to partner dashboard (server equivalent of client pathname check)
+  const isPartner = (roleData ?? []).some(
+    (r) => roleNameFromRow(r) === 'partner'
+  )
+  if (isPartner) {
+    const headerList = await headers()
+    const pathname = headerList.get('x-pathname') ?? ''
+    const partnerAllowed = [
+      '/portal/partner-dashboard',
+      '/portal/partner-requestbox',
+      '/portal/notifications',
+    ]
+    if (!partnerAllowed.some((p) => pathname.startsWith(p))) {
+      redirect('/portal/partner-dashboard')
+    }
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">

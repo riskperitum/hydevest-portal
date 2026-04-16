@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/permissions/hooks'
 import {
-  LayoutDashboard, ClipboardList, ShoppingCart, TrendingUp,
+  LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, Inbox, Users,
   Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw
 } from 'lucide-react'
@@ -64,6 +64,11 @@ const NAV: NavItem[] = [
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
 ]
 
+const PARTNER_NAV: NavItem[] = [
+  { href: '/portal/partner-dashboard', label: 'My Dashboard', icon: LayoutDashboard },
+  { href: '/portal/partner-requestbox', label: 'Messages', icon: MessageSquare },
+]
+
 export default function Sidebar() {
   const pathname = usePathname()
   const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
@@ -76,13 +81,21 @@ export default function Sidebar() {
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { setIsPartner(false); return }
-      const { data } = await supabase
-        .from('partners')
-        .select('id')
+      if (!user) {
+        setIsPartner(false)
+        return
+      }
+      const { data: roleRows } = await supabase
+        .from('user_roles')
+        .select('roles(name)')
         .eq('user_id', user.id)
-        .maybeSingle()
-      setIsPartner(!!data?.id)
+      const hasPartner = (roleRows ?? []).some((row) => {
+        const roles = row.roles as { name?: string } | { name?: string }[] | null | undefined
+        if (!roles) return false
+        const name = Array.isArray(roles) ? roles[0]?.name : roles.name
+        return name === 'partner'
+      })
+      setIsPartner(hasPartner)
     })
   }, [])
 
@@ -112,7 +125,7 @@ export default function Sidebar() {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 shrink-0">
-        <Link href="/portal/overview" className="flex items-center gap-2">
+        <Link href={isPartner ? '/portal/partner-dashboard' : '/portal/overview'} className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shrink-0">
             <span className="text-white text-xs font-bold">H</span>
           </div>
@@ -134,11 +147,14 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-        {NAV.filter(item => {
-          if (item.adminOnly && !isSuperAdmin) return false
-          if (item.partnerOnly && !isPartner) return false
-          return true
-        }).map(item => {
+        {(isPartner
+          ? PARTNER_NAV
+          : NAV.filter(item => {
+              if (item.adminOnly && !isSuperAdmin) return false
+              if (item.partnerOnly && !isPartner) return false
+              return true
+            })
+        ).map(item => {
           if (item.children) {
             const isOpen = openGroups.includes(item.label)
             const hasActive = item.children.some(c => isActive(c.href))

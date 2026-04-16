@@ -623,6 +623,79 @@ export default function OverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* Monthly charts */}
+      <div className="space-y-4">
+        <h2 className="text-sm font-semibold text-gray-700">Monthly trends</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">Revenue vs collections</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Billed vs collected per month</p>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#1D9E75' }} />
+                  Revenue
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#534AB7' }} />
+                  Collected
+                </span>
+              </div>
+            </div>
+            <MonthlyBarChart
+              labels={monthlyChartData.labels}
+              datasets={[
+                { label: 'Revenue',   data: monthlyChartData.revenue,   color: '#1D9E75' },
+                { label: 'Collected', data: monthlyChartData.collected, color: '#534AB7' },
+              ]}
+            />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">Monthly expenses</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Total spend on trip expenses</p>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#EF9F27' }} />
+                  Expenses
+                </span>
+              </div>
+            </div>
+            <MonthlyLineChart
+              labels={monthlyChartData.labels}
+              data={monthlyChartData.expenses}
+              color="#EF9F27"
+              fillColor="rgba(239,159,39,0.08)"
+            />
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-800">Sales order volume</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Number of sales orders created per month</p>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#378ADD' }} />
+                Orders
+              </span>
+            </div>
+          </div>
+          <MonthlyBarChart
+            labels={monthlyChartData.labels}
+            datasets={[
+              { label: 'Orders', data: monthlyChartData.orderCount, color: '#378ADD' },
+            ]}
+            isCount
+          />
+        </div>
+      </div>
     </div>
   )
 }

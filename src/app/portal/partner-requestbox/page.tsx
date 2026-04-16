@@ -108,7 +108,7 @@ export default function PartnerRequestBoxPage() {
     const { data: msgData } = await supabase
       .from('requestbox_messages')
       .select('id, message_id, type, subject, body, status, amount, percentage, created_at, partner_last_read_at')
-      .eq('from_partner_id', partnerData.id)
+      .or(`from_partner_id.eq.${partnerData.id},to_partner_id.eq.${partnerData.id}`)
       .order('created_at', { ascending: false })
 
     const msgIds = (msgData ?? []).map(m => m.id)

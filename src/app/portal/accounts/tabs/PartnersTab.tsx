@@ -144,24 +144,35 @@ export default function PartnersTab() {
     }
 
     setSavingLogin(true)
-    const supabase = createClient()
 
-    const { error } = await supabase.rpc('create_partner_auth_account', {
-      p_email:      loginForm.email,
-      p_password:   loginForm.password,
-      p_full_name:  loginPartner.name,
-      p_partner_id: loginPartner.id,
-    })
+    try {
+      const res = await fetch('/api/partners/create-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:      loginForm.email,
+          password:   loginForm.password,
+          full_name:  loginPartner.name,
+          partner_id: loginPartner.id,
+        }),
+      })
 
-    if (error) {
-      setLoginError(error.message ?? 'Failed to create login account. Please try again.')
+      const result = await res.json()
+
+      if (!res.ok) {
+        setLoginError(result.error ?? 'Failed to create login account.')
+        setSavingLogin(false)
+        return
+      }
+
       setSavingLogin(false)
-      return
+      setLoginSuccess(true)
+      load()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network error. Please try again.'
+      setLoginError(message)
+      setSavingLogin(false)
     }
-
-    setSavingLogin(false)
-    setLoginSuccess(true)
-    load()
   }
 
   async function handleDelete(row: Partner) {

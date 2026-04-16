@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Wallet, AlertTriangle,
   Plus, ArrowDownCircle, TrendingUp, Package,
-  RefreshCw, Info
+  Info
 } from 'lucide-react'
 import Link from 'next/link'
 import AmountInput from '@/components/ui/AmountInput'
@@ -179,7 +179,7 @@ export default function PartnerAdminPage() {
       return acc
     }, {} as Record<string, number>)
 
-    setAllocations(viewData.map(r => {
+    const mappedAllocations = viewData.map(r => {
       const pct              = Number(r.percentage) / 100
       const actualSales      = revenueByContainer[r.container_db_id] ?? 0
       const totalRecovered   = recoveredByContainer[r.container_db_id] ?? 0
@@ -220,13 +220,24 @@ export default function PartnerAdminPage() {
         is_fully_funded:       isFullyFunded,
         max_creditable_ngn:    maxCreditable,
       }
-    }))
+    })
+
+    setAllocations(mappedAllocations)
+
+    // Calculate total profit dynamically
+    const calculatedProfit = mappedAllocations
+      .filter(a => a.partner_revenue_share > 0)
+      .reduce((s, a) => s + a.partner_profit, 0)
+
+    setPartner(prev => prev ? { ...prev, total_profit: calculatedProfit } : prev)
 
     setLoading(false)
   }, [partnerDbId])
 
   useEffect(() => {
-    load()
+    queueMicrotask(() => {
+      void load()
+    })
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user ? { id: user.id } : null))
   }, [load])
@@ -318,11 +329,19 @@ export default function PartnerAdminPage() {
       ? (container.partner_credited_ngn + amount) >= container.partner_revenue_share
       : false
 
+    // Calculate new profit = revenue share - investment cost for this container
+    const containerProfit = container
+      ? container.partner_revenue_share - container.partner_quoted_cost_ngn
+      : 0
+
     await supabase.from('partners').update({
       wallet_balance:   (partner?.wallet_balance ?? 0) + amount,
       wallet_allocated: isFullySettled
         ? Math.max((partner?.wallet_allocated ?? 0) - (container?.amount_received_ngn ?? 0), 0)
         : partner?.wallet_allocated,
+      total_profit: isFullySettled
+        ? (partner?.total_profit ?? 0) + containerProfit
+        : partner?.total_profit,
     }).eq('id', partnerDbId)
 
     setSavingSale(false); setSaleOpen(false)
@@ -711,7 +730,7 @@ export default function PartnerAdminPage() {
       <Modal open={saleOpen} onClose={() => setSaleOpen(false)} title="Credit from container sale" size="sm">
         <form onSubmit={doSaleCredit} className="space-y-4">
           <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
-            <p className="text-xs text-emerald-700 font-medium">Only recovered amounts can be credited. You cannot credit more than the partner's share of actual recoveries received.</p>
+            <p className="text-xs text-emerald-700 font-medium">Only recovered amounts can be credited. You cannot credit more than the partner&apos;s share of actual recoveries received.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Container</label>
@@ -738,7 +757,7 @@ export default function PartnerAdminPage() {
                   <span className="font-semibold text-gray-700">{fmt(selectedAlloc.total_recovered_ngn)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Partner's share ({selectedAlloc.percentage}%)</span>
+                  <span className="text-gray-500">Partner&apos;s share ({selectedAlloc.percentage}%)</span>
                   <span className="font-semibold text-gray-700">{fmt(selectedAlloc.total_recovered_ngn * selectedAlloc.percentage / 100)}</span>
                 </div>
                 <div className="flex justify-between border-t border-gray-200 pt-1.5">

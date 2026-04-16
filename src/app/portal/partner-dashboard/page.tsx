@@ -167,13 +167,29 @@ export default function PartnerDashboardPage() {
           .order('created_at', { ascending: true })
       : { data: [] }
 
-    const repliesByMsg = (replies ?? []).reduce((acc, r) => {
+    type ReplyRow = {
+      id: string
+      message_id: string
+      body: string
+      created_at: string
+      partner: { name?: string } | { name?: string }[] | null
+      profile: { full_name?: string | null; email?: string | null } | { full_name?: string | null; email?: string | null }[] | null
+    }
+
+    function one<T>(x: T | T[] | null | undefined): T | undefined {
+      if (x == null) return undefined
+      return Array.isArray(x) ? x[0] : x
+    }
+
+    const repliesByMsg = ((replies ?? []) as ReplyRow[]).reduce((acc, r) => {
+      const partner = one(r.partner)
+      const profile = one(r.profile)
       if (!acc[r.message_id]) acc[r.message_id] = []
       acc[r.message_id].push({
         id: r.id,
         body: r.body,
-        from_partner: !!(r.partner as any)?.name,
-        sender_name: (r.partner as any)?.name ?? (r.profile as any)?.full_name ?? 'Support',
+        from_partner: !!partner?.name,
+        sender_name: partner?.name ?? profile?.full_name ?? 'Support',
         created_at: r.created_at,
       })
       return acc
@@ -216,7 +232,7 @@ export default function PartnerDashboardPage() {
       return acc
     }, {} as Record<string, number>)
 
-    setContainers(viewData.map(r => {
+    const mappedContainers = viewData.map(r => {
       const pct             = Number(r.percentage) / 100
       const actualSales     = revenueByContainer[r.container_db_id] ?? 0
       const partnerRevShare = actualSales * pct
@@ -247,12 +263,24 @@ export default function PartnerDashboardPage() {
         sales_status:            salesStatus,
         container_status:        status,
       }
-    }))
+    })
+
+    setContainers(mappedContainers)
+
+    // Override profit based on container performance (completed sales only)
+    const overriddenProfit = mappedContainers
+      .filter(c => c.sales_status === 'completed')
+      .reduce((sum, c) => sum + Number(c.partner_profit ?? 0), 0)
+    setPartner(prev => prev ? { ...prev, total_profit: overriddenProfit } : prev)
 
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    queueMicrotask(() => {
+      void load()
+    })
+  }, [load])
 
   async function openMessage(msg: MyMessage) {
     setSelectedMessage(msg)

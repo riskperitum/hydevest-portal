@@ -5,8 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
   Search, Package, TrendingUp, Wallet,
-  Users, AlertTriangle, ChevronRight, Filter
+  Users, AlertTriangle, AlertCircle, ChevronRight, Filter
 } from 'lucide-react'
+import Modal from '@/components/ui/Modal'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerPartnerRow {
@@ -73,6 +74,52 @@ export default function PartnershipPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [topupModalOpen, setTopupModalOpen] = useState(false)
+  const [pendingTopups, setPendingTopups] = useState<{
+    partner_name: string
+    partner_db_id: string
+    partner_id: string
+    container_id: string
+    container_db_id: string
+    topup_needed_ngn: number
+    amount_received_ngn: number
+    partner_quoted_cost_ngn: number
+    percentage: number
+  }[]>([])
+  const [loadingTopups, setLoadingTopups] = useState(false)
+
+  async function loadPendingTopups() {
+    setLoadingTopups(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('partnership_container_view')
+      .select(`
+        partner_db_id, funder_name, container_db_id, container_ref,
+        percentage, amount_received_ngn, partner_quoted_cost_ngn, topup_needed_ngn
+      `)
+      .gt('topup_needed_ngn', 0)
+      .order('topup_needed_ngn', { ascending: false })
+
+    // Get partner IDs from partners table
+    const { data: partners } = await supabase
+      .from('partners')
+      .select('id, partner_id, name')
+
+    const partnerMap = Object.fromEntries((partners ?? []).map(p => [p.id, p]))
+
+    setPendingTopups((data ?? []).map(r => ({
+      partner_name:           r.funder_name,
+      partner_db_id:          r.partner_db_id,
+      partner_id:             partnerMap[r.partner_db_id]?.partner_id ?? '—',
+      container_id:           r.container_ref,
+      container_db_id:        r.container_db_id,
+      topup_needed_ngn:       Number(r.topup_needed_ngn),
+      amount_received_ngn:    Number(r.amount_received_ngn),
+      partner_quoted_cost_ngn: Number(r.partner_quoted_cost_ngn),
+      percentage:             Number(r.percentage),
+    })))
+    setLoadingTopups(false)
+  }
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -220,9 +267,18 @@ export default function PartnershipPage() {
 
   return (
     <div className="space-y-5 max-w-6xl">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Partnership</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Partner investments, wallets and container allocations</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Partnership</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Partner investments, wallets and container allocations</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setTopupModalOpen(true); void loadPendingTopups() }}
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
+          <AlertCircle size={14} />
+          Pending top-ups
+        </button>
       </div>
 
       {/* Portfolio metrics */}
@@ -482,6 +538,93 @@ export default function PartnershipPage() {
           </div>
         )}
       </div>
+
+      <Modal open={topupModalOpen} onClose={() => setTopupModalOpen(false)} title="Partners pending top-up" size="lg">
+        <div className="space-y-4">
+          <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+            <p className="text-xs text-amber-700">
+              These partners have containers where the amount received is less than the quoted landing cost. They need to top up their wallet to cover the gap.
+            </p>
+          </div>
+
+          {loadingTopups ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full" />
+            </div>
+          ) : pendingTopups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-2">
+              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+              </div>
+              <p className="text-sm font-medium text-gray-700">All partners are fully topped up</p>
+              <p className="text-xs text-gray-400">No pending top-ups at this time.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400">Partner</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400">Container</th>
+                    <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400">Share %</th>
+                    <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400">Quoted cost</th>
+                    <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400">Received</th>
+                    <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400">Gap</th>
+                    <th className="px-3 py-2.5 text-xs font-medium text-gray-400"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {pendingTopups.map((p, i) => (
+                    <tr key={i} className="hover:bg-gray-50/50">
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-gray-900">{p.partner_name}</p>
+                        <p className="text-xs text-gray-400">{p.partner_id}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">
+                          {p.container_id}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right text-xs text-gray-600">{p.percentage.toFixed(0)}%</td>
+                      <td className="px-3 py-3 text-right text-xs font-medium text-gray-800">
+                        ₦{p.partner_quoted_cost_ngn.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="px-3 py-3 text-right text-xs font-medium text-green-700">
+                        ₦{p.amount_received_ngn.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <span className="text-sm font-bold text-amber-700">
+                          ₦{p.topup_needed_ngn.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopupModalOpen(false)
+                            router.push(`/portal/partnership/partner/${p.partner_db_id}`)
+                          }}
+                          className="text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline whitespace-nowrap">
+                          Go to partner →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200">
+                    <td colSpan={5} className="px-3 py-2.5 text-xs font-semibold text-gray-600">Total gap</td>
+                    <td className="px-3 py-2.5 text-right text-sm font-bold text-amber-700">
+                      ₦{pendingTopups.reduce((s, p) => s + p.topup_needed_ngn, 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

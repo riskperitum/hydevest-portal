@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, LogOut, User, ChevronDown, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import Modal from '@/components/ui/Modal'
 
 interface HeaderProps {
   profile: { id: string; full_name: string | null; email: string; avatar_url: string | null } | null
@@ -29,6 +30,11 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [pwOpen, setPwOpen] = useState(false)
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [pwError, setPwError] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwSuccess, setPwSuccess] = useState(false)
 
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -91,9 +97,10 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
   }
 
   return (
-    <header className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-6 shrink-0">
-      <div className="w-10 lg:w-0" />
-      <div className="flex items-center gap-3">
+    <>
+      <header className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-6 shrink-0">
+        <div className="w-10 lg:w-0" />
+        <div className="flex items-center gap-3">
 
         {/* Notification bell */}
         <div className="relative">
@@ -179,6 +186,12 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
                   <User size={15} /> My profile
                 </button>
+                <button
+                  onClick={() => { setPwOpen(true); setPwError(''); setPwSuccess(false); setPwForm({ current: '', next: '', confirm: '' }) }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  Change password
+                </button>
                 <button onClick={signOut}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors">
                   <LogOut size={15} /> Sign out
@@ -188,6 +201,61 @@ export default function Header({ profile, isSuperAdmin }: HeaderProps) {
           )}
         </div>
       </div>
-    </header>
+      </header>
+
+      <Modal open={pwOpen} onClose={() => setPwOpen(false)} title="Change password" size="sm">
+        {pwSuccess ? (
+          <div className="flex flex-col items-center justify-center py-6 gap-3">
+            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+            <p className="text-sm font-medium text-gray-900">Password changed successfully</p>
+            <button onClick={() => setPwOpen(false)}
+              className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+              Done
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={async e => {
+            e.preventDefault()
+            setPwError('')
+            if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match.'); return }
+            if (pwForm.next.length < 8) { setPwError('Password must be at least 8 characters.'); return }
+            setPwSaving(true)
+            const supabase = (await import('@/lib/supabase/client')).createClient()
+            const { error } = await supabase.auth.updateUser({ password: pwForm.next })
+            if (error) { setPwError(error.message); setPwSaving(false); return }
+            setPwSaving(false)
+            setPwSuccess(true)
+          }} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">New password</label>
+              <input type="password" required value={pwForm.next}
+                onChange={e => setPwForm(f => ({ ...f, next: e.target.value }))}
+                placeholder="At least 8 characters"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm new password</label>
+              <input type="password" required value={pwForm.confirm}
+                onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))}
+                placeholder="Repeat new password"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            {pwError && <p className="text-xs text-red-600 font-medium">{pwError}</p>}
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={() => setPwOpen(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={pwSaving}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {pwSaving ? 'Saving…' : 'Change password'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+    </>
   )
 }

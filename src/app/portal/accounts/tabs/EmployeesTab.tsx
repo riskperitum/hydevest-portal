@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AccountTable from '@/components/ui/AccountTable'
 import Modal from '@/components/ui/Modal'
@@ -8,6 +9,7 @@ import { Loader2, ShieldCheck } from 'lucide-react'
 
 interface Employee {
   id: string
+  user_id: string | null
   full_name: string | null
   email: string
   phone: string | null
@@ -20,6 +22,7 @@ interface Employee {
 const blank = { full_name: '', email: '', password: '', phone: '', blocked: false }
 
 export default function EmployeesTab() {
+  const router = useRouter()
   const [data, setData] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -50,12 +53,16 @@ export default function EmployeesTab() {
 
     setData((profiles ?? []).map(p => ({
       ...p,
+      user_id: p.id,
       roles: (roleMap[p.id] ?? []).join(', ') || 'No role',
     })))
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const t = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(t)
+  }, [])
 
   function openAdd() {
     setEditRow(null)
@@ -160,7 +167,19 @@ export default function EmployeesTab() {
         emptyMessage="No employees yet. Add your first team member."
         rowActions={row => [
           { label: 'Edit', onClick: () => openEdit(row) },
-          { label: 'Manage roles', onClick: () => {} },
+          {
+            label: 'Manage roles & permissions',
+            icon: (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            ),
+            onClick: () => {
+              if (row.user_id) {
+                router.push(`/portal/admin/users/${row.user_id}`)
+              } else {
+                alert('This employee does not have a login account yet.')
+              }
+            },
+          },
           { label: 'Deactivate', onClick: () => {}, danger: true },
         ]}
       />

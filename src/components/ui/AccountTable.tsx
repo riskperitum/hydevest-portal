@@ -19,7 +19,7 @@ interface AccountTableProps<T> {
   addLabel: string
   searchPlaceholder?: string
   emptyMessage?: string
-  rowActions?: (row: T) => { label: string; onClick: () => void; danger?: boolean }[]
+  rowActions?: (row: T) => { label: string; onClick: () => void; danger?: boolean; icon?: React.ReactNode }[]
 }
 
 interface DropdownState {
@@ -64,7 +64,7 @@ export default function AccountTable<T>({
     // Position below the button, aligned to the right
     setDropdown({
       index,
-      x: rect.right - 160, // 160 = dropdown width
+      x: rect.right - 192, // ~w-48
       y: rect.bottom + 4,
     })
   }
@@ -163,16 +163,17 @@ export default function AccountTable<T>({
           <div className="fixed inset-0 z-40" onClick={() => setDropdown(null)} />
           <div
             ref={dropdownRef}
-            className="fixed z-50 w-40 bg-white rounded-xl border border-gray-100 shadow-xl py-1"
+            className="fixed z-50 w-48 bg-white rounded-xl border border-gray-100 shadow-xl py-1"
             style={{ left: dropdown.x, top: dropdown.y }}>
             {rowActions(paginated[dropdown.index]).map(action => (
               <button
                 key={action.label}
                 onClick={() => { action.onClick(); setDropdown(null) }}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors
+                className={`w-full text-left px-4 py-2 text-sm transition-colors flex items-center gap-2
                   ${action.danger
                     ? 'text-red-500 hover:bg-red-50'
                     : 'text-gray-700 hover:bg-gray-50'}`}>
+                {action.icon}
                 {action.label}
               </button>
             ))}

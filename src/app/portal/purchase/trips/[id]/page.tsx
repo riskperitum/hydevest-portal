@@ -11,6 +11,7 @@ import {
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Trip {
   id: string
@@ -262,6 +263,11 @@ export default function TripDetailPage() {
   const [reviewNote, setReviewNote] = useState('')
   const [reviewBannerOpen, setReviewBannerOpen] = useState(true)
   const [submittingReview, setSubmittingReview] = useState(false)
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const [approvingTrip, setApprovingTrip] = useState(false)
+  const [tripActionNote, setTripActionNote] = useState('')
+  const [showTripApproval, setShowTripApproval] = useState(false)
 
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
@@ -333,6 +339,119 @@ export default function TripDetailPage() {
       setContainers(conFresh ?? [])
     }
   }, [tripId, recalculateLandingCosts])
+
+  async function handleTripApprovalAction(action: 'submit' | 'review' | 'approve' | 'reject') {
+    if (!trip || !currentUser) return
+    setApprovingTrip(true)
+    const supabase = createClient()
+
+    try {
+      if (action === 'submit') {
+        const seq = Date.now().toString().slice(-5)
+        await supabase.from('tasks').insert({
+          task_id:      `TASK-${seq}`,
+          type:         'review',
+          title:        `Review trip — ${trip.trip_id}: ${trip.title}`,
+          description:  tripActionNote || null,
+          module:       'trips',
+          record_id:    trip.id,
+          record_ref:   trip.trip_id,
+          status:       'pending',
+          priority:     'normal',
+          requested_by: currentUser.id,
+        })
+        await supabase.from('trips').update({ approval_status: 'pending_review' }).eq('id', trip.id)
+        await supabase.from('trip_activity_log').insert({
+          trip_id:      trip.id,
+          action:       'Submitted for review',
+          new_value:    tripActionNote || null,
+          performed_by: currentUser.id,
+        })
+      }
+
+      if (action === 'review') {
+        await supabase.from('trips').update({
+          approval_status:  'reviewed',
+          needs_review:     false,
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: currentUser.id,
+        }).eq('id', trip.id)
+        await supabase.from('containers').update({
+          is_modified: false,
+          modified_after_approval_at: null,
+          modified_after_approval_by: null,
+        }).eq('trip_id', trip.id)
+        await supabase.from('trip_activity_log').insert({
+          trip_id:      trip.id,
+          action:       'Trip reviewed',
+          new_value:    tripActionNote || null,
+          performed_by: currentUser.id,
+        })
+        await supabase.from('tasks').update({ status: 'actioned' })
+          .eq('record_id', trip.id)
+          .eq('type', 'review')
+          .eq('status', 'pending')
+      }
+
+      if (action === 'approve') {
+        await supabase.from('trips').update({
+          approval_status: 'approved',
+        }).eq('id', trip.id)
+        await supabase.from('containers').update({
+          is_modified: false,
+          modified_after_approval_at: null,
+          modified_after_approval_by: null,
+        }).eq('trip_id', trip.id)
+        await supabase.from('trip_activity_log').insert({
+          trip_id:      trip.id,
+          action:       'Trip approved',
+          new_value:    tripActionNote || null,
+          performed_by: currentUser.id,
+        })
+        const { data: pendingTask } = await supabase
+          .from('tasks').select('requested_by').eq('record_id', trip.id)
+          .eq('type', 'approve').eq('status', 'pending').single()
+        if (pendingTask?.requested_by) {
+          await supabase.from('notifications').insert({
+            user_id:   pendingTask.requested_by,
+            type:      'task_approved',
+            title:     `Trip approved — ${trip.trip_id}`,
+            message:   `${trip.title} has been approved.`,
+            record_id: trip.id,
+            module:    'trips',
+          })
+        }
+        await supabase.from('tasks').update({ status: 'actioned' })
+          .eq('record_id', trip.id)
+          .eq('type', 'approve')
+          .eq('status', 'pending')
+      }
+
+      if (action === 'reject') {
+        await supabase.from('trips').update({ approval_status: 'rejected' }).eq('id', trip.id)
+        await supabase.from('trip_activity_log').insert({
+          trip_id:      trip.id,
+          action:       'Trip rejected',
+          new_value:    tripActionNote || null,
+          performed_by: currentUser.id,
+        })
+        await supabase.from('tasks').update({
+          status:      'rejected',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: currentUser.id,
+        })
+          .eq('record_id', trip.id)
+          .eq('module', 'trips')
+          .eq('status', 'pending')
+      }
+    } finally {
+      setApprovingTrip(false)
+      setTripActionNote('')
+      setShowTripApproval(false)
+      void load()
+      void loadActivity()
+    }
+  }
 
   const loadActivity = useCallback(async () => {
     const supabase = createClient()
@@ -824,6 +943,110 @@ export default function TripDetailPage() {
           </button>
         </div>
       </div>
+
+        {/* Trip approval action panel */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-gray-500">Approval status:</span>
+              {(() => {
+                const s = trip.approval_status
+                const colors: Record<string, string> = {
+                  pending:        'bg-gray-100 text-gray-600',
+                  pending_review: 'bg-amber-50 text-amber-700',
+                  reviewed:       'bg-blue-50 text-blue-700',
+                  approved:       'bg-green-50 text-green-700',
+                  rejected:       'bg-red-50 text-red-600',
+                }
+                const labels: Record<string, string> = {
+                  pending:        'Not submitted',
+                  pending_review: 'Pending review',
+                  reviewed:       'Reviewed',
+                  approved:       'Approved',
+                  rejected:       'Rejected',
+                }
+                return (
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${colors[s] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {labels[s] ?? s}
+                  </span>
+                )
+              })()}
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Submit for review — shown when pending */}
+              {trip.approval_status === 'pending' && !canSelfApprove && (
+                <button type="button" onClick={() => setShowTripApproval(v => !v)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
+                  Submit for review
+                </button>
+              )}
+
+              {/* Admin/super admin — can self review and approve directly */}
+              {canSelfApprove && (trip.approval_status === 'pending' || trip.approval_status === 'pending_review') && (
+                <button type="button" onClick={() => void handleTripApprovalAction('review')} disabled={approvingTrip}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
+                  {approvingTrip ? 'Processing…' : 'Mark reviewed'}
+                </button>
+              )}
+              {canSelfApprove && trip.approval_status === 'reviewed' && (
+                <button type="button" onClick={() => void handleTripApprovalAction('approve')} disabled={approvingTrip}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {approvingTrip ? 'Processing…' : 'Approve trip'}
+                </button>
+              )}
+
+              {/* Non-admin review/approve — shown when pending_review for reviewers */}
+              {!canSelfApprove && trip.approval_status === 'pending_review' && (
+                <button type="button" onClick={() => void handleTripApprovalAction('review')} disabled={approvingTrip}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
+                  Mark reviewed
+                </button>
+              )}
+
+              {/* Reject button — shown when pending_review or reviewed */}
+              {(trip.approval_status === 'pending_review' || trip.approval_status === 'reviewed') && (
+                <button type="button" onClick={() => void handleTripApprovalAction('reject')} disabled={approvingTrip}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50">
+                  Reject
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Submit for review expandable panel */}
+          {showTripApproval && trip.approval_status === 'pending' && (
+            <div className="pt-3 border-t border-gray-100 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Note (optional)</label>
+                <textarea rows={2} value={tripActionNote}
+                  onChange={e => setTripActionNote(e.target.value)}
+                  placeholder="Add context for the reviewer..."
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowTripApproval(false)}
+                  className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => void handleTripApprovalAction('submit')} disabled={approvingTrip}
+                  className="px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                  {approvingTrip ? 'Submitting…' : 'Submit for review'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reviewed info */}
+          {(trip.approval_status === 'reviewed' || trip.approval_status === 'approved') && trip.last_reviewed_at && (
+            <div className="pt-2 border-t border-gray-100">
+              <p className="text-xs text-gray-400">
+                Reviewed by <span className="font-medium text-gray-600">{trip.last_reviewer?.full_name ?? trip.last_reviewer?.email ?? '—'}</span>
+                {' · '}{new Date(trip.last_reviewed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+          )}
+        </div>
 
       {/* Metrics */}
       <div className="space-y-2">

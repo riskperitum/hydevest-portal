@@ -8,6 +8,7 @@ import {
   Clock, Search, Filter, Eye, ChevronDown, ChevronUp,
   FileText, Download
 } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerInventory {
   // Container info
@@ -59,6 +60,9 @@ const INVENTORY_STATUS_CONFIG = {
 
 export default function InventoryPage() {
   const router = useRouter()
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
+
   const [inventory, setInventory] = useState<ContainerInventory[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

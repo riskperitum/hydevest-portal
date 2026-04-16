@@ -6,6 +6,7 @@ import { Plus, Search, Download, Eye, ClipboardCheck, CheckCircle2, Trash2, Load
 import { useRouter } from 'next/navigation'
 import { ModifiedIndicator } from '@/components/trips/ModifiedIndicator'
 import Modal from '@/components/ui/Modal'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Trip {
   id: string
@@ -68,6 +69,9 @@ export default function TripsPage() {
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
   const load = useCallback(async () => {
     const supabase = createClient()

@@ -11,6 +11,7 @@ import {
 import Link from 'next/link'
 import AmountInput from '@/components/ui/AmountInput'
 import Modal from '@/components/ui/Modal'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Partner {
   id: string
@@ -82,6 +83,9 @@ export default function PartnerAdminPage() {
   const params = useParams()
   const router = useRouter()
   const partnerDbId = params.id as string
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
   const [partner, setPartner] = useState<Partner | null>(null)
   const [allocations, setAllocations] = useState<ContainerAllocation[]>([])
@@ -504,9 +508,19 @@ export default function PartnerAdminPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100">
-                    {['Container','Trip','Stake','Quoted cost','Allocated','Gap','Credited','Exp. return','Actual return','Profit','Status'].map(h => (
-                      <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                    ))}
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Container</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Trip</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Stake</th>
+                    {canViewCosts && (
+                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Quoted cost</th>
+                    )}
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Allocated</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Gap</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Credited</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Exp. return</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Actual return</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Profit</th>
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -522,7 +536,9 @@ export default function PartnerAdminPage() {
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className="text-sm font-bold text-brand-700">{a.percentage.toFixed(0)}%</span>
                       </td>
-                      <td className="px-3 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{fmt(a.partner_quoted_cost_ngn)}</td>
+                      {canViewCosts && (
+                        <td className="px-3 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{fmt(a.partner_quoted_cost_ngn)}</td>
+                      )}
                       <td className="px-3 py-3 text-xs text-green-600 font-medium whitespace-nowrap">{fmt(a.amount_received_ngn)}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {a.topup_needed_ngn > 0

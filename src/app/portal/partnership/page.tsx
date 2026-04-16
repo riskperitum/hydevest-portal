@@ -7,6 +7,7 @@ import {
   Search, Package, TrendingUp, Wallet,
   Users, AlertTriangle, ChevronRight, Filter
 } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerPartnerRow {
   container_db_id: string
@@ -62,6 +63,9 @@ const CONTAINER_STATUS_COLOR: Record<string, string> = {
 
 export default function PartnershipPage() {
   const router = useRouter()
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
+
   const [activeTab, setActiveTab] = useState<'containers' | 'partners'>('containers')
   const [containers, setContainers] = useState<ContainerPartnerRow[]>([])
   const [partnerRows, setPartnerRows] = useState<PartnerSummaryRow[]>([])
@@ -298,9 +302,19 @@ export default function PartnershipPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Container','Tracking','Trip','Partners','Status','Full Quoted Cost','Expected Revenue','Actual Sales','Top-up Needed','Sales Status',''].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                  ))}
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Container</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Tracking</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Trip</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Partners</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Status</th>
+                  {canViewCosts && (
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Full Quoted Cost</th>
+                  )}
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Expected Revenue</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Actual Sales</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Top-up Needed</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Sales Status</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap"></th>
                 </tr>
               </thead>
               <tbody>
@@ -342,7 +356,9 @@ export default function PartnershipPage() {
                           {row.container_status}
                         </span>
                       </td>
-                      <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmt(row.full_quoted_landing_cost_ngn)}</td>
+                      {canViewCosts && (
+                        <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap text-xs">{fmt(row.full_quoted_landing_cost_ngn)}</td>
+                      )}
                       <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap text-xs">
                         {row.expected_sale_revenue > 0 ? fmt(row.expected_sale_revenue) : '—'}
                       </td>
@@ -376,9 +392,16 @@ export default function PartnershipPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Partner','Containers','Wallet balance','Allocated to containers','Total investment','Revenue share','Profit',''].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                  ))}
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Partner</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Containers</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Wallet balance</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Allocated to containers</th>
+                  {canViewCosts && (
+                    <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Total investment</th>
+                  )}
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Revenue share</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Profit</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap"></th>
                 </tr>
               </thead>
               <tbody>
@@ -418,7 +441,9 @@ export default function PartnershipPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap text-xs">{fmt(p.wallet_allocated)}</td>
-                    <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
+                    {canViewCosts && (
+                      <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(p.total_quoted_cost)}</td>
+                    )}
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
                       {p.total_revenue_share > 0
                         ? <span className="text-green-600 font-medium">{fmt(p.total_revenue_share)}</span>
@@ -444,7 +469,9 @@ export default function PartnershipPage() {
                     <td className="px-3 py-2.5 text-xs font-bold text-gray-700">{filteredPartners.reduce((s,p)=>s+p.container_count,0)}</td>
                     <td className="px-3 py-2.5 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.wallet_balance,0))}</td>
                     <td className="px-3 py-2.5 text-xs font-bold text-blue-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.wallet_allocated,0))}</td>
-                    <td className="px-3 py-2.5 text-xs font-bold text-gray-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_quoted_cost,0))}</td>
+                    {canViewCosts && (
+                      <td className="px-3 py-2.5 text-xs font-bold text-gray-700 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_quoted_cost,0))}</td>
+                    )}
                     <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_revenue_share,0))}</td>
                     <td className="px-3 py-2.5 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(filteredPartners.reduce((s,p)=>s+p.total_profit,0))}</td>
                     <td />

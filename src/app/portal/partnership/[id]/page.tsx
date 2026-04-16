@@ -10,6 +10,7 @@ import {
 import Link from 'next/link'
 import AmountInput from '@/components/ui/AmountInput'
 import Modal from '@/components/ui/Modal'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerDetail {
   container_id: string
@@ -50,6 +51,9 @@ const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFr
 export default function PartnershipContainerDrilldownPage() {
   const params = useParams()
   const containerDbId = params.id as string
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
   const [container, setContainer] = useState<ContainerDetail | null>(null)
   const [funders, setFunders] = useState<PartnerFunder[]>([])
@@ -209,7 +213,7 @@ export default function PartnershipContainerDrilldownPage() {
       {/* Metric cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Full quoted landing cost', value: fmt(container.full_quoted_landing_cost_ngn), color: 'text-gray-900', bg: 'bg-white' },
+          ...(canViewCosts ? [{ label: 'Full quoted landing cost', value: fmt(container.full_quoted_landing_cost_ngn), color: 'text-gray-900', bg: 'bg-white' }] : []),
           { label: 'Expected sale revenue', value: container.expected_sale_revenue > 0 ? fmt(container.expected_sale_revenue) : '—', color: 'text-blue-700', bg: 'bg-blue-50' },
           { label: 'Actual sales', value: container.actual_sales > 0 ? fmt(container.actual_sales) : '—', color: 'text-green-700', bg: 'bg-green-50' },
           { label: 'Total top-up needed', value: totalTopup > 0 ? fmt(totalTopup) : 'Fully funded', color: totalTopup > 0 ? 'text-amber-700' : 'text-green-700', bg: totalTopup > 0 ? 'bg-amber-50' : 'bg-green-50' },
@@ -222,27 +226,29 @@ export default function PartnershipContainerDrilldownPage() {
       </div>
 
       {/* Cost breakdown */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-4">Quoted landing cost breakdown</h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-          {[
-            { label: 'Quoted price/pc (USD)', value: `$${(container.quoted_price_usd ?? container.unit_price_usd).toFixed(2)}` },
-            { label: 'Pieces purchased', value: container.pieces_purchased.toLocaleString() },
-            { label: 'Shipping (USD)', value: `$${container.shipping_amount_usd.toFixed(2)}` },
-            { label: 'Surcharge (NGN)', value: fmt(container.surcharge_ngn) },
-            { label: 'General expenses share', value: fmt(container.general_expense_share_ngn) },
-          ].map(item => (
-            <div key={item.label} className="bg-gray-50 rounded-xl p-3">
-              <p className="text-xs text-gray-400 mb-1">{item.label}</p>
-              <p className="text-sm font-semibold text-gray-900">{item.value}</p>
-            </div>
-          ))}
+      {canViewCosts && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-700 mb-4">Quoted landing cost breakdown</h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+            {[
+              { label: 'Quoted price/pc (USD)', value: `$${(container.quoted_price_usd ?? container.unit_price_usd).toFixed(2)}` },
+              { label: 'Pieces purchased', value: container.pieces_purchased.toLocaleString() },
+              { label: 'Shipping (USD)', value: `$${container.shipping_amount_usd.toFixed(2)}` },
+              { label: 'Surcharge (NGN)', value: fmt(container.surcharge_ngn) },
+              { label: 'General expenses share', value: fmt(container.general_expense_share_ngn) },
+            ].map(item => (
+              <div key={item.label} className="bg-gray-50 rounded-xl p-3">
+                <p className="text-xs text-gray-400 mb-1">{item.label}</p>
+                <p className="text-sm font-semibold text-gray-900">{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+            <p className="text-xs text-gray-500">WAER used: <span className="font-semibold text-gray-700">₦{container.waer.toLocaleString()}</span></p>
+            <p className="text-sm font-bold text-gray-900">Total: {fmt(container.full_quoted_landing_cost_ngn)}</p>
+          </div>
         </div>
-        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-          <p className="text-xs text-gray-500">WAER used: <span className="font-semibold text-gray-700">₦{container.waer.toLocaleString()}</span></p>
-          <p className="text-sm font-bold text-gray-900">Total: {fmt(container.full_quoted_landing_cost_ngn)}</p>
-        </div>
-      </div>
+      )}
 
       {/* Partner breakdown table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -254,9 +260,18 @@ export default function PartnershipContainerDrilldownPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Partner','Stake %','Investment (quoted cost)','Amount received','Top-up needed','Display value','Expected return','Actual return','Profit','Actions'].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                ))}
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Partner</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Stake %</th>
+                {canViewCosts && (
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Investment (quoted cost)</th>
+                )}
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Amount received</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Top-up needed</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Display value</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Expected return</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Actual return</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Profit</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -278,7 +293,9 @@ export default function PartnershipContainerDrilldownPage() {
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-sm font-bold text-brand-700">{f.percentage.toFixed(0)}%</span>
                     </td>
-                    <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(f.partner_quoted_cost_ngn)}</td>
+                    {canViewCosts && (
+                      <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap text-xs">{fmt(f.partner_quoted_cost_ngn)}</td>
+                    )}
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-xs font-medium text-green-600">{fmt(f.amount_received_ngn)}</span>
                     </td>
@@ -345,10 +362,12 @@ export default function PartnershipContainerDrilldownPage() {
         title="Update amount received" description={editFunder?.funder_name ?? ''} size="sm">
         <form onSubmit={saveReceivedAmount} className="space-y-4">
           <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-1 text-xs text-gray-600">
-            <div className="flex justify-between">
-              <span>Partner investment (quoted cost)</span>
-              <span className="font-semibold">{editFunder ? fmt(editFunder.partner_quoted_cost_ngn) : '—'}</span>
-            </div>
+            {canViewCosts && (
+              <div className="flex justify-between">
+                <span>Partner investment (quoted cost)</span>
+                <span className="font-semibold">{editFunder ? fmt(editFunder.partner_quoted_cost_ngn) : '—'}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span>Currently received</span>
               <span className="font-semibold text-green-600">{editFunder ? fmt(editFunder.amount_received_ngn) : '—'}</span>
@@ -381,12 +400,14 @@ export default function PartnershipContainerDrilldownPage() {
       <Modal open={editDisplayOpen} onClose={() => setEditDisplayOpen(false)}
         title="Edit display value" description={editDisplayFunder?.funder_name ?? ''} size="sm">
         <form onSubmit={saveDisplayValue} className="space-y-4">
-          <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
-            <p className="text-xs text-brand-700 font-medium">
-              Calculated value: <span className="font-bold">{editDisplayFunder ? fmt(editDisplayFunder.partner_quoted_cost_ngn) : '—'}</span>
-            </p>
-            <p className="text-xs text-brand-600 mt-0.5">Override this to show a custom value to the partner in their dashboard.</p>
-          </div>
+          {canViewCosts && (
+            <div className="p-3 bg-brand-50 rounded-lg border border-brand-100">
+              <p className="text-xs text-brand-700 font-medium">
+                Calculated value: <span className="font-bold">{editDisplayFunder ? fmt(editDisplayFunder.partner_quoted_cost_ngn) : '—'}</span>
+              </p>
+              <p className="text-xs text-brand-600 mt-0.5">Override this to show a custom value to the partner in their dashboard.</p>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Display value (NGN)</label>
             <AmountInput value={editDisplayValue} onChange={setEditDisplayValue}

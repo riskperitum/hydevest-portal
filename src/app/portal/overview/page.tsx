@@ -4,25 +4,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
-  Package, TrendingUp, Wallet, AlertCircle,
-  ShoppingCart, BarChart3, Users, ArrowUpRight,
-  ArrowDownRight, Clock, CheckCircle2, RefreshCw,
-  ChevronRight
+  Package, TrendingUp, AlertCircle, Clock,
+  CheckCircle2, RefreshCw, ChevronRight,
+  ShoppingCart, FileText, DollarSign, Users,
+  BarChart3, PlusCircle, Wallet
 } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
-interface KPI {
-  label: string
-  value: string
-  sub: string
-  icon: React.ReactNode
-  color: string
-  bg: string
-  trend?: 'up' | 'down' | 'neutral'
-  href?: string
-}
-
-const fmt    = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmt     = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+const fmtPct  = (n: number) => `${Number(n).toFixed(1)}%`
 
 function timeAgo(date: string): string {
   const diff = Math.floor((new Date().getTime() - new Date(date).getTime()) / 60000)
@@ -33,28 +23,84 @@ function timeAgo(date: string): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+const PRIORITY_COLOR: Record<string, string> = {
+  urgent: 'bg-red-50 text-red-600',
+  high:   'bg-amber-50 text-amber-700',
+  normal: 'bg-blue-50 text-blue-600',
+  low:    'bg-gray-100 text-gray-500',
+}
+
+const MODULE_LABEL: Record<string, string> = {
+  trips:                'Trip',
+  containers:           'Container',
+  presales:             'Presale',
+  sales_orders:         'Sales',
+  recoveries:           'Recovery',
+  expenses:             'Expense',
+  supplier_receivables: 'Supplier rec.',
+  partner_payouts:      'Partner payout',
+}
+
+const RANGE_OPTIONS = [
+  { key: '7d',  label: '7d' },
+  { key: '30d', label: '30d' },
+  { key: '90d', label: '90d' },
+  { key: 'ytd', label: 'YTD' },
+  { key: 'all', label: 'All' },
+]
+
+const QUICK_ACTIONS = [
+  { label: 'New trip',       icon: Package,      href: '/portal/purchase/trips',    color: 'bg-blue-50 text-blue-700' },
+  { label: 'New presale',    icon: ShoppingCart, href: '/portal/sales/presales/create', color: 'bg-brand-50 text-brand-700' },
+  { label: 'New sales order',icon: FileText,     href: '/portal/sales/orders/create',   color: 'bg-green-50 text-green-700' },
+  { label: 'Add expense',    icon: DollarSign,   href: '/portal/expensify',         color: 'bg-amber-50 text-amber-700' },
+  { label: 'View tasks',     icon: CheckCircle2, href: '/portal/tasks',             color: 'bg-red-50 text-red-600' },
+  { label: 'Partnership',    icon: Users,        href: '/portal/partnership',       color: 'bg-purple-50 text-purple-700' },
+  { label: 'Reports',        icon: BarChart3,    href: '/portal/reports',           color: 'bg-gray-100 text-gray-700' },
+  { label: 'Request box',    icon: Wallet,       href: '/portal/requestbox',        color: 'bg-teal-50 text-teal-700' },
+]
+
 export default function OverviewPage() {
-  const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [userName, setUserName] = useState('')
+  const router   = useRouter()
+  const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
-  // KPI data
-  const [activeContainers, setActiveContainers] = useState(0)
-  const [totalRevenue, setTotalRevenue] = useState(0)
-  const [totalOutstanding, setTotalOutstanding] = useState(0)
-  const [totalRecovered, setTotalRecovered] = useState(0)
-  const [pendingTasks, setPendingTasks] = useState(0)
-  const [partnerWallets, setPartnerWallets] = useState(0)
-  const [supplierPayables, setSupplierPayables] = useState(0)
-  const [containerInventoryValue, setContainerInventoryValue] = useState(0)
-  const [grossMargin, setGrossMargin] = useState(0)
+  const [loading, setLoading]       = useState(true)
+  const [userName, setUserName]     = useState('')
+  const [range, setRange]           = useState('30d')
 
-  // Recent activity
-  const [recentSales, setRecentSales] = useState<any[]>([])
+  // KPIs
+  const [activeContainers, setActiveContainers]     = useState(0)
+  const [inventoryValue, setInventoryValue]         = useState(0)
+  const [totalRevenue, setTotalRevenue]             = useState(0)
+  const [totalOutstanding, setTotalOutstanding]     = useState(0)
+  const [totalRecovered, setTotalRecovered]         = useState(0)
+  const [pendingTasks, setPendingTasks]             = useState(0)
+  const [grossMargin, setGrossMargin]               = useState(0)
+  const [totalCost, setTotalCost]                   = useState(0)
+  const [tripsCount, setTripsCount]                 = useState(0)
+  const [approvalQueue, setApprovalQueue]           = useState(0)
+  const [totalSalesOrders, setTotalSalesOrders]     = useState(0)
+  const [completedContainers, setCompletedContainers] = useState(0)
+
+  // Activity
+  const [recentSales, setRecentSales]           = useState<any[]>([])
   const [recentRecoveries, setRecentRecoveries] = useState<any[]>([])
-  const [pendingTaskList, setPendingTaskList] = useState<any[]>([])
+  const [pendingTaskList, setPendingTaskList]   = useState<any[]>([])
+  const [topDebtors, setTopDebtors]             = useState<any[]>([])
+  const [containerData, setContainerData]       = useState<any[]>([])
+
+  function getRangeStart(r: string): string | null {
+    const now = new Date()
+    if (r === '7d')  { now.setDate(now.getDate() - 7);   return now.toISOString() }
+    if (r === '30d') { now.setDate(now.getDate() - 30);  return now.toISOString() }
+    if (r === '90d') { now.setDate(now.getDate() - 90);  return now.toISOString() }
+    if (r === 'ytd') { return new Date(new Date().getFullYear(), 0, 1).toISOString() }
+    return null
+  }
 
   const load = useCallback(async () => {
+    setLoading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -63,187 +109,284 @@ export default function OverviewPage() {
       .from('profiles').select('full_name').eq('id', user.id).single()
     setUserName(profile?.full_name?.split(' ')[0] ?? 'there')
 
+    const rangeStart = getRangeStart(range)
+
+    // Build date filter
+    const dateFilter = (q: any) => rangeStart ? q.gte('created_at', rangeStart) : q
+
     const [
       { data: containers },
-      { data: salesOrders },
+      { data: allSalesOrders },
       { data: recoveries },
       { data: tasks },
-      { data: partners },
       { data: tripExpenses },
+      { data: trips },
       { data: recentSalesData },
       { data: recentRecovData },
       { data: pendingTaskData },
     ] = await Promise.all([
-      supabase.from('containers').select('id, status, estimated_landing_cost'),
-      supabase.from('sales_orders').select('customer_payable, outstanding_balance'),
-      supabase.from('recoveries').select('amount_paid'),
-      supabase.from('tasks').select('id').eq('status', 'pending'),
-      supabase.from('partners').select('wallet_balance, wallet_allocated'),
-      supabase.from('trip_expenses').select('amount_ngn, category').eq('category', 'container'),
-      supabase.from('sales_orders')
-        .select(`
-          id, customer_payable, created_at,
-          customer:customers!sales_orders_customer_id_fkey(name),
-          container:containers!sales_orders_container_id_fkey(container_id)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabase.from('recoveries')
-        .select(`
-          id, amount_paid, payment_date,
-          sales_order:sales_orders!recoveries_sales_order_id_fkey(
-            customer:customers!sales_orders_customer_id_fkey(name)
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabase.from('tasks')
-        .select(`
-          id, task_id, title, module, priority, created_at,
-          requested_by_profile:profiles!tasks_requested_by_fkey(full_name)
-        `)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(5),
+      supabase.from('containers').select('id, status, estimated_landing_cost, container_id, unit_price_usd, quoted_price_usd'),
+      dateFilter(supabase.from('sales_orders').select(`
+        id, customer_payable, outstanding_balance, created_at,
+        customer:customers!sales_orders_customer_id_fkey(name),
+        container:containers!sales_orders_container_id_fkey(container_id)
+      `)),
+      dateFilter(supabase.from('recoveries').select('amount_paid, created_at')),
+      supabase.from('tasks').select('id, status').eq('status', 'pending'),
+      supabase.from('trip_expenses').select('amount_ngn, category'),
+      dateFilter(supabase.from('trips').select('id, created_at')),
+      dateFilter(supabase.from('sales_orders').select(`
+        id, customer_payable, created_at,
+        customer:customers!sales_orders_customer_id_fkey(name),
+        container:containers!sales_orders_container_id_fkey(container_id)
+      `)).order('created_at', { ascending: false }).limit(5),
+      dateFilter(supabase.from('recoveries').select(`
+        id, amount_paid, payment_date, created_at,
+        sales_order:sales_orders!recoveries_sales_order_id_fkey(
+          customer:customers!sales_orders_customer_id_fkey(name)
+        )
+      `)).order('created_at', { ascending: false }).limit(5),
+      supabase.from('tasks').select(`
+        id, task_id, title, module, priority, created_at,
+        requested_by_profile:profiles!tasks_requested_by_fkey(full_name)
+      `).eq('status', 'pending').order('created_at', { ascending: false }).limit(5),
     ])
 
-    // KPIs
-    const active = (containers ?? []).filter(c => c.status !== 'completed').length
-    const invValue = (containers ?? []).filter(c => c.status !== 'completed')
+    // KPI calculations
+    const active    = (containers ?? []).filter(c => c.status !== 'completed').length
+    const completed = (containers ?? []).filter(c => c.status === 'completed').length
+    const invVal    = (containers ?? []).filter(c => c.status !== 'completed')
       .reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
 
-    const revenue = (salesOrders ?? []).reduce((s, so) => s + Number(so.customer_payable), 0)
-    const outstanding = (salesOrders ?? []).reduce((s, so) => s + Number(so.outstanding_balance ?? 0), 0)
-    const recovered = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
-    const wallets = (partners ?? []).reduce((s, p) => s + Number(p.wallet_balance ?? 0) + Number(p.wallet_allocated ?? 0), 0)
-    const supplierPaid = (tripExpenses ?? []).reduce((s, te) => s + Number(te.amount_ngn ?? 0), 0)
-    const margin = revenue > 0 ? ((revenue - supplierPaid) / revenue) * 100 : 0
+    const revenue     = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.customer_payable), 0)
+    const outstanding = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.outstanding_balance ?? 0), 0)
+    const recovered   = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
+    const cost        = (tripExpenses ?? []).filter(te => te.category === 'container')
+      .reduce((s, te) => s + Number(te.amount_ngn ?? 0), 0)
+    const margin      = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0
+
+    // Top debtors
+    const debtorMap: Record<string, { name: string; billed: number; outstanding: number; collected: number }> = {}
+    for (const so of (allSalesOrders ?? [])) {
+      const name = (so.customer as any)?.name ?? 'Unknown'
+      if (!debtorMap[name]) debtorMap[name] = { name, billed: 0, outstanding: 0, collected: 0 }
+      debtorMap[name].billed      += Number(so.customer_payable)
+      debtorMap[name].outstanding += Number(so.outstanding_balance ?? 0)
+      debtorMap[name].collected   += Number(so.customer_payable) - Number(so.outstanding_balance ?? 0)
+    }
+    const debtors = Object.values(debtorMap)
+      .filter(d => d.outstanding > 0)
+      .sort((a, b) => b.outstanding - a.outstanding)
+
+    // Container data for chart
+    const contData = (containers ?? []).map(c => {
+      const soForContainer = (allSalesOrders ?? []).filter(so => (so.container as any)?.container_id === c.container_id)
+      const rev = soForContainer.reduce((s, so) => s + Number(so.customer_payable), 0)
+      return {
+        id:       c.container_id,
+        revenue:  rev,
+        cost:     Number(c.estimated_landing_cost ?? 0),
+        profit:   rev - Number(c.estimated_landing_cost ?? 0),
+        status:   c.status,
+      }
+    })
 
     setActiveContainers(active)
-    setContainerInventoryValue(invValue)
+    setCompletedContainers(completed)
+    setInventoryValue(invVal)
     setTotalRevenue(revenue)
     setTotalOutstanding(outstanding)
     setTotalRecovered(recovered)
     setPendingTasks((tasks ?? []).length)
-    setPartnerWallets(wallets)
-    setSupplierPayables(supplierPaid)
     setGrossMargin(margin)
+    setTotalCost(cost)
+    setTripsCount((trips ?? []).length)
+    setApprovalQueue((pendingTaskData ?? []).filter(t => ['urgent','high'].includes(t.priority)).length)
+    setTotalSalesOrders((allSalesOrders ?? []).length)
     setRecentSales(recentSalesData ?? [])
     setRecentRecoveries(recentRecovData ?? [])
     setPendingTaskList(pendingTaskData ?? [])
+    setTopDebtors(debtors)
+    setContainerData(contData)
     setLoading(false)
-  }, [])
+  }, [range])
 
   useEffect(() => { load() }, [load])
 
   const recoveryRate = totalRevenue > 0 ? (totalRecovered / totalRevenue) * 100 : 0
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const kpis: KPI[] = [
+  // KPI tiles config
+  const kpiRow1 = [
     {
-      label: 'Active containers',
-      value: activeContainers.toString(),
-      sub: `${fmt(containerInventoryValue)} inventory value`,
-      icon: <Package size={18} className="text-blue-600" />,
-      color: 'text-blue-700', bg: 'bg-blue-50',
-      trend: 'neutral', href: '/portal/purchase/containers',
-    },
-    {
-      label: 'Total sales revenue',
+      label: 'Total revenue',
       value: fmt(totalRevenue),
-      sub: `${recoveryRate.toFixed(0)}% recovered`,
-      icon: <TrendingUp size={18} className="text-green-600" />,
+      sub: `${totalSalesOrders} sales orders`,
+      icon: <TrendingUp size={16} className="text-green-600" />,
       color: 'text-green-700', bg: 'bg-green-50',
-      trend: 'up', href: '/portal/sales/orders',
+      href: '/portal/sales/orders',
     },
     {
       label: 'Outstanding receivables',
       value: fmt(totalOutstanding),
-      sub: `${fmt(totalRecovered)} collected so far`,
-      icon: <Clock size={18} className={totalOutstanding > 0 ? 'text-amber-600' : 'text-green-600'} />,
+      sub: `${fmtPct(100 - recoveryRate)} remaining`,
+      icon: <Clock size={16} className={totalOutstanding > 0 ? 'text-amber-600' : 'text-green-600'} />,
       color: totalOutstanding > 0 ? 'text-amber-700' : 'text-green-700',
       bg: totalOutstanding > 0 ? 'bg-amber-50' : 'bg-green-50',
-      trend: totalOutstanding > 0 ? 'down' : 'neutral',
       href: '/portal/reports/customer-debt',
     },
     {
-      label: 'Partner wallets',
-      value: fmt(partnerWallets),
-      sub: 'Total partner positions',
-      icon: <Wallet size={18} className="text-brand-600" />,
-      color: 'text-brand-700', bg: 'bg-brand-50',
-      trend: 'neutral', href: '/portal/partnership',
+      label: 'Active containers',
+      value: activeContainers.toString(),
+      sub: `${completedContainers} completed`,
+      icon: <Package size={16} className="text-blue-600" />,
+      color: 'text-blue-700', bg: 'bg-blue-50',
+      href: '/portal/purchase/containers',
     },
     {
       label: 'Pending tasks',
       value: pendingTasks.toString(),
-      sub: 'Awaiting your action',
-      icon: <AlertCircle size={18} className={pendingTasks > 0 ? 'text-red-500' : 'text-green-600'} />,
+      sub: `${approvalQueue} urgent or high`,
+      icon: <AlertCircle size={16} className={pendingTasks > 0 ? 'text-red-500' : 'text-green-600'} />,
       color: pendingTasks > 0 ? 'text-red-600' : 'text-green-700',
       bg: pendingTasks > 0 ? 'bg-red-50' : 'bg-green-50',
-      trend: pendingTasks > 0 ? 'down' : 'neutral',
       href: '/portal/tasks',
-    },
-    {
-      label: 'Gross margin',
-      value: `${grossMargin.toFixed(1)}%`,
-      sub: `${fmt(supplierPayables)} cost of sales`,
-      icon: <BarChart3 size={18} className={grossMargin >= 20 ? 'text-green-600' : 'text-amber-600'} />,
-      color: grossMargin >= 20 ? 'text-green-700' : 'text-amber-700',
-      bg: grossMargin >= 20 ? 'bg-green-50' : 'bg-amber-50',
-      trend: grossMargin >= 20 ? 'up' : 'down',
-      href: '/portal/reports/container-profit',
     },
   ]
 
-  const PRIORITY_COLOR: Record<string, string> = {
-    urgent: 'bg-red-50 text-red-600',
-    high:   'bg-amber-50 text-amber-700',
-    normal: 'bg-blue-50 text-blue-600',
-    low:    'bg-gray-100 text-gray-500',
-  }
-
-  const MODULE_LABEL: Record<string, string> = {
-    trips: 'Trip', containers: 'Container', presales: 'Presale',
-    sales_orders: 'Sales', recoveries: 'Recovery', expenses: 'Expense',
-    supplier_receivables: 'Supplier rec.', partner_payouts: 'Partner payout',
-  }
+  const kpiRow2 = [
+    {
+      label: 'Recovery rate',
+      value: fmtPct(recoveryRate),
+      sub: `${fmt(totalRecovered)} collected`,
+      icon: <CheckCircle2 size={16} className={recoveryRate >= 80 ? 'text-green-600' : 'text-amber-600'} />,
+      color: recoveryRate >= 80 ? 'text-green-700' : 'text-amber-700',
+      bg: recoveryRate >= 80 ? 'bg-green-50' : 'bg-amber-50',
+      href: '/portal/recoveries',
+      show: true,
+    },
+    {
+      label: 'Gross margin',
+      value: fmtPct(grossMargin),
+      sub: `${fmt(totalRevenue - totalCost)} gross profit`,
+      icon: <BarChart3 size={16} className={grossMargin >= 20 ? 'text-green-600' : 'text-amber-600'} />,
+      color: grossMargin >= 20 ? 'text-green-700' : 'text-amber-700',
+      bg: grossMargin >= 20 ? 'bg-green-50' : 'bg-amber-50',
+      href: '/portal/reports/container-profit',
+      show: canViewCosts,
+    },
+    {
+      label: 'Trips this period',
+      value: tripsCount.toString(),
+      sub: `${activeContainers} containers active`,
+      icon: <Package size={16} className="text-brand-600" />,
+      color: 'text-brand-700', bg: 'bg-brand-50',
+      href: '/portal/purchase/trips',
+      show: true,
+    },
+    {
+      label: 'Inventory value',
+      value: fmt(inventoryValue),
+      sub: `${activeContainers} containers`,
+      icon: <Package size={16} className="text-blue-600" />,
+      color: 'text-blue-700', bg: 'bg-blue-50',
+      href: '/portal/inventory',
+      show: canViewCosts,
+    },
+  ].filter(k => k.show)
 
   return (
-    <div className="space-y-6 max-w-7xl">
+    <div className="space-y-5 max-w-7xl">
 
-      {/* Welcome */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {userName} 👋</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
+      {/* Header row — greeting + date range + quick actions */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">{greeting}, {userName} 👋</h1>
+            <p className="text-sm text-gray-400 mt-0.5">
+              {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Date range */}
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+              {RANGE_OPTIONS.map(r => (
+                <button key={r.key} onClick={() => setRange(r.key)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+                    ${range === r.key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={load}
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+              <RefreshCw size={15} />
+            </button>
+          </div>
         </div>
-        <button onClick={load} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-          <RefreshCw size={16} />
-        </button>
+
+        {/* Quick actions strip */}
+        <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+          {QUICK_ACTIONS.map(action => {
+            const Icon = action.icon
+            return (
+              <button key={action.label}
+                onClick={() => router.push(action.href)}
+                className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border border-white shadow-sm text-xs font-medium transition-all hover:shadow-md hover:-translate-y-0.5 ${action.color}`}>
+                <Icon size={16} />
+                <span className="leading-tight text-center">{action.label}</span>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
-      {/* KPI grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {kpis.map(kpi => (
+      {/* KPI Row 1 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {kpiRow1.map(kpi => (
           <button key={kpi.label}
-            onClick={() => kpi.href && router.push(kpi.href)}
-            className={`${kpi.bg} rounded-xl border border-white shadow-sm p-5 text-left hover:shadow-md transition-all group ${kpi.href ? 'cursor-pointer' : 'cursor-default'}`}>
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <div className="w-9 h-9 rounded-xl bg-white/60 flex items-center justify-center shrink-0">
+            onClick={() => router.push(kpi.href)}
+            className={`${kpi.bg} rounded-xl border border-white shadow-sm p-4 text-left hover:shadow-md transition-all group`}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center shrink-0">
                 {kpi.icon}
               </div>
-              {kpi.href && <ChevronRight size={14} className="text-gray-300 group-hover:text-gray-500 transition-colors mt-1 shrink-0" />}
+              <ChevronRight size={13} className="text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" />
             </div>
-            <p className={`text-xl font-bold truncate ${kpi.color}`}>{loading ? '—' : kpi.value}</p>
+            <p className={`text-xl font-bold truncate ${kpi.color}`}>
+              {loading ? '—' : kpi.value}
+            </p>
             <p className="text-xs text-gray-500 mt-0.5">{kpi.label}</p>
             <p className="text-xs text-gray-400 mt-1 truncate">{loading ? '...' : kpi.sub}</p>
           </button>
         ))}
       </div>
 
-      {/* Recovery progress */}
+      {/* KPI Row 2 — conditional on permissions */}
+      {kpiRow2.length > 0 && (
+        <div className={`grid grid-cols-2 gap-3 ${kpiRow2.length === 4 ? 'md:grid-cols-4' : kpiRow2.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+          {kpiRow2.map(kpi => (
+            <button key={kpi.label}
+              onClick={() => router.push(kpi.href)}
+              className={`${kpi.bg} rounded-xl border border-white shadow-sm p-4 text-left hover:shadow-md transition-all group`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center shrink-0">
+                  {kpi.icon}
+                </div>
+                <ChevronRight size={13} className="text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" />
+              </div>
+              <p className={`text-xl font-bold truncate ${kpi.color}`}>
+                {loading ? '—' : kpi.value}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">{kpi.label}</p>
+              <p className="text-xs text-gray-400 mt-1 truncate">{loading ? '...' : kpi.sub}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Recovery progress bar */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-800">Recovery progress</h2>
@@ -257,15 +400,101 @@ export default function OverviewPage() {
             <span>Total billed: <span className="font-semibold text-gray-700">{fmt(totalRevenue)}</span></span>
           </div>
           <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-            <div className={`h-full rounded-full transition-all ${recoveryRate >= 80 ? 'bg-green-500' : recoveryRate >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
+            <div className={`h-full rounded-full transition-all duration-700 ${recoveryRate >= 80 ? 'bg-green-500' : recoveryRate >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
               style={{ width: `${Math.min(recoveryRate, 100)}%` }} />
           </div>
-          <p className="text-xs text-gray-400 text-right">{recoveryRate.toFixed(1)}% of total revenue collected</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">{fmtPct(recoveryRate)} of total revenue collected</p>
+            {recoveryRate >= 90 && <span className="text-xs font-medium text-green-600">Excellent</span>}
+            {recoveryRate >= 70 && recoveryRate < 90 && <span className="text-xs font-medium text-brand-600">On track</span>}
+            {recoveryRate < 70 && recoveryRate > 0 && <span className="text-xs font-medium text-amber-600">Needs attention</span>}
+          </div>
         </div>
       </div>
 
-      {/* Three column activity section */}
+      {/* Three column activity */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        {/* Top debtors */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">Top debtors</h3>
+            <button onClick={() => router.push('/portal/reports/customer-debt')}
+              className="text-xs text-brand-600 hover:underline">All →</button>
+          </div>
+          <div className="p-4 space-y-3">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="space-y-1 animate-pulse">
+                  <div className="h-3 bg-gray-100 rounded w-3/4" />
+                  <div className="h-2 bg-gray-100 rounded w-full" />
+                </div>
+              ))
+            ) : topDebtors.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-4 gap-2">
+                <CheckCircle2 size={20} className="text-green-300" />
+                <p className="text-xs text-gray-400">No outstanding debts</p>
+              </div>
+            ) : topDebtors.map(d => {
+              const pct = d.billed > 0 ? (d.collected / d.billed) * 100 : 0
+              return (
+                <div key={d.name}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium text-gray-800 truncate max-w-[130px]">{d.name}</span>
+                    <span className={`font-semibold ${d.outstanding > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+                      {fmt(d.outstanding)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${pct >= 90 ? 'bg-green-500' : pct >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
+                      style={{ width: `${Math.min(pct, 100)}%` }} />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">{fmtPct(pct)} collected</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Pending tasks */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">Pending tasks</h3>
+            <button onClick={() => router.push('/portal/tasks')} className="text-xs text-brand-600 hover:underline">All →</button>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="p-3 animate-pulse flex gap-3">
+                  <div className="h-3 bg-gray-100 rounded flex-1" />
+                  <div className="h-3 bg-gray-100 rounded w-16" />
+                </div>
+              ))
+            ) : pendingTaskList.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 gap-2">
+                <CheckCircle2 size={20} className="text-green-300" />
+                <p className="text-xs text-gray-400">All clear!</p>
+              </div>
+            ) : pendingTaskList.map(task => (
+              <button key={task.id}
+                onClick={() => router.push('/portal/tasks')}
+                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-gray-800 truncate">{task.title}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded capitalize ${PRIORITY_COLOR[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {task.priority}
+                      </span>
+                      <span className="text-xs text-gray-400">{MODULE_LABEL[task.module] ?? task.module}</span>
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 shrink-0">{timeAgo(task.created_at)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Recent sales */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -297,82 +526,6 @@ export default function OverviewPage() {
                   {fmt(Number(sale.customer_payable))}
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent recoveries */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">Recent recoveries</h3>
-            <button onClick={() => router.push('/portal/recoveries')} className="text-xs text-brand-600 hover:underline">All →</button>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {loading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="p-3 animate-pulse flex gap-3">
-                  <div className="h-3 bg-gray-100 rounded flex-1" />
-                  <div className="h-3 bg-gray-100 rounded w-20" />
-                </div>
-              ))
-            ) : recentRecoveries.length === 0 ? (
-              <div className="p-6 text-center text-xs text-gray-400">No recoveries yet</div>
-            ) : recentRecoveries.map(rec => (
-              <div key={rec.id} className="px-4 py-3 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-gray-800 truncate">
-                    {(rec.sales_order as any)?.customer?.name ?? '—'}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {rec.payment_date
-                      ? new Date(rec.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-                      : '—'}
-                  </p>
-                </div>
-                <span className="text-xs font-semibold text-brand-700 shrink-0">
-                  {fmt(Number(rec.amount_paid))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Pending tasks */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">Pending tasks</h3>
-            <button onClick={() => router.push('/portal/tasks')} className="text-xs text-brand-600 hover:underline">All →</button>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {loading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="p-3 animate-pulse flex gap-3">
-                  <div className="h-3 bg-gray-100 rounded flex-1" />
-                  <div className="h-3 bg-gray-100 rounded w-20" />
-                </div>
-              ))
-            ) : pendingTaskList.length === 0 ? (
-              <div className="p-6 text-center">
-                <CheckCircle2 size={20} className="text-green-300 mx-auto mb-1" />
-                <p className="text-xs text-gray-400">All clear!</p>
-              </div>
-            ) : pendingTaskList.map(task => (
-              <button key={task.id}
-                onClick={() => router.push('/portal/tasks')}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-gray-800 truncate">{task.title}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded capitalize ${PRIORITY_COLOR[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {task.priority}
-                      </span>
-                      <span className="text-xs text-gray-400">{MODULE_LABEL[task.module] ?? task.module}</span>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-400 shrink-0">{timeAgo(task.created_at)}</span>
-                </div>
-              </button>
             ))}
           </div>
         </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Search, Download, Filter, Eye, FileText, Loader2, Package, TrendingUp, Layers, Tag, DollarSign } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Container {
   id: string
@@ -56,6 +57,9 @@ export default function ContainersPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [generatingReport, setGeneratingReport] = useState(false)
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -461,16 +465,25 @@ export default function ContainersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {[
-                  'Container ID', 'Trip', 'Title', 'Tracking No.',
-                  'Trip Status', 'Landing Cost (₦)',
-                  'Pieces', 'Avg Weight', 'Unit Price ($)',
-                  'Purchase Subtotal ($)',
-                  'Hide Type', 'Funding',
-                  'Created', 'Created By', ''
-                ].map(h => (
-                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">{h}</th>
-                ))}
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Container ID</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Trip</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Title</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Tracking No.</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Trip Status</th>
+                {canViewCosts && (
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Landing Cost (₦)</th>
+                )}
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Pieces</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Avg Weight</th>
+                {canViewCosts && (
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Unit Price ($)</th>
+                )}
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Purchase Subtotal ($)</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Hide Type</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Funding</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Created</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Created By</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -530,14 +543,18 @@ export default function ContainersPage() {
                         {statusInfo(con.trip?.status ?? 'not_started').label}
                       </span>
                     </td>
-                    <td className="px-3 py-3.5 whitespace-nowrap">
-                      {con.estimated_landing_cost
-                        ? <span className="font-semibold text-gray-900">{fmt(con.estimated_landing_cost)}</span>
-                        : <span className="text-gray-300">—</span>}
-                    </td>
+                    {canViewCosts && (
+                      <td className="px-3 py-3.5 whitespace-nowrap">
+                        {con.estimated_landing_cost
+                          ? <span className="font-semibold text-gray-900">{fmt(con.estimated_landing_cost)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                    )}
                     <td className="px-3 py-3.5 text-gray-700 text-right pr-6 font-medium">{con.pieces_purchased?.toLocaleString() ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-3.5 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-3.5 text-gray-700 whitespace-nowrap font-medium">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : <span className="text-gray-300">—</span>}</td>
+                    {canViewCosts && (
+                      <td className="px-3 py-3.5 text-gray-700 whitespace-nowrap font-medium">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : <span className="text-gray-300">—</span>}</td>
+                    )}
                     <td className="px-3 py-3.5 whitespace-nowrap">
                       {purchaseSubtotal > 0
                         ? <span className="font-semibold text-brand-700">{fmtUSD(purchaseSubtotal)}</span>
@@ -571,14 +588,18 @@ export default function ContainersPage() {
                     Totals · {filtered.length} container{filtered.length !== 1 ? 's' : ''}
                   </td>
                   <td className="px-3 py-3 text-xs text-gray-300">—</td>
-                  <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">
-                    {totalLanding > 0 ? fmt(totalLanding) : '—'}
-                  </td>
+                  {canViewCosts && (
+                    <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">
+                      {totalLanding > 0 ? fmt(totalLanding) : '—'}
+                    </td>
+                  )}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 text-right pr-6">
                     {totalPieces.toLocaleString()}
                   </td>
                   <td className="px-3 py-3 text-xs text-gray-300">—</td>
-                  <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                  {canViewCosts && (
+                    <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                  )}
                   <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
                     {fmtUSD(totalUSD)}
                   </td>

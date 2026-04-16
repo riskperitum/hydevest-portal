@@ -16,7 +16,6 @@ export default async function PortalLayout({ children }: { children: React.React
     .eq('id', user.id)
     .single()
 
-  // Check super admin via user_roles table
   const { data: roleData } = await supabase
     .from('user_roles')
     .select('roles(name)')
@@ -29,14 +28,10 @@ export default async function PortalLayout({ children }: { children: React.React
     return r?.name
   }
 
-  const isSuperAdmin = (roleData ?? []).some(
-    (r) => roleNameFromRow(r) === 'super_admin'
-  )
+  const isSuperAdmin = (roleData ?? []).some(r => roleNameFromRow(r) === 'super_admin')
+  const isPartner    = (roleData ?? []).some(r => roleNameFromRow(r) === 'partner')
 
-  // If user has partner role, redirect to partner dashboard (server equivalent of client pathname check)
-  const isPartner = (roleData ?? []).some(
-    (r) => roleNameFromRow(r) === 'partner'
-  )
+  // Redirect partners away from non-partner pages
   if (isPartner) {
     const headerList = await headers()
     const pathname = headerList.get('x-pathname') ?? ''
@@ -45,14 +40,14 @@ export default async function PortalLayout({ children }: { children: React.React
       '/portal/partner-requestbox',
       '/portal/notifications',
     ]
-    if (!partnerAllowed.some((p) => pathname.startsWith(p))) {
+    if (!partnerAllowed.some(p => pathname.startsWith(p))) {
       redirect('/portal/partner-dashboard')
     }
   }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
-      <Sidebar />
+      <Sidebar isPartner={isPartner} />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header profile={profile} isSuperAdmin={isSuperAdmin} />
         <main className="flex-1 overflow-y-auto">

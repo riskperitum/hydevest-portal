@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
@@ -69,35 +68,13 @@ const PARTNER_NAV: NavItem[] = [
   { href: '/portal/partner-requestbox', label: 'Messages', icon: MessageSquare },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
   const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const [isPartner, setIsPartner] = useState(false)
 
   const { isSuperAdmin } = usePermissions()
-
-  useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        setIsPartner(false)
-        return
-      }
-      const { data: roleRows } = await supabase
-        .from('user_roles')
-        .select('roles(name)')
-        .eq('user_id', user.id)
-      const hasPartner = (roleRows ?? []).some((row) => {
-        const roles = row.roles as { name?: string } | { name?: string }[] | null | undefined
-        if (!roles) return false
-        const name = Array.isArray(roles) ? roles[0]?.name : roles.name
-        return name === 'partner'
-      })
-      setIsPartner(hasPartner)
-    })
-  }, [])
 
   // Close mobile sidebar on route change
   useEffect(() => { setMobileOpen(false) }, [pathname])

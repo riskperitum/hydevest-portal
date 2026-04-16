@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Search, Filter, Download, FileText,
   TrendingUp, TrendingDown, Minus, Package,
-  DollarSign, Target, Zap, BarChart2
+  DollarSign, Target, Zap, BarChart2, Loader2
 } from 'lucide-react'
 import Link from 'next/link'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerProfitRow {
   container_db_id: string
@@ -65,6 +66,9 @@ const SALES_STATUS_CONFIG = {
 
 export default function ContainerProfitReportPage() {
   const router = useRouter()
+  const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
+  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
+
   const [rows, setRows] = useState<ContainerProfitRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -77,8 +81,6 @@ export default function ContainerProfitReportPage() {
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const PAGE_SIZE = 12
-
-  useEffect(() => { setCurrentPage(1) }, [search, profitFilter, salesFilter, dateFrom, dateTo])
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -228,7 +230,13 @@ export default function ContainerProfitReportPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (permLoading || !canViewCosts) return
+    const t = window.setTimeout(() => {
+      void load()
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [load, canViewCosts, permLoading])
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
@@ -252,15 +260,14 @@ export default function ContainerProfitReportPage() {
   // Portfolio metrics
   const totalLandingCost = filtered.reduce((s, r) => s + r.estimated_landing_cost, 0)
   const totalExpectedRevenue = filtered.reduce((s, r) => s + r.expected_sale_revenue, 0)
-  const totalSales = filtered.reduce((s, r) => s + r.total_sales_to_date, 0)
   const totalExpectedProfit = filtered.reduce((s, r) => s + r.expected_profit, 0)
   const totalActualProfit = filtered.reduce((s, r) => s + (r.sales_status === 'completed' ? r.actual_profit : 0), 0)
   const totalUnearnedProfit = filtered.reduce((s, r) => s + Math.max(r.unearned_profit, 0), 0)
   const completedCount = filtered.filter(r => r.sales_status === 'completed').length
-  const profitableCount = filtered.filter(r => r.profit_status === 'profitable').length
   const portfolioMargin = totalLandingCost > 0 ? ((totalExpectedRevenue - totalLandingCost) / totalLandingCost) * 100 : 0
 
   function generateReport(type: 'filtered' | 'full') {
+    if (!canViewCosts) return
     const data = type === 'filtered' ? filtered : rows
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <title>Container Profit Report — Hydevest</title>
@@ -323,6 +330,7 @@ export default function ContainerProfitReportPage() {
   }
 
   function exportCSV() {
+    if (!canViewCosts) return
     const headers = ['Container','Tracking No.','Trip','Sale Type','Landing Cost','Exp. Revenue','Exp. Profit','Exp. Margin %','Actual Sales','Actual Profit','Act. Margin %','Unearned Profit','Sales Status','Profit Status']
     const csvRows = filtered.map(r => [
       r.container_id, r.tracking_number??'', r.trip_id,
@@ -352,307 +360,325 @@ export default function ContainerProfitReportPage() {
         </div>
       </div>
 
-      {/* Portfolio overview cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: 'Total landing cost', value: fmt(totalLandingCost), color: 'text-gray-900', icon: <Package size={14} className="text-gray-500" /> },
-          { label: 'Expected revenue', value: fmt(totalExpectedRevenue), color: 'text-brand-700', icon: <Target size={14} className="text-brand-600" /> },
-          { label: 'Expected profit', value: fmt(totalExpectedProfit), color: totalExpectedProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <TrendingUp size={14} className={totalExpectedProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
-          { label: 'Actual profit', value: completedCount > 0 ? fmt(totalActualProfit) : '—', color: totalActualProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <Zap size={14} className={totalActualProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
-          { label: 'Unearned profit', value: fmt(totalUnearnedProfit), color: 'text-amber-700', icon: <BarChart2 size={14} className="text-amber-600" /> },
-          { label: 'Portfolio margin', value: fmtPct(portfolioMargin), color: portfolioMargin >= 0 ? 'text-green-700' : 'text-red-600', icon: <DollarSign size={14} className={portfolioMargin >= 0 ? 'text-green-600' : 'text-red-500'} /> },
-        ].map(m => (
-          <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-center gap-1.5 mb-1">{m.icon}<p className="text-xs text-gray-400 leading-tight">{m.label}</p></div>
-            <p className={`text-base font-bold truncate ${m.color}`}>{m.value}</p>
+      {permLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="animate-spin text-brand-600" size={28} />
+        </div>
+      ) : canViewCosts ? (
+        <>
+          {/* Portfolio overview cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { label: 'Total landing cost', value: fmt(totalLandingCost), color: 'text-gray-900', icon: <Package size={14} className="text-gray-500" /> },
+              { label: 'Expected revenue', value: fmt(totalExpectedRevenue), color: 'text-brand-700', icon: <Target size={14} className="text-brand-600" /> },
+              { label: 'Expected profit', value: fmt(totalExpectedProfit), color: totalExpectedProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <TrendingUp size={14} className={totalExpectedProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
+              { label: 'Actual profit', value: completedCount > 0 ? fmt(totalActualProfit) : '—', color: totalActualProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <Zap size={14} className={totalActualProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
+              { label: 'Unearned profit', value: fmt(totalUnearnedProfit), color: 'text-amber-700', icon: <BarChart2 size={14} className="text-amber-600" /> },
+              { label: 'Portfolio margin', value: fmtPct(portfolioMargin), color: portfolioMargin >= 0 ? 'text-green-700' : 'text-red-600', icon: <DollarSign size={14} className={portfolioMargin >= 0 ? 'text-green-600' : 'text-red-500'} /> },
+            ].map(m => (
+              <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                <div className="flex items-center gap-1.5 mb-1">{m.icon}<p className="text-xs text-gray-400 leading-tight">{m.label}</p></div>
+                <p className={`text-base font-bold truncate ${m.color}`}>{m.value}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Profit status summary pills */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-xs text-gray-500 font-medium">Portfolio breakdown:</span>
-        {Object.entries(PROFIT_STATUS_CONFIG).map(([key, cfg]) => {
-          const count = filtered.filter(r => r.profit_status === key).length
-          if (count === 0) return null
-          return (
+          {/* Profit status summary pills */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs text-gray-500 font-medium">Portfolio breakdown:</span>
+            {Object.entries(PROFIT_STATUS_CONFIG).map(([key, cfg]) => {
+              const count = filtered.filter(r => r.profit_status === key).length
+              if (count === 0) return null
+              return (
             <button key={key}
-              onClick={() => setProfitFilter(profitFilter === key ? '' : key)}
+              onClick={() => { setProfitFilter(profitFilter === key ? '' : key); setCurrentPage(1) }}
               className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-all
                 ${profitFilter === key ? cfg.color + ' shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-              {cfg.label}: {count}
-            </button>
-          )
-        })}
-      </div>
+                  <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                  {cfg.label}: {count}
+                </button>
+              )
+            })}
+          </div>
 
-      {/* Search + filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
+          {/* Search + filters */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1) }}
               placeholder="Search by tracking number, container ID or trip..."
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowFilters(v => !v)}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
-                ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              <Filter size={15} /> Filters
-              {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
-            </button>
-            <button onClick={() => setReportOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
-              <FileText size={15} /> Report
-            </button>
-            <button onClick={exportCSV}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-              <Download size={15} /> Export
-            </button>
-          </div>
-        </div>
-        {showFilters && (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-3 border-t border-gray-100">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Profit status</label>
-              <select value={profitFilter} onChange={e => setProfitFilter(e.target.value)}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowFilters(v => !v)}
+                  className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
+                    ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  <Filter size={15} /> Filters
+                  {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
+                </button>
+                <button onClick={() => setReportOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+                  <FileText size={15} /> Report
+                </button>
+                <button onClick={exportCSV}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+                  <Download size={15} /> Export
+                </button>
+              </div>
+            </div>
+            {showFilters && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-3 border-t border-gray-100">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Profit status</label>
+              <select value={profitFilter} onChange={e => { setProfitFilter(e.target.value); setCurrentPage(1) }}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="">All</option>
-                <option value="profitable">Profitable</option>
-                <option value="break_even">Break even</option>
-                <option value="loss">Loss</option>
-                <option value="pending">Pending</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Sales status</label>
-              <select value={salesFilter} onChange={e => setSalesFilter(e.target.value)}
+                    <option value="">All</option>
+                    <option value="profitable">Profitable</option>
+                    <option value="break_even">Break even</option>
+                    <option value="loss">Loss</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Sales status</label>
+              <select value={salesFilter} onChange={e => { setSalesFilter(e.target.value); setCurrentPage(1) }}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="">All</option>
-                <option value="not_started">Not started</option>
-                <option value="in_progress">In progress</option>
-                <option value="completed">Completed</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date from</label>
-              <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setCurrentPage(1) }}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date to</label>
-              <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setCurrentPage(1) }}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            </div>
-            {activeFilters > 0 && (
-              <div className="flex items-end pb-0.5">
-                <button onClick={() => { setProfitFilter(''); setSalesFilter(''); setDateFrom(''); setDateTo(''); setCurrentPage(1) }}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium">Clear all</button>
+                    <option value="">All</option>
+                    <option value="not_started">Not started</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date from</label>
+                  <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setCurrentPage(1) }}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Trip date to</label>
+                  <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setCurrentPage(1) }}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                </div>
+                {activeFilters > 0 && (
+                  <div className="flex items-end pb-0.5">
+                    <button onClick={() => { setProfitFilter(''); setSalesFilter(''); setDateFrom(''); setDateTo(''); setCurrentPage(1) }}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium">Clear all</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Profit analysis cards — one per container */}
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 animate-pulse">
-              <div className="h-4 bg-gray-100 rounded w-1/2" />
-              <div className="h-3 bg-gray-100 rounded w-3/4" />
-              <div className="h-8 bg-gray-100 rounded" />
+          {/* Profit analysis cards — one per container */}
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 animate-pulse">
+                  <div className="h-4 bg-gray-100 rounded w-1/2" />
+                  <div className="h-3 bg-gray-100 rounded w-3/4" />
+                  <div className="h-8 bg-gray-100 rounded" />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-16 text-center">
-          <BarChart2 size={32} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">No containers with profit data found.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {paginatedFiltered.map(row => {
-            const profitCfg = PROFIT_STATUS_CONFIG[row.profit_status]
-            const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
-            const isCompleted = row.sales_status === 'completed'
-            const displayProfit = isCompleted ? row.actual_profit : row.expected_profit
-            const displayMargin = isCompleted ? row.actual_profit_margin : row.expected_profit_margin
-            const isPositive = displayProfit >= 0
-            const landingPct = row.expected_sale_revenue > 0
-              ? Math.min((row.estimated_landing_cost / row.expected_sale_revenue) * 100, 100)
-              : 0
-            const salesPct = row.expected_sale_revenue > 0
-              ? Math.min((row.total_sales_to_date / row.expected_sale_revenue) * 100, 100)
-              : 0
+          ) : filtered.length === 0 ? (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-16 text-center">
+              <BarChart2 size={32} className="text-gray-200 mx-auto mb-3" />
+              <p className="text-sm text-gray-400">No containers with profit data found.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {paginatedFiltered.map(row => {
+                const profitCfg = PROFIT_STATUS_CONFIG[row.profit_status]
+                const salesCfg = SALES_STATUS_CONFIG[row.sales_status]
+                const isCompleted = row.sales_status === 'completed'
+                const displayProfit = isCompleted ? row.actual_profit : row.expected_profit
+                const displayMargin = isCompleted ? row.actual_profit_margin : row.expected_profit_margin
+                const isPositive = displayProfit >= 0
+                const landingPct = row.expected_sale_revenue > 0
+                  ? Math.min((row.estimated_landing_cost / row.expected_sale_revenue) * 100, 100)
+                  : 0
+                const salesPct = row.expected_sale_revenue > 0
+                  ? Math.min((row.total_sales_to_date / row.expected_sale_revenue) * 100, 100)
+                  : 0
 
-            return (
-              <div key={row.container_db_id}
-                onClick={() => router.push(`/portal/reports/container-profit/${row.container_db_id}`)}
-                className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group overflow-hidden">
-
-                {/* Card header */}
-                <div className={`px-5 pt-5 pb-4 ${isPositive ? 'bg-gradient-to-br from-green-50/50 to-white' : 'bg-gradient-to-br from-red-50/30 to-white'}`}>
-                  <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>{salesCfg.label}</span>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1 font-mono truncate">{row.tracking_number ?? '—'} · {row.trip_id}</p>
-                      {row.trip_created_at && (
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          Trip started: {new Date(row.trip_created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </p>
-                      )}
-                    </div>
-                    <div className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full border shrink-0 ${profitCfg.color}`}>
-                      {profitCfg.icon}
-                      {profitCfg.label}
-                    </div>
-                  </div>
-
-                  {/* Big profit number */}
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-0.5">{isCompleted ? 'Actual profit' : 'Expected profit'}</p>
-                      <p className={`text-lg font-bold ${isPositive ? 'text-green-700' : 'text-red-600'}`}>
-                        {isPositive ? '+' : ''}{fmt(displayProfit)}
-                      </p>
-                    </div>
-                    <div className={`text-right`}>
-                      <p className="text-xs text-gray-400 mb-0.5">Margin</p>
-                      <p className={`text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
-                        {fmtPct(displayMargin)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Progress bars */}
-                <div className="px-5 py-3 border-t border-gray-50 space-y-2.5">
-                  {/* Landing cost vs expected revenue */}
-                  <div>
-                    <div className="flex justify-between text-xs text-gray-400 mb-1">
-                      <span>Landing cost</span>
-                      <span className="font-medium text-gray-700">{fmt(row.estimated_landing_cost)}</span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gray-400 rounded-full" style={{ width: `${landingPct}%` }} />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-xs text-gray-400 mb-1">
-                      <span>{isCompleted ? 'Sales achieved' : 'Sales to date'}</span>
-                      <span className="font-medium text-gray-700">{row.total_sales_to_date > 0 ? fmt(row.total_sales_to_date) : fmt(row.expected_sale_revenue)}</span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${isCompleted ? (isPositive ? 'bg-green-500' : 'bg-red-400') : 'bg-brand-400'}`}
-                        style={{ width: `${isCompleted ? Math.min(salesPct, 100) : 100}%` }} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer metrics */}
-                <div className="px-5 pb-4 pt-1 grid grid-cols-3 gap-2 border-t border-gray-50">
-                  <div>
-                    <p className="text-xs text-gray-400 text-[10px]">Exp. revenue</p>
-                    <p className="text-xs font-semibold text-gray-700 truncate text-[11px]">{fmt(row.expected_sale_revenue)}</p>
-                  </div>
-                  {!isCompleted && row.unearned_profit > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400 text-[10px]">Unearned</p>
-                      <p className="text-xs font-semibold text-amber-600 truncate text-[11px]">{fmt(row.unearned_profit)}</p>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-[10px] text-gray-400">
-                      {row.sale_type === 'split_sale' ? 'Pallets left' : 'Type'}
-                    </p>
-                    <p className="text-[11px] font-semibold text-gray-700">
-                      {row.sale_type === 'split_sale'
-                        ? `${row.pallets_remaining} / ${row.pallets_total}`
-                        : 'Box sale'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Sale type</p>
-                    <span className={`text-xs font-medium ${row.sale_type === 'box_sale' ? 'text-blue-600' : 'text-purple-600'}`}>
-                      {row.sale_type === 'box_sale' ? 'Box' : 'Split'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3">
-          <p className="text-sm text-gray-500">
-            Showing <span className="font-semibold text-gray-700">{((currentPage - 1) * PAGE_SIZE) + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)}</span> of <span className="font-semibold text-gray-700">{filtered.length}</span> containers
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
-              Previous
-            </button>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                let pageNum = i + 1
-                if (totalPages > 7) {
-                  if (currentPage <= 4) pageNum = i + 1
-                  else if (currentPage >= totalPages - 3) pageNum = totalPages - 6 + i
-                  else pageNum = currentPage - 3 + i
-                }
                 return (
-                  <button key={pageNum}
-                    onClick={() => setCurrentPage(pageNum)}
-                    className={`w-7 h-7 text-xs font-medium rounded-lg transition-colors
-                      ${currentPage === pageNum ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                    {pageNum}
-                  </button>
+                  <div key={row.container_db_id}
+                    onClick={() => router.push(`/portal/reports/container-profit/${row.container_db_id}`)}
+                    className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group overflow-hidden">
+
+                    {/* Card header */}
+                    <div className={`px-5 pt-5 pb-4 ${isPositive ? 'bg-gradient-to-br from-green-50/50 to-white' : 'bg-gradient-to-br from-red-50/30 to-white'}`}>
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{row.container_id}</span>
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${salesCfg.color}`}>{salesCfg.label}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1 font-mono truncate">{row.tracking_number ?? '—'} · {row.trip_id}</p>
+                          {row.trip_created_at && (
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Trip started: {new Date(row.trip_created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </p>
+                          )}
+                        </div>
+                        <div className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full border shrink-0 ${profitCfg.color}`}>
+                          {profitCfg.icon}
+                          {profitCfg.label}
+                        </div>
+                      </div>
+
+                      {/* Big profit number */}
+                      <div className="flex items-end justify-between">
+                        <div>
+                          <p className="text-xs text-gray-400 mb-0.5">{isCompleted ? 'Actual profit' : 'Expected profit'}</p>
+                          <p className={`text-lg font-bold ${isPositive ? 'text-green-700' : 'text-red-600'}`}>
+                            {isPositive ? '+' : ''}{fmt(displayProfit)}
+                          </p>
+                        </div>
+                        <div className={`text-right`}>
+                          <p className="text-xs text-gray-400 mb-0.5">Margin</p>
+                          <p className={`text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+                            {fmtPct(displayMargin)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress bars */}
+                    <div className="px-5 py-3 border-t border-gray-50 space-y-2.5">
+                      {/* Landing cost vs expected revenue */}
+                      <div>
+                        <div className="flex justify-between text-xs text-gray-400 mb-1">
+                          <span>Landing cost</span>
+                          <span className="font-medium text-gray-700">{fmt(row.estimated_landing_cost)}</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-gray-400 rounded-full" style={{ width: `${landingPct}%` }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs text-gray-400 mb-1">
+                          <span>{isCompleted ? 'Sales achieved' : 'Sales to date'}</span>
+                          <span className="font-medium text-gray-700">{row.total_sales_to_date > 0 ? fmt(row.total_sales_to_date) : fmt(row.expected_sale_revenue)}</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${isCompleted ? (isPositive ? 'bg-green-500' : 'bg-red-400') : 'bg-brand-400'}`}
+                            style={{ width: `${isCompleted ? Math.min(salesPct, 100) : 100}%` }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer metrics */}
+                    <div className="px-5 pb-4 pt-1 grid grid-cols-3 gap-2 border-t border-gray-50">
+                      <div>
+                        <p className="text-xs text-gray-400 text-[10px]">Exp. revenue</p>
+                        <p className="text-xs font-semibold text-gray-700 truncate text-[11px]">{fmt(row.expected_sale_revenue)}</p>
+                      </div>
+                      {!isCompleted && row.unearned_profit > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-400 text-[10px]">Unearned</p>
+                          <p className="text-xs font-semibold text-amber-600 truncate text-[11px]">{fmt(row.unearned_profit)}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-[10px] text-gray-400">
+                          {row.sale_type === 'split_sale' ? 'Pallets left' : 'Type'}
+                        </p>
+                        <p className="text-[11px] font-semibold text-gray-700">
+                          {row.sale_type === 'split_sale'
+                            ? `${row.pallets_remaining} / ${row.pallets_total}`
+                            : 'Box sale'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Sale type</p>
+                        <span className={`text-xs font-medium ${row.sale_type === 'box_sale' ? 'text-blue-600' : 'text-purple-600'}`}>
+                          {row.sale_type === 'box_sale' ? 'Box' : 'Split'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 )
               })}
             </div>
-            <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Report modal */}
-      {reportOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
-            <div className="space-y-2">
-              {(['filtered', 'full'] as const).map(t => (
-                <button key={t} onClick={() => setReportType(t)}
-                  className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType===t?'border-brand-400 bg-brand-50':'border-gray-100 hover:border-gray-200'}`}>
-                  <p className={`text-sm font-semibold ${reportType===t?'text-brand-700':'text-gray-700'}`}>{t==='filtered'?'Filtered view':'Full report'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{t==='filtered'?`${filtered.length} containers`:`${rows.length} total`}</p>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3">
+              <p className="text-sm text-gray-500">
+                Showing <span className="font-semibold text-gray-700">{((currentPage - 1) * PAGE_SIZE) + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)}</span> of <span className="font-semibold text-gray-700">{filtered.length}</span> containers
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
+                  Previous
                 </button>
-              ))}
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                    let pageNum = i + 1
+                    if (totalPages > 7) {
+                      if (currentPage <= 4) pageNum = i + 1
+                      else if (currentPage >= totalPages - 3) pageNum = totalPages - 6 + i
+                      else pageNum = currentPage - 3 + i
+                    }
+                    return (
+                      <button key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`w-7 h-7 text-xs font-medium rounded-lg transition-colors
+                          ${currentPage === pageNum ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                        {pageNum}
+                      </button>
+                    )
+                  })}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors">
+                  Next
+                </button>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <button onClick={() => setReportOpen(false)}
-                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button onClick={() => generateReport(reportType)}
-                className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">Generate</button>
+          )}
+
+          {/* Report modal */}
+          {reportOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+                <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
+                <div className="space-y-2">
+                  {(['filtered', 'full'] as const).map(t => (
+                    <button key={t} onClick={() => setReportType(t)}
+                      className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType===t?'border-brand-400 bg-brand-50':'border-gray-100 hover:border-gray-200'}`}>
+                      <p className={`text-sm font-semibold ${reportType===t?'text-brand-700':'text-gray-700'}`}>{t==='filtered'?'Filtered view':'Full report'}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{t==='filtered'?`${filtered.length} containers`:`${rows.length} total`}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setReportOpen(false)}
+                    className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                  <button onClick={() => generateReport(reportType)}
+                    className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">Generate</button>
+                </div>
+              </div>
             </div>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
           </div>
+          <p className="text-sm font-medium text-gray-600">Access restricted</p>
+          <p className="text-xs text-gray-400 text-center max-w-xs">You do not have permission to view cost and profit data. Contact your administrator.</p>
         </div>
       )}
     </div>

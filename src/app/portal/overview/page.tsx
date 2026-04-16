@@ -179,8 +179,6 @@ export default function OverviewPage() {
         .order('created_at', { ascending: true }),
     ])
 
-    if (!isMountedRef.current) return
-
     // KPI calculations
     const active    = (containers ?? []).filter(c => c.status !== 'completed').length
     const completed = (containers ?? []).filter(c => c.status === 'completed').length
@@ -219,24 +217,6 @@ export default function OverviewPage() {
         status:   c.status,
       }
     })
-
-    setActiveContainers(active)
-    setCompletedContainers(completed)
-    setInventoryValue(invVal)
-    setTotalRevenue(revenue)
-    setTotalOutstanding(outstanding)
-    setTotalRecovered(recovered)
-    setPendingTasks((tasks ?? []).length)
-    setGrossMargin(margin)
-    setTotalCost(cost)
-    setTripsCount((trips ?? []).length)
-    setApprovalQueue((pendingTaskData ?? []).filter(t => ['urgent','high'].includes(t.priority)).length)
-    setTotalSalesOrders((allSalesOrders ?? []).length)
-    setRecentSales(recentSalesData ?? [])
-    setRecentRecoveries(recentRecovData ?? [])
-    setPendingTaskList(pendingTaskData ?? [])
-    setTopDebtors(debtors)
-    setContainerData(contData)
 
     // Build monthly chart data
     const monthMap: Record<string, { revenue: number; collected: number; expenses: number; orderCount: number }> = {}
@@ -296,6 +276,24 @@ export default function OverviewPage() {
       }
     }
 
+    if (!isMountedRef.current) return
+    setActiveContainers(active)
+    setCompletedContainers(completed)
+    setInventoryValue(invVal)
+    setTotalRevenue(revenue)
+    setTotalOutstanding(outstanding)
+    setTotalRecovered(recovered)
+    setPendingTasks((tasks ?? []).length)
+    setGrossMargin(margin)
+    setTotalCost(cost)
+    setTripsCount((trips ?? []).length)
+    setApprovalQueue((pendingTaskData ?? []).filter((t: any) => ['urgent','high'].includes(t.priority)).length)
+    setTotalSalesOrders((allSalesOrders ?? []).length)
+    setRecentSales(recentSalesData ?? [])
+    setRecentRecoveries(recentRecovData ?? [])
+    setPendingTaskList(pendingTaskData ?? [])
+    setTopDebtors(debtors)
+    setContainerData(contData)
     setMonthlyChartData({
       labels:     sortedKeys.map(getMonthLabel),
       revenue:    sortedKeys.map(k => Math.round(monthMap[k].revenue)),
@@ -303,7 +301,6 @@ export default function OverviewPage() {
       expenses:   sortedKeys.map(k => Math.round(monthMap[k].expenses)),
       orderCount: sortedKeys.map(k => monthMap[k].orderCount),
     })
-
     setLoading(false)
   }, [range])
 

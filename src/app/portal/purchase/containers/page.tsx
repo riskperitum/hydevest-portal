@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Search, Download, Filter, Eye, FileText, Loader2, Package, TrendingUp, Layers, Tag, DollarSign } from 'lucide-react'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import { computeContainerStatus, getContainerStatusBadge, type ContainerStatusInput } from '@/lib/utils/containerStatus'
 
 interface Container {
   id: string
@@ -12,11 +13,9 @@ interface Container {
   trip_id: string
   container_number: string | null
   tracking_number: string | null
-  status: string
-  approval_status: string
+  title: string | null
   pieces_purchased: number | null
   average_weight: number | null
-  max_weight: number | null
   unit_price_usd: number | null
   shipping_amount_usd: number | null
   quoted_price_usd: number | null
@@ -24,8 +23,9 @@ interface Container {
   estimated_landing_cost: number | null
   hide_type: string | null
   funding_type: string
+  is_modified: boolean | null
   created_at: string
-  trip: { trip_id: string; title: string; status: string } | null
+  trip: { id: string; trip_id: string; title: string; status: string; approval_status: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
 }
 
@@ -57,21 +57,70 @@ export default function ContainersPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [generatingReport, setGeneratingReport] = useState(false)
+  const [presaleMap, setPresaleMap] = useState<Record<string, number>>({})
+  const [salesMap, setSalesMap] = useState<Record<string, number>>({})
+  const [paidMap, setPaidMap] = useState<Record<string, number>>({})
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const { data } = await supabase
+    const { data: containerData } = await supabase
       .from('containers')
       .select(`
-        *,
-        trip:trips(trip_id, title, status),
-        created_by_profile:profiles!containers_created_by_fkey(full_name, email)
+        id, container_id, trip_id, container_number, tracking_number,
+        title, hide_type, pieces_purchased, unit_price_usd, quoted_price_usd,
+        shipping_amount_usd, surcharge_ngn, estimated_landing_cost,
+        funding_type, is_modified,
+        created_at,
+        average_weight,
+        created_by_profile:profiles!containers_created_by_fkey(full_name, email),
+        trip:trips!containers_trip_id_fkey(
+          id, trip_id, title, status, approval_status
+        )
       `)
       .order('created_at', { ascending: false })
-    setContainers(data ?? [])
+
+    const containerIds = (containerData ?? []).map(c => c.id)
+
+    const [{ data: presaleCounts }, { data: salesCounts }, { data: paidCounts }] = await Promise.all([
+      containerIds.length > 0
+        ? supabase.from('presales').select('container_id').in('container_id', containerIds)
+        : Promise.resolve({ data: [] as { container_id: string }[] }),
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id, payment_status').in('container_id', containerIds)
+        : Promise.resolve({ data: [] as { container_id: string; payment_status: string }[] }),
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id').in('container_id', containerIds).eq('payment_status', 'paid')
+        : Promise.resolve({ data: [] as { container_id: string }[] }),
+    ])
+
+    const presaleMap: Record<string, number> = {}
+    for (const p of (presaleCounts ?? [])) {
+      presaleMap[p.container_id] = (presaleMap[p.container_id] ?? 0) + 1
+    }
+    const salesMap: Record<string, number> = {}
+    for (const s of (salesCounts ?? [])) {
+      salesMap[s.container_id] = (salesMap[s.container_id] ?? 0) + 1
+    }
+    const paidMap: Record<string, number> = {}
+    for (const p of (paidCounts ?? [])) {
+      paidMap[p.container_id] = (paidMap[p.container_id] ?? 0) + 1
+    }
+
+    setPresaleMap(presaleMap)
+    setSalesMap(salesMap)
+    setPaidMap(paidMap)
+    setContainers(
+      (containerData ?? []).map(row => {
+        const t = row.trip as Container['trip'] | Container['trip'][] | null | undefined
+        const trip = Array.isArray(t) ? (t[0] ?? null) : (t ?? null)
+        const p = row.created_by_profile as Container['created_by_profile'] | Container['created_by_profile'][] | null | undefined
+        const created_by_profile = Array.isArray(p) ? (p[0] ?? null) : (p ?? null)
+        return { ...row, trip, created_by_profile } as unknown as Container
+      })
+    )
     setLoading(false)
   }, [])
 
@@ -79,10 +128,17 @@ export default function ContainersPage() {
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const statusInfo = (s: string) =>
-    CONTAINER_STATUS.find(o => o.value === s)
-    ?? CONTAINER_STATUS.find(o => o.value === 'not_started')
-    ?? CONTAINER_STATUS[0]
+
+  const computedStatusLabel = useCallback((c: Container) => {
+    const statusInput: ContainerStatusInput = {
+      trip_status: (c.trip as { status?: string } | null)?.status ?? 'not_started',
+      presale_count: presaleMap[c.id] ?? 0,
+      sales_order_count: salesMap[c.id] ?? 0,
+      fully_paid_count: paidMap[c.id] ?? 0,
+      total_orders_count: salesMap[c.id] ?? 0,
+    }
+    return getContainerStatusBadge(computeContainerStatus(statusInput)).label
+  }, [presaleMap, salesMap, paidMap])
 
   const filtered = containers.filter(c => {
     const matchSearch = search === '' ||
@@ -107,7 +163,7 @@ export default function ContainersPage() {
     const rows = filtered.map(c => [
       c.container_id, c.container_number ?? '', c.tracking_number ?? '',
       c.trip?.trip_id ?? '', c.trip?.title ?? '',
-      c.status, c.hide_type ?? '', c.funding_type,
+      computedStatusLabel(c), c.hide_type ?? '', c.funding_type,
       c.pieces_purchased ?? '', c.average_weight ?? '',
       c.unit_price_usd ?? '', c.shipping_amount_usd ?? '',
       c.estimated_landing_cost ?? '',
@@ -133,7 +189,7 @@ export default function ContainersPage() {
         title: c.container_number ?? '—',
         tracking: c.tracking_number ?? '—',
         trip: `${c.trip?.trip_id ?? ''} — ${c.trip?.title ?? ''}`,
-        status: c.status,
+        status: computedStatusLabel(c),
         hideType: c.hide_type ? HIDE_TYPE_LABELS[c.hide_type] : '—',
         funding: c.funding_type,
         pieces: c.pieces_purchased?.toLocaleString() ?? '—',
@@ -539,9 +595,32 @@ export default function ContainersPage() {
                     </td>
                     <td className="px-3 py-3.5 text-gray-500 whitespace-nowrap font-mono text-xs">{con.tracking_number ?? '—'}</td>
                     <td className="px-3 py-3.5 whitespace-nowrap">
-                      <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusInfo(con.trip?.status ?? 'not_started').color}`}>
-                        {statusInfo(con.trip?.status ?? 'not_started').label}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(() => {
+                          const statusInput: ContainerStatusInput = {
+                            trip_status: (con.trip as { status?: string } | null)?.status ?? 'not_started',
+                            presale_count: presaleMap[con.id] ?? 0,
+                            sales_order_count: salesMap[con.id] ?? 0,
+                            fully_paid_count: paidMap[con.id] ?? 0,
+                            total_orders_count: salesMap[con.id] ?? 0,
+                          }
+                          const computedStatus = computeContainerStatus(statusInput)
+                          const badge = getContainerStatusBadge(computedStatus)
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                              {badge.label}
+                            </span>
+                          )
+                        })()}
+
+                        {con.is_modified && (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            Modified
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {canViewCosts && (
                       <td className="px-3 py-3.5 whitespace-nowrap">

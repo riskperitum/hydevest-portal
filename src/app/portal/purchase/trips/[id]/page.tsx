@@ -12,6 +12,7 @@ import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import { computeContainerStatus, getContainerStatusBadge, type ContainerStatusInput } from '@/lib/utils/containerStatus'
 
 interface Trip {
   id: string
@@ -67,6 +68,7 @@ interface Container {
   pieces_purchased: number | null
   approval_status: string
   status: string
+  is_modified: boolean | null
   created_at: string
   created_by_profile: { full_name: string | null; email: string } | null
 }
@@ -268,6 +270,9 @@ export default function TripDetailPage() {
   const [approvingTrip, setApprovingTrip] = useState(false)
   const [tripActionNote, setTripActionNote] = useState('')
   const [showTripApproval, setShowTripApproval] = useState(false)
+  const [presaleCountMap, setPresaleCountMap] = useState<Record<string, number>>({})
+  const [salesCountMap, setSalesCountMap] = useState<Record<string, number>>({})
+  const [paidCountMap, setPaidCountMap] = useState<Record<string, number>>({})
 
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
@@ -326,21 +331,49 @@ export default function TripDetailPage() {
     ])
     setTrip(t)
     setExpenses(exp ?? [])
-    setContainers(con ?? [])
-    setLoading(false)
+    let containersData = con ?? []
 
-    if ((con ?? []).length > 0 && (exp ?? []).length > 0) {
-      await recalculateLandingCosts(con ?? [], exp ?? [])
+    if (containersData.length > 0 && (exp ?? []).length > 0) {
+      await recalculateLandingCosts(containersData, exp ?? [])
       const { data: conFresh } = await supabase
         .from('containers')
         .select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)')
         .eq('trip_id', tripId)
         .order('created_at', { ascending: false })
-      setContainers(conFresh ?? [])
+      containersData = conFresh ?? []
     }
+
+    setContainers(containersData)
+
+    const containerIds = containersData.map((c) => c.id)
+    const [{ data: tripPresales }, { data: tripSales }, { data: tripPaid }] = await Promise.all([
+      containerIds.length > 0
+        ? supabase.from('presales').select('container_id').in('container_id', containerIds)
+        : Promise.resolve({ data: [] as { container_id: string }[] }),
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id, payment_status').in('container_id', containerIds)
+        : Promise.resolve({ data: [] as { container_id: string; payment_status: string }[] }),
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id').in('container_id', containerIds).eq('payment_status', 'paid')
+        : Promise.resolve({ data: [] as { container_id: string }[] }),
+    ])
+
+    const pcMap: Record<string, number> = {}
+    for (const p of (tripPresales ?? [])) pcMap[p.container_id] = (pcMap[p.container_id] ?? 0) + 1
+
+    const scMap: Record<string, number> = {}
+    for (const s of (tripSales ?? [])) scMap[s.container_id] = (scMap[s.container_id] ?? 0) + 1
+
+    const pdMap: Record<string, number> = {}
+    for (const p of (tripPaid ?? [])) pdMap[p.container_id] = (pdMap[p.container_id] ?? 0) + 1
+
+    setPresaleCountMap(pcMap)
+    setSalesCountMap(scMap)
+    setPaidCountMap(pdMap)
+    setLoading(false)
   }, [tripId, recalculateLandingCosts])
 
-  async function handleTripApprovalAction(action: 'submit' | 'review' | 'approve' | 'reject') {
+  async function handleTripApprovalAction(action: 'submit' | 'submit_approve' | 'review' | 'approve' | 'reject') {
     if (!trip || !currentUser) return
     setApprovingTrip(true)
     const supabase = createClient()
@@ -391,6 +424,30 @@ export default function TripDetailPage() {
           .eq('record_id', trip.id)
           .eq('type', 'review')
           .eq('status', 'pending')
+      }
+
+      if (action === 'submit_approve') {
+        // Non-admin requesting approval after review
+        const seq = Date.now().toString().slice(-5)
+        await supabase.from('tasks').insert({
+          task_id:      `TASK-${seq}`,
+          title:        `Approve trip — ${trip.trip_id}: ${trip.title}`,
+          description:  tripActionNote || null,
+          module:       'trips',
+          record_id:    trip.id,
+          record_ref:   trip.trip_id,
+          status:       'pending',
+          priority:     'normal',
+          requested_by: currentUser.id,
+          type:         'approve',
+        })
+        await supabase.from('trips').update({ approval_status: 'pending_review' }).eq('id', trip.id)
+        await supabase.from('trip_activity_log').insert({
+          trip_id:      trip.id,
+          action:       'Submitted for approval',
+          new_value:    tripActionNote || null,
+          performed_by: currentUser.id,
+        })
       }
 
       if (action === 'approve') {
@@ -974,51 +1031,68 @@ export default function TripDetailPage() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Submit for review — shown when pending */}
-              {trip.approval_status === 'pending' && !canSelfApprove && (
+
+              {/* ── NON-ADMIN BUTTONS ── */}
+              {!canSelfApprove && trip.approval_status === 'pending' && (
                 <button type="button" onClick={() => setShowTripApproval(v => !v)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
-                  Submit for review
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
+                  Request review
                 </button>
               )}
-
-              {/* Admin/super admin — can self review and approve directly */}
-              {canSelfApprove && (trip.approval_status === 'pending' || trip.approval_status === 'pending_review') && (
-                <button type="button" onClick={() => void handleTripApprovalAction('review')} disabled={approvingTrip}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
+              {!canSelfApprove && trip.approval_status === 'reviewed' && (
+                <button type="button" onClick={() => void handleTripApprovalAction('submit_approve')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100 disabled:opacity-50">
+                  {approvingTrip ? 'Submitting…' : 'Request approval'}
+                </button>
+              )}
+              {!canSelfApprove && trip.approval_status === 'pending_review' && (
+                <button type="button" onClick={() => void handleTripApprovalAction('review')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
                   {approvingTrip ? 'Processing…' : 'Mark reviewed'}
                 </button>
               )}
+
+              {/* ── ADMIN / SUPER ADMIN BYPASS BUTTONS ── */}
+              {canSelfApprove && (
+                trip.approval_status === 'pending' ||
+                trip.approval_status === 'pending_review' ||
+                trip.approval_status === 'rejected'
+              ) && (
+                <button type="button" onClick={() => void handleTripApprovalAction('review')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
+                  {approvingTrip ? 'Processing…' : 'Review'}
+                </button>
+              )}
               {canSelfApprove && trip.approval_status === 'reviewed' && (
-                <button type="button" onClick={() => void handleTripApprovalAction('approve')} disabled={approvingTrip}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                  {approvingTrip ? 'Processing…' : 'Approve trip'}
+                <button type="button" onClick={() => void handleTripApprovalAction('approve')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {approvingTrip ? 'Processing…' : 'Approve'}
                 </button>
               )}
 
-              {/* Non-admin review/approve — shown when pending_review for reviewers */}
-              {!canSelfApprove && trip.approval_status === 'pending_review' && (
-                <button type="button" onClick={() => void handleTripApprovalAction('review')} disabled={approvingTrip}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
-                  Mark reviewed
-                </button>
-              )}
-
-              {/* Reject button — shown when pending_review or reviewed */}
-              {(trip.approval_status === 'pending_review' || trip.approval_status === 'reviewed') && (
-                <button type="button" onClick={() => void handleTripApprovalAction('reject')} disabled={approvingTrip}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50">
+              {/* ── REJECT — shown to admins when pending_review or reviewed ── */}
+              {canSelfApprove && (
+                trip.approval_status === 'pending_review' ||
+                trip.approval_status === 'reviewed'
+              ) && (
+                <button type="button" onClick={() => void handleTripApprovalAction('reject')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50">
                   Reject
                 </button>
               )}
             </div>
           </div>
 
-          {/* Submit for review expandable panel */}
-          {showTripApproval && trip.approval_status === 'pending' && (
+          {/* Request review expandable form — for non-admins */}
+          {showTripApproval && trip.approval_status === 'pending' && !canSelfApprove && (
             <div className="pt-3 border-t border-gray-100 space-y-3">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Note (optional)</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Note for reviewer (optional)</label>
                 <textarea rows={2} value={tripActionNote}
                   onChange={e => setTripActionNote(e.target.value)}
                   placeholder="Add context for the reviewer..."
@@ -1041,7 +1115,9 @@ export default function TripDetailPage() {
           {(trip.approval_status === 'reviewed' || trip.approval_status === 'approved') && trip.last_reviewed_at && (
             <div className="pt-2 border-t border-gray-100">
               <p className="text-xs text-gray-400">
-                Reviewed by <span className="font-medium text-gray-600">{trip.last_reviewer?.full_name ?? trip.last_reviewer?.email ?? '—'}</span>
+                Reviewed by <span className="font-medium text-gray-600">
+                  {trip.last_reviewer?.full_name ?? trip.last_reviewer?.email ?? '—'}
+                </span>
                 {' · '}{new Date(trip.last_reviewed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
               </p>
             </div>
@@ -1373,7 +1449,7 @@ export default function TripDetailPage() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     {[
-                      'Container ID', 'Title', 'Tracking No.',
+                      'Container ID', 'Title', 'Tracking No.', 'Status',
                       'Pieces', 'Avg Weight', 'Unit Price ($)', 'Landing Cost (₦)',
                       'Max Weight', 'Shipping ($)',
                       'Purchase Amt ($)', 'Purchase Subtotal ($)',
@@ -1388,7 +1464,7 @@ export default function TripDetailPage() {
                 <tbody>
                   {containers.length === 0 ? (
                     <tr>
-                      <td colSpan={18} className="px-4 py-12 text-center text-sm text-gray-400">
+                      <td colSpan={19} className="px-4 py-12 text-center text-sm text-gray-400">
                         No containers added yet.
                       </td>
                     </tr>
@@ -1408,6 +1484,34 @@ export default function TripDetailPage() {
                         </td>
                         <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.container_number ?? '—'}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.tracking_number ?? '—'}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {(() => {
+                              const statusInput: ContainerStatusInput = {
+                                trip_status: trip?.status ?? 'not_started',
+                                presale_count: presaleCountMap[con.id] ?? 0,
+                                sales_order_count: salesCountMap[con.id] ?? 0,
+                                fully_paid_count: paidCountMap[con.id] ?? 0,
+                                total_orders_count: salesCountMap[con.id] ?? 0,
+                              }
+                              const computedStatus = computeContainerStatus(statusInput)
+                              const badge = getContainerStatusBadge(computedStatus)
+                              return (
+                                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                                  {badge.label}
+                                </span>
+                              )
+                            })()}
+
+                            {con.is_modified && (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                Modified
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-3 py-3 text-gray-600 text-center">{con.pieces_purchased ?? '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.unit_price_usd ? `$${Number(con.unit_price_usd).toLocaleString()}` : '—'}</td>
@@ -1437,27 +1541,17 @@ export default function TripDetailPage() {
                         <td className="px-3 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                             <button
-                              onClick={() => router.push(`/portal/purchase/trips/${tripId}/containers/${con.id}`)}
-                              title="View container"
-                              className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                              type="button"
+                              onClick={() => router.push(`/portal/purchase/trips/${trip?.id}/containers/${con.id}`)}
+                              className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors"
+                              title="View container">
                               <Eye size={14} />
                             </button>
                             <button
-                              onClick={async () => {
-                                const supabase = createClient()
-                                const newStatus = con.approval_status === 'approved' ? 'not_approved' : 'approved'
-                                await supabase.from('containers').update({ approval_status: newStatus }).eq('id', con.id)
-                                await logTripActivity('Container approval changed', 'containers', con.container_number ?? con.container_id, newStatus)
-                                load()
-                              }}
-                              title={con.approval_status === 'approved' ? 'Unapprove' : 'Approve'}
-                              className={`p-1.5 rounded-lg transition-colors ${con.approval_status === 'approved' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-amber-50 hover:text-amber-600'}`}>
-                              <CheckCircle2 size={14} />
-                            </button>
-                            <button
+                              type="button"
                               onClick={() => deleteContainer(con.id)}
-                              title="Delete container"
-                              className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                              className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                              title="Delete container">
                               <Trash2 size={14} />
                             </button>
                           </div>
@@ -1468,7 +1562,7 @@ export default function TripDetailPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Totals</td>
+                    <td colSpan={6} className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Totals</td>
                     <td className="px-3 py-3 text-xs text-gray-400">—</td>
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
                       {(() => {

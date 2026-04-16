@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
@@ -10,6 +10,8 @@ import {
   BarChart3, PlusCircle, Wallet
 } from 'lucide-react'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import MonthlyBarChart  from './MonthlyBarChart'
+import MonthlyLineChart from './MonthlyLineChart'
 
 const fmt     = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 const fmtPct  = (n: number) => `${Number(n).toFixed(1)}%`
@@ -65,6 +67,12 @@ export default function OverviewPage() {
   const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => { isMountedRef.current = false }
+  }, [])
+
   const [loading, setLoading]       = useState(true)
   const [userName, setUserName]     = useState('')
   const [range, setRange]           = useState('30d')
@@ -89,6 +97,13 @@ export default function OverviewPage() {
   const [pendingTaskList, setPendingTaskList]   = useState<any[]>([])
   const [topDebtors, setTopDebtors]             = useState<any[]>([])
   const [containerData, setContainerData]       = useState<any[]>([])
+  const [monthlyChartData, setMonthlyChartData] = useState<{
+    labels: string[]
+    revenue: number[]
+    collected: number[]
+    expenses: number[]
+    orderCount: number[]
+  }>({ labels: [], revenue: [], collected: [], expenses: [], orderCount: [] })
 
   function getRangeStart(r: string): string | null {
     const now = new Date()
@@ -124,6 +139,9 @@ export default function OverviewPage() {
       { data: recentSalesData },
       { data: recentRecovData },
       { data: pendingTaskData },
+      { data: monthlySales },
+      { data: monthlyRecoveries },
+      { data: monthlyExpenses },
     ] = await Promise.all([
       supabase.from('containers').select('id, status, estimated_landing_cost, container_id, unit_price_usd, quoted_price_usd'),
       dateFilter(supabase.from('sales_orders').select(`
@@ -150,7 +168,18 @@ export default function OverviewPage() {
         id, task_id, title, module, priority, created_at,
         requested_by_profile:profiles!tasks_requested_by_fkey(full_name)
       `).eq('status', 'pending').order('created_at', { ascending: false }).limit(5),
+      supabase.from('sales_orders')
+        .select('created_at, customer_payable')
+        .order('created_at', { ascending: true }),
+      supabase.from('recoveries')
+        .select('created_at, amount_paid')
+        .order('created_at', { ascending: true }),
+      supabase.from('trip_expenses')
+        .select('created_at, amount_ngn')
+        .order('created_at', { ascending: true }),
     ])
+
+    if (!isMountedRef.current) return
 
     // KPI calculations
     const active    = (containers ?? []).filter(c => c.status !== 'completed').length
@@ -208,6 +237,73 @@ export default function OverviewPage() {
     setPendingTaskList(pendingTaskData ?? [])
     setTopDebtors(debtors)
     setContainerData(contData)
+
+    // Build monthly chart data
+    const monthMap: Record<string, { revenue: number; collected: number; expenses: number; orderCount: number }> = {}
+
+    const getMonthKey = (dateStr: string) => {
+      const d = new Date(dateStr)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+    const getMonthLabel = (key: string) => {
+      const [y, m] = key.split('-')
+      return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' })
+    }
+
+    for (const so of (monthlySales ?? [])) {
+      const k = getMonthKey(so.created_at)
+      if (!monthMap[k]) monthMap[k] = { revenue: 0, collected: 0, expenses: 0, orderCount: 0 }
+      monthMap[k].revenue += Number(so.customer_payable)
+      monthMap[k].orderCount += 1
+    }
+    for (const r of (monthlyRecoveries ?? [])) {
+      const k = getMonthKey(r.created_at)
+      if (!monthMap[k]) monthMap[k] = { revenue: 0, collected: 0, expenses: 0, orderCount: 0 }
+      monthMap[k].collected += Number(r.amount_paid)
+    }
+    for (const e of (monthlyExpenses ?? [])) {
+      const k = getMonthKey(e.created_at)
+      if (!monthMap[k]) monthMap[k] = { revenue: 0, collected: 0, expenses: 0, orderCount: 0 }
+      monthMap[k].expenses += Number(e.amount_ngn)
+    }
+
+    // Fill in missing months between first and last
+    const keys = Object.keys(monthMap).sort()
+    if (keys.length > 0) {
+      const first = new Date(keys[0] + '-01')
+      const last  = new Date(keys[keys.length - 1] + '-01')
+      const cursor = new Date(first)
+      while (cursor <= last) {
+        const k = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+        if (!monthMap[k]) monthMap[k] = { revenue: 0, collected: 0, expenses: 0, orderCount: 0 }
+        cursor.setMonth(cursor.getMonth() + 1)
+      }
+    }
+
+    const sortedKeys = Object.keys(monthMap).sort()
+
+    // Pad to at least 6 months for better chart appearance
+    while (sortedKeys.length < 6) {
+      const first = sortedKeys[0]
+      if (first) {
+        const [y, m] = first.split('-').map(Number)
+        const prev = new Date(y, m - 2, 1)
+        const k = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
+        sortedKeys.unshift(k)
+        monthMap[k] = { revenue: 0, collected: 0, expenses: 0, orderCount: 0 }
+      } else {
+        break
+      }
+    }
+
+    setMonthlyChartData({
+      labels:     sortedKeys.map(getMonthLabel),
+      revenue:    sortedKeys.map(k => Math.round(monthMap[k].revenue)),
+      collected:  sortedKeys.map(k => Math.round(monthMap[k].collected)),
+      expenses:   sortedKeys.map(k => Math.round(monthMap[k].expenses)),
+      orderCount: sortedKeys.map(k => monthMap[k].orderCount),
+    })
+
     setLoading(false)
   }, [range])
 

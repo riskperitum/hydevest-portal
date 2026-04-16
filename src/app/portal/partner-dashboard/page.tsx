@@ -267,9 +267,9 @@ export default function PartnerDashboardPage() {
 
     setContainers(mappedContainers)
 
-    // Override profit based on container performance (completed sales only)
+    // Include any container that has actual revenue regardless of sales_status
     const overriddenProfit = mappedContainers
-      .filter(c => c.sales_status === 'completed')
+      .filter(c => c.partner_revenue_share > 0)
       .reduce((sum, c) => sum + Number(c.partner_profit ?? 0), 0)
     setPartner(prev => prev ? { ...prev, total_profit: overriddenProfit } : prev)
 

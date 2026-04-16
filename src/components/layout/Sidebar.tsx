@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
-  Package, Receipt, Wallet, BarChart2, Inbox, Users,
+  Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
   Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw
 } from 'lucide-react'
 import Image from 'next/image'
@@ -57,7 +57,7 @@ const NAV: NavItem[] = [
     icon: LayoutDashboard,
     partnerOnly: true,
   },
-  { label: 'Finance',     href: '/portal/finance',    icon: Wallet },
+  { label: 'Finance',     href: '/portal/finance',    icon: BarChart3 },
   { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },

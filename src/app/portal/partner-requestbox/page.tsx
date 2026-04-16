@@ -98,7 +98,7 @@ export default function PartnerRequestBoxPage() {
     if (!partnerData) { setLoading(false); return }
     setPartner({ ...partnerData, wallet_balance: Number(partnerData.wallet_balance ?? 0) })
 
-    // Load only non-partner profiles for tagging
+    // Get all partner user IDs to exclude from staff list
     const { data: partnerRoleData } = await supabase
       .from('user_roles')
       .select('user_id, roles(name)')
@@ -110,14 +110,19 @@ export default function PartnerRequestBoxPage() {
         const role = Array.isArray(roles) ? roles[0] : roles
         return role?.name === 'partner'
       })
-      .map((r: any) => r.user_id)
+      .map((r: any) => r.user_id as string)
 
-    const { data: staffData } = await supabase
+    // Load only non-partner profiles for tagging
+    let staffQuery = supabase
       .from('profiles')
       .select('id, full_name, email')
       .eq('is_active', true)
-      .not('id', 'in', `(${partnerUserIds.length > 0 ? partnerUserIds.join(',') : '00000000-0000-0000-0000-000000000000'})`)
 
+    if (partnerUserIds.length > 0) {
+      staffQuery = staffQuery.not('id', 'in', `(${partnerUserIds.join(',')})`)
+    }
+
+    const { data: staffData } = await staffQuery
     setStaffProfiles(staffData ?? [])
 
     const { data: msgData } = await supabase

@@ -690,6 +690,11 @@ export default function SalesOrderDetailPage() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors">
             <FileText size={13} /> Invoice
           </button>
+          <button
+            onClick={() => router.push(`/portal/sales/orders/${params.id}/invoice`)}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100">
+            <FileText size={14} /> View invoice
+          </button>
           <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
             <CheckCircle2 size={13} /> Request approval

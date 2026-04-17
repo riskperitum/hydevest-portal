@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Save, Loader2, Settings, Plus, Check } from 'lucide-react'
 
@@ -53,6 +53,13 @@ export default function SettingsTab() {
   const [saved, setSaved] = useState(false)
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
 
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const isDrawing = useRef(false)
+  const [sigSaved, setSigSaved] = useState(false)
+  const [sigCleared, setSigCleared] = useState(false)
+  const [existingSig, setExistingSig] = useState('')
+  const [signatoryName, setSignatoryName] = useState('')
+
   // New period form
   const [periodOpen, setPeriodOpen] = useState(false)
   const [periodForm, setPeriodForm] = useState({ name: '', period_start: '', period_end: '' })
@@ -75,6 +82,99 @@ export default function SettingsTab() {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user ? { id: user.id } : null))
   }, [load])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.strokeStyle = '#1a1a1a'
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    const getPos = (e: MouseEvent | TouchEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      const scaleX = canvas.width / rect.width
+      const scaleY = canvas.height / rect.height
+      if (e instanceof TouchEvent) {
+        return {
+          x: (e.touches[0].clientX - rect.left) * scaleX,
+          y: (e.touches[0].clientY - rect.top) * scaleY,
+        }
+      }
+      return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      }
+    }
+
+    const startDraw = (e: MouseEvent | TouchEvent) => {
+      e.preventDefault()
+      isDrawing.current = true
+      const pos = getPos(e)
+      ctx.beginPath()
+      ctx.moveTo(pos.x, pos.y)
+    }
+
+    const draw = (e: MouseEvent | TouchEvent) => {
+      e.preventDefault()
+      if (!isDrawing.current) return
+      const pos = getPos(e)
+      ctx.lineTo(pos.x, pos.y)
+      ctx.stroke()
+    }
+
+    const stopDraw = () => { isDrawing.current = false }
+
+    canvas.addEventListener('mousedown', startDraw)
+    canvas.addEventListener('mousemove', draw)
+    canvas.addEventListener('mouseup', stopDraw)
+    canvas.addEventListener('mouseleave', stopDraw)
+    canvas.addEventListener('touchstart', startDraw, { passive: false })
+    canvas.addEventListener('touchmove', draw, { passive: false })
+    canvas.addEventListener('touchend', stopDraw)
+
+    return () => {
+      canvas.removeEventListener('mousedown', startDraw)
+      canvas.removeEventListener('mousemove', draw)
+      canvas.removeEventListener('mouseup', stopDraw)
+      canvas.removeEventListener('mouseleave', stopDraw)
+      canvas.removeEventListener('touchstart', startDraw)
+      canvas.removeEventListener('touchmove', draw)
+      canvas.removeEventListener('touchend', stopDraw)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (settings.authorized_signature) setExistingSig(settings.authorized_signature)
+    if (settings.authorized_signatory_name) setSignatoryName(settings.authorized_signatory_name)
+  }, [settings])
+
+  function clearSignature() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    setSigCleared(true)
+    setSigSaved(false)
+  }
+
+  async function saveSignature() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dataUrl = canvas.toDataURL('image/png')
+    const supabase = (await import('@/lib/supabase/client')).createClient()
+    await supabase.from('finance_settings')
+      .upsert({ key: 'authorized_signature', value: dataUrl, updated_by: currentUser?.id }, { onConflict: 'key' })
+    await supabase.from('finance_settings')
+      .upsert({ key: 'authorized_signatory_name', value: signatoryName, updated_by: currentUser?.id }, { onConflict: 'key' })
+    setExistingSig(dataUrl)
+    setSigSaved(true)
+    setTimeout(() => setSigSaved(false), 3000)
+  }
 
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault()
@@ -187,6 +287,52 @@ export default function SettingsTab() {
             </div>
           )
         })}
+
+        {/* Signature section */}
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Authorized signatory</h3>
+          </div>
+          <div className="p-5 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Signatory name</label>
+              <input value={signatoryName}
+                onChange={e => setSignatoryName(e.target.value)}
+                placeholder="e.g. Sak Adeleye"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-sm" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Draw signature</label>
+              <div className="border-2 border-dashed border-gray-200 rounded-xl overflow-hidden bg-white" style={{ maxWidth: 400 }}>
+                <canvas ref={canvasRef} width={400} height={150}
+                  className="w-full cursor-crosshair touch-none block"
+                  style={{ height: 150 }} />
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">Draw your signature above using mouse or finger</p>
+            </div>
+
+            {existingSig && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Current saved signature:</p>
+                <div className="border border-gray-100 rounded-xl p-3 bg-gray-50 inline-block">
+                  <img src={existingSig} alt="Saved signature" style={{ height: 60, maxWidth: 300 }} className="object-contain" />
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={saveSignature}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+                {sigSaved ? '✓ Signature saved' : 'Save signature'}
+              </button>
+              <button type="button" onClick={clearSignature}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50">
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div className="flex justify-end">
           <button type="submit" disabled={saving}

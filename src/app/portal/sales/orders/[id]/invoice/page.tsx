@@ -146,9 +146,11 @@ export default function InvoicePage() {
         <div style={{ background: '#55249E', padding: '16px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <img src="/logo.png" alt="Hydevest logo"
-                style={{ height: 48, width: 'auto', objectFit: 'contain' }}
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+              <div style={{ background: 'white', borderRadius: 8, padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <img src="/logo.png" alt="Hydevest logo"
+                  style={{ height: 40, width: 'auto', objectFit: 'contain' }}
+                  onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
+              </div>
               <div style={{ color: 'white' }}>
                 <div style={{ fontSize: 16, fontWeight: 700 }}>{companyName}</div>
                 <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>
@@ -295,13 +297,11 @@ export default function InvoicePage() {
           </div>
 
           {/* Legal statement */}
-          {Number(invoice.outstanding_balance) > 0 && (
-            <div style={{ borderLeft: '3px solid #55249E', background: '#f9f7fe', padding: '8px 12px', borderRadius: '0 6px 6px 0', fontSize: 9.5, color: '#444', lineHeight: 1.6 }}>
-              <strong>Note:</strong> The customer agrees to settle the outstanding balance of <strong>{fmt(invoice.outstanding_balance)}</strong> in full
-              by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
-              including but not limited to property seizure.
-            </div>
-          )}
+          <div style={{ borderLeft: '3px solid #55249E', background: '#f9f7fe', padding: '8px 12px', borderRadius: '0 6px 6px 0', fontSize: 9.5, color: '#444', lineHeight: 1.6 }}>
+            <strong>Note:</strong> The customer agrees to settle the outstanding balance in full
+            by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
+            including but not limited to property seizure.
+          </div>
 
           {/* Signatures */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 8 }}>
@@ -313,8 +313,9 @@ export default function InvoicePage() {
                   <span style={{ fontSize: 9, color: '#aaa', fontStyle: 'italic' }}>Signature</span>
                 )}
               </div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>{sigName}</div>
-              <div style={{ fontSize: 9, color: '#666' }}>Authorized Signatory, {companyName}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>Authorized Signatory</div>
+              <div style={{ fontSize: 9, color: '#666' }}>{companyName}</div>
+              <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>Date: {invoiceDate}</div>
             </div>
             <div>
               <div style={{ borderBottom: '1.5px solid #333', minHeight: 56, marginBottom: 6 }}></div>

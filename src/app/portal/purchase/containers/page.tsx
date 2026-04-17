@@ -5,7 +5,14 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Search, Download, Filter, Eye, FileText, Loader2, Package, TrendingUp, Layers, Tag, DollarSign } from 'lucide-react'
 import { usePermissions, can } from '@/lib/permissions/hooks'
-import { computeContainerStatus, getContainerStatusBadge, type ContainerStatusInput } from '@/lib/utils/containerStatus'
+import {
+  computeContainerStatus,
+  getContainerStatusBadge,
+  type ContainerStatusInput,
+  type ContainerStatusMetrics,
+  emptyContainerStatusMetrics,
+  normalizeSaleTypeForStatus,
+} from '@/lib/utils/containerStatus'
 
 interface Container {
   id: string
@@ -57,9 +64,7 @@ export default function ContainersPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [generatingReport, setGeneratingReport] = useState(false)
-  const [presaleMap, setPresaleMap] = useState<Record<string, number>>({})
-  const [salesMap, setSalesMap] = useState<Record<string, number>>({})
-  const [paidMap, setPaidMap] = useState<Record<string, number>>({})
+  const [statusMetricsByContainer, setStatusMetricsByContainer] = useState<Record<string, ContainerStatusMetrics>>({})
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
@@ -84,34 +89,72 @@ export default function ContainersPage() {
 
     const containerIds = (containerData ?? []).map(c => c.id)
 
-    const [{ data: presaleCounts }, { data: salesCounts }, { data: paidCounts }] = await Promise.all([
-      containerIds.length > 0
-        ? supabase.from('presales').select('container_id').in('container_id', containerIds)
-        : Promise.resolve({ data: [] as { container_id: string }[] }),
-      containerIds.length > 0
-        ? supabase.from('sales_orders').select('container_id, payment_status').in('container_id', containerIds)
-        : Promise.resolve({ data: [] as { container_id: string; payment_status: string }[] }),
-      containerIds.length > 0
-        ? supabase.from('sales_orders').select('container_id').in('container_id', containerIds).eq('payment_status', 'paid')
-        : Promise.resolve({ data: [] as { container_id: string }[] }),
-    ])
-
-    const presaleMap: Record<string, number> = {}
-    for (const p of (presaleCounts ?? [])) {
-      presaleMap[p.container_id] = (presaleMap[p.container_id] ?? 0) + 1
-    }
-    const salesMap: Record<string, number> = {}
-    for (const s of (salesCounts ?? [])) {
-      salesMap[s.container_id] = (salesMap[s.container_id] ?? 0) + 1
-    }
-    const paidMap: Record<string, number> = {}
-    for (const p of (paidCounts ?? [])) {
-      paidMap[p.container_id] = (paidMap[p.container_id] ?? 0) + 1
+    const metrics: Record<string, ContainerStatusMetrics> = {}
+    for (const id of containerIds) {
+      metrics[id] = emptyContainerStatusMetrics()
     }
 
-    setPresaleMap(presaleMap)
-    setSalesMap(salesMap)
-    setPaidMap(paidMap)
+    if (containerIds.length === 0) {
+      setStatusMetricsByContainer({})
+    } else {
+      const [{ data: presaleRows }, { data: salesRows }] = await Promise.all([
+        supabase
+          .from('presales')
+          .select('id, container_id, sale_type, total_number_of_pallets, created_at')
+          .in('container_id', containerIds)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('sales_orders')
+          .select('container_id, payment_status, outstanding_balance')
+          .in('container_id', containerIds),
+      ])
+
+      const presaleIds = (presaleRows ?? []).map(p => p.id)
+      const { data: distRows } = presaleIds.length > 0
+        ? await supabase.from('presale_pallet_distributions').select('presale_id').in('presale_id', presaleIds)
+        : { data: [] as { presale_id: string }[] }
+
+      const palletDistByPresale: Record<string, number> = {}
+      for (const d of distRows ?? []) {
+        palletDistByPresale[d.presale_id] = (palletDistByPresale[d.presale_id] ?? 0) + 1
+      }
+
+      const presalesByContainer = new Map<string, { id: string; sale_type: string; total_number_of_pallets: number | null }[]>()
+      for (const pr of presaleRows ?? []) {
+        const list = presalesByContainer.get(pr.container_id) ?? []
+        list.push({
+          id: pr.id,
+          sale_type: pr.sale_type,
+          total_number_of_pallets: pr.total_number_of_pallets,
+        })
+        presalesByContainer.set(pr.container_id, list)
+      }
+
+      for (const id of containerIds) {
+        const rows = presalesByContainer.get(id) ?? []
+        const m = metrics[id]
+        m.presale_count = rows.length
+        if (rows.length > 0) {
+          const first = rows[0]
+          m.sale_type = normalizeSaleTypeForStatus(first.sale_type)
+          m.presale_pallets = Number(first.total_number_of_pallets ?? 0)
+          m.pallet_dist_count = rows.reduce((s, pr) => s + (palletDistByPresale[pr.id] ?? 0), 0)
+        }
+      }
+
+      for (const o of salesRows ?? []) {
+        const cid = o.container_id
+        const m = metrics[cid]
+        if (!m) continue
+        m.sales_order_count += 1
+        if (o.payment_status === 'paid') m.fully_paid_count += 1
+        const ob = Number(o.outstanding_balance ?? 0)
+        if (o.payment_status === 'paid' || ob <= 0) m.settled_count += 1
+        m.total_outstanding += ob
+      }
+
+      setStatusMetricsByContainer(metrics)
+    }
     setContainers(
       (containerData ?? []).map(row => {
         const t = row.trip as Container['trip'] | Container['trip'][] | null | undefined
@@ -130,15 +173,13 @@ export default function ContainersPage() {
   const fmtUSD = (n: number) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   const computedStatusLabel = useCallback((c: Container) => {
+    const m = statusMetricsByContainer[c.id] ?? emptyContainerStatusMetrics()
     const statusInput: ContainerStatusInput = {
       trip_status: (c.trip as { status?: string } | null)?.status ?? 'not_started',
-      presale_count: presaleMap[c.id] ?? 0,
-      sales_order_count: salesMap[c.id] ?? 0,
-      fully_paid_count: paidMap[c.id] ?? 0,
-      total_orders_count: salesMap[c.id] ?? 0,
+      ...m,
     }
     return getContainerStatusBadge(computeContainerStatus(statusInput)).label
-  }, [presaleMap, salesMap, paidMap])
+  }, [statusMetricsByContainer])
 
   const filtered = containers.filter(c => {
     const matchSearch = search === '' ||
@@ -597,12 +638,10 @@ export default function ContainersPage() {
                     <td className="px-3 py-3.5 whitespace-nowrap">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {(() => {
+                          const m = statusMetricsByContainer[con.id] ?? emptyContainerStatusMetrics()
                           const statusInput: ContainerStatusInput = {
                             trip_status: (con.trip as { status?: string } | null)?.status ?? 'not_started',
-                            presale_count: presaleMap[con.id] ?? 0,
-                            sales_order_count: salesMap[con.id] ?? 0,
-                            fully_paid_count: paidMap[con.id] ?? 0,
-                            total_orders_count: salesMap[con.id] ?? 0,
+                            ...m,
                           }
                           const computedStatus = computeContainerStatus(statusInput)
                           const badge = getContainerStatusBadge(computedStatus)

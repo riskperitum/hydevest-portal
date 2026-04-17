@@ -31,6 +31,11 @@ const NAV: NavItem[] = [
     ]
   },
   {
+    href: '/portal/containers',
+    label: 'Containers',
+    icon: Package,
+  },
+  {
     label: 'Sales', icon: TrendingUp,
     children: [
       { label: 'Pre-sales',    href: '/portal/sales/presales' },

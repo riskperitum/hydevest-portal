@@ -428,14 +428,31 @@ function SupplierReceivablesDrilldownInner() {
       .from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()
 
     if (targetTrip) {
+      // Get the WAER of the ORIGINATING trip (where the receivable came from)
+      const { data: originExpenses } = await supabase
+        .from('trip_expenses')
+        .select('amount, amount_ngn, currency')
+        .eq('trip_id', tripId)
+
+      // Calculate WAER from originating trip
+      const usdExpenses = (originExpenses ?? []).filter(e => e.currency === 'USD')
+      const totalUSD = usdExpenses.reduce((s, e) => s + Number(e.amount), 0)
+      const totalNGN = usdExpenses.reduce((s, e) => s + Number(e.amount_ngn ?? 0), 0)
+      const originWAER = totalUSD > 0 ? totalNGN / totalUSD : 1
+
+      // Calculate NGN equivalent using originating trip WAER
+      const amountNGN = Number(alloc.amount_usd) * originWAER
+
       const { data: expense } = await supabase.from('trip_expenses').insert({
-        trip_id: targetTrip.id,
-        category: 'container',
-        currency: 'USD',
-        amount: alloc.amount_usd,
-        description: `Supplier receivable reallocation from trip ${tripReceivable?.trip_id}`,
+        trip_id:      targetTrip.id,
+        category:     'container',
+        currency:     'USD',
+        amount:       alloc.amount_usd,
+        exchange_rate: originWAER,
+        amount_ngn:   amountNGN,
+        description:  `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
         expense_date: new Date().toISOString().split('T')[0],
-        created_by: currentUser?.id,
+        created_by:   currentUser?.id,
       }).select().single()
 
       if (expense) {

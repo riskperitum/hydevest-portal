@@ -537,40 +537,60 @@ export default function SalesOrderDetailPage() {
 
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found.</div>
 
-  const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status as keyof typeof PAYMENT_STATUS_CONFIG] ?? PAYMENT_STATUS_CONFIG.outstanding
-  const approvalCfg = APPROVAL_STATUS_CONFIG[order.approval_status as keyof typeof APPROVAL_STATUS_CONFIG] ?? APPROVAL_STATUS_CONFIG.pending
-
   return (
     <div className="space-y-5 max-w-4xl">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <div className="flex items-center gap-2 mb-1">
             <button onClick={() => router.back()}
               className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
               <ArrowLeft size={16} />
             </button>
             <h1 className="text-lg font-semibold text-gray-900">{order.order_id}</h1>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${order.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-              {order.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
-            </span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${paymentCfg.color}`}>
-              {paymentCfg.label}
-            </span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${approvalCfg.color}`}>
-              {approvalCfg.label}
-            </span>
+          </div>
+          <p className="text-sm text-gray-500 ml-8 mb-1.5">
+            {order.customer?.name ?? '—'} · {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </p>
+          {/* Status badges below the customer name */}
+          <div className="flex items-center gap-2 flex-wrap ml-8">
+            {/* Payment status */}
+            {(() => {
+              const cfg = PAYMENT_STATUS_CONFIG[order.payment_status as keyof typeof PAYMENT_STATUS_CONFIG] ?? PAYMENT_STATUS_CONFIG.outstanding
+              return (
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${cfg.color}`}>
+                  {cfg.label}
+                </span>
+              )
+            })()}
+            {/* Approval status */}
+            {(() => {
+              const cfg = APPROVAL_STATUS_CONFIG[order.approval_status as keyof typeof APPROVAL_STATUS_CONFIG] ?? APPROVAL_STATUS_CONFIG.pending
+              return (
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${cfg.color}`}>
+                  {cfg.label}
+                </span>
+              )
+            })()}
+            {/* Write-off status */}
+            {order.write_off_status === 'pending_approval' && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full border bg-red-50 text-red-600 border-red-200">
+                Write-off pending
+              </span>
+            )}
+            {order.write_off_status === 'approved' && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full border bg-gray-100 text-gray-500 border-gray-200">
+                Written off
+              </span>
+            )}
+            {/* Needs review flag */}
             {order.needs_approval && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200">
                 Modified — needs approval
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-400 ml-8">
-            {order.customer?.name ?? '—'} · {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </p>
         </div>
 
         {/* Action buttons — always top right */}
@@ -581,14 +601,12 @@ export default function SalesOrderDetailPage() {
             style={{ background: '#55249E' }}>
             <FileText size={14} /> View invoice
           </button>
-
           {order.approval_status !== 'approved' && (
             <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
               <CheckCircle2 size={14} /> Request approval
             </button>
           )}
-
           <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
             <Trash2 size={14} /> Delete

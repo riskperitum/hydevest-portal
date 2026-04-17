@@ -99,7 +99,7 @@ export default function ContainerDetailPage() {
 
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
-  const [editOpen, setEditOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(true)
   const [funderOpen, setFunderOpen] = useState(false)
   const [funderForm, setFunderForm] = useState({ funder_type: 'entity', funder_id: '', percentage: '' })
   const [savingFunder, setSavingFunder] = useState(false)
@@ -131,12 +131,13 @@ export default function ContainerDetailPage() {
       supabase.from('trip_documents').select('*').eq('container_id', containerId).order('created_at', { ascending: false }),
     ])
     setContainer(con)
-    setEditOpen(false)
+    setEditOpen(true)
     setOverrideConfirmed(false)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
 
-    // Check if container has an active sales order
+    // Only lock if container has an active sales order
+    // Containers with no presale and no sales order are always freely editable
     if (con?.id) {
       const { data: activeSO } = await supabase
         .from('sales_orders')
@@ -150,6 +151,7 @@ export default function ContainerDetailPage() {
         setHasActiveSalesOrder(true)
         setSalesOrderRef(activeSO.order_id)
       } else {
+        // No active sales order — always freely editable
         setHasActiveSalesOrder(false)
         setSalesOrderRef(null)
       }
@@ -576,7 +578,7 @@ export default function ContainerDetailPage() {
               </span>
             </div>
           )}
-          {hasActiveSalesOrder && !overrideConfirmed ? (
+          {(hasActiveSalesOrder && !overrideConfirmed) ? (
             <div className="flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
                 <Lock size={14} />
@@ -589,12 +591,7 @@ export default function ContainerDetailPage() {
                 </button>
               )}
             </div>
-          ) : (
-            <button onClick={() => setEditOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-              <Pencil size={14} /> Edit container
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
 

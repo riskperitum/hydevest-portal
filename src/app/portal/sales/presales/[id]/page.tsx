@@ -10,6 +10,7 @@ import {
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import AmountInput from '@/components/ui/AmountInput'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import {
   computeContainerStatus,
   getContainerStatusBadge,
@@ -20,6 +21,7 @@ import {
 interface Presale {
   id: string
   presale_id: string
+  created_by?: string | null
   sale_type: string
   status: string
   approval_status: string
@@ -76,6 +78,9 @@ export default function PresaleDetailPage() {
   const router = useRouter()
   const presaleId = params.id as string
 
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+
   const [presale, setPresale] = useState<Presale | null>(null)
   const [pallets, setPallets] = useState<PalletDistribution[]>([])
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
@@ -94,6 +99,10 @@ export default function PresaleDetailPage() {
 
   const [hasActiveSalesOrder, setHasActiveSalesOrder] = useState(false)
   const [salesOrderRef, setSalesOrderRef] = useState<string | null>(null)
+
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const [overrideReason, setOverrideReason] = useState('')
+  const [overriding, setOverriding] = useState(false)
 
   const [addPalletOpen, setAddPalletOpen] = useState(false)
   const [newPalletPieces, setNewPalletPieces] = useState('')
@@ -334,6 +343,39 @@ export default function PresaleDetailPage() {
     load()
   }
 
+  async function handleOverrideEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!overrideReason.trim()) return
+    setOverriding(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // Log in presale activity log
+    await supabase.from('presale_activity_log').insert({
+      presale_id: presale?.id,
+      action:     'Admin override — edit while active sales order',
+      notes:      `Override reason: ${overrideReason.trim()}`,
+      created_by: user?.id,
+    } as any)
+
+    // Notify presale creator
+    if (presale?.created_by && presale.created_by !== user?.id) {
+      await supabase.from('notifications').insert({
+        user_id:   presale.created_by,
+        type:      'note_mention',
+        title:     `Presale details edited — ${presale?.presale_id}`,
+        message:   `An administrator has modified presale ${presale?.presale_id} while your sales order is active. Reason: ${overrideReason.trim()}`,
+        record_id: presale?.id,
+        module:    'presales',
+      })
+    }
+
+    setOverriding(false)
+    setOverrideOpen(false)
+    setOverrideReason('')
+    setEditOpen(true)
+  }
+
   async function deletePalletRow(id: string) {
     const supabase = createClient()
     await supabase.from('presale_pallet_distributions').delete().eq('id', id)
@@ -474,9 +516,17 @@ export default function PresaleDetailPage() {
              presale.approval_status === 'reviewed' ? '✓ Reviewed' : 'Not approved'}
           </span>
           {hasActiveSalesOrder ? (
-            <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
-              <Lock size={14} />
-              Locked — active sales order
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
+                <Lock size={14} />
+                Locked — active sales order
+              </div>
+              {canOverride && (
+                <button onClick={() => setOverrideOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                  <AlertTriangle size={14} /> Override & edit
+                </button>
+              )}
             </div>
           ) : (
             <button onClick={() => setEditOpen(true)}
@@ -524,6 +574,38 @@ export default function PresaleDetailPage() {
           </div>
         </div>
       )}
+
+      <Modal open={overrideOpen} onClose={() => setOverrideOpen(false)} title="Override edit lock" size="sm">
+        <form onSubmit={handleOverrideEdit} className="space-y-4">
+          <div className="p-3 bg-red-50 rounded-xl border border-red-100">
+            <p className="text-xs font-semibold text-red-800">Admin override — this action is logged</p>
+            <p className="text-xs text-red-600 mt-1">
+              This presale has an active sales order ({salesOrderRef}).
+              Editing may affect ongoing sales. The presale creator will be notified.
+              Your reason will be recorded in the activity log.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Reason for override <span className="text-red-400">*</span>
+            </label>
+            <textarea required rows={3} value={overrideReason}
+              onChange={e => setOverrideReason(e.target.value)}
+              placeholder="Explain why you need to edit this presale while a sales order is active..."
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => setOverrideOpen(false)}
+              className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={overriding || !overrideReason.trim()}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {overriding ? <><Loader2 size={14} className="animate-spin" /> Processing…</> : 'Confirm override'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Container info */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">

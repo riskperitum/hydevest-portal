@@ -11,6 +11,7 @@ import {
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Container {
   id: string
@@ -81,6 +82,9 @@ export default function ContainerDetailPage() {
   const tripId = params.id as string
   const containerId = params.containerId as string
 
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+
   const [container, setContainer] = useState<Container | null>(null)
   const [funders, setFunders] = useState<Funder[]>([])
   const [comments, setComments] = useState<Comment[]>([])
@@ -93,6 +97,7 @@ export default function ContainerDetailPage() {
 
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
+  const [editOpen, setEditOpen] = useState(false)
   const [funderOpen, setFunderOpen] = useState(false)
   const [funderForm, setFunderForm] = useState({ funder_type: 'entity', funder_id: '', percentage: '' })
   const [savingFunder, setSavingFunder] = useState(false)
@@ -111,6 +116,10 @@ export default function ContainerDetailPage() {
   const [hasActiveSalesOrder, setHasActiveSalesOrder] = useState(false)
   const [salesOrderRef, setSalesOrderRef] = useState<string | null>(null)
 
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const [overrideReason, setOverrideReason] = useState('')
+  const [overriding, setOverriding] = useState(false)
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: con }, { data: fund }, { data: docs }] = await Promise.all([
@@ -119,6 +128,7 @@ export default function ContainerDetailPage() {
       supabase.from('trip_documents').select('*').eq('container_id', containerId).order('created_at', { ascending: false }),
     ])
     setContainer(con)
+    setEditOpen(false)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
 
@@ -153,6 +163,46 @@ export default function ContainerDetailPage() {
     }
     setLoading(false)
   }, [containerId])
+
+  async function handleOverrideEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!overrideReason.trim()) return
+    setOverriding(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // Log the override in activity log
+    await supabase.from('container_activity_log').insert({
+      container_id: container?.id,
+      action:       'Admin override — edit while active sales order',
+      notes:        `Override reason: ${overrideReason.trim()}`,
+      created_by:   user?.id,
+    } as any)
+
+    // Notify the presale creator
+    const { data: presale } = await supabase
+      .from('presales')
+      .select('created_by')
+      .eq('container_id', container?.id)
+      .single()
+
+    if (presale?.created_by) {
+      await supabase.from('notifications').insert({
+        user_id:   presale.created_by,
+        type:      'note_mention',
+        title:     `Container details edited — ${container?.container_id}`,
+        message:   `An administrator has modified container ${container?.container_id} details while your sales order is active. Reason: ${overrideReason.trim()}`,
+        record_id: container?.id,
+        module:    'containers',
+      })
+    }
+
+    setOverriding(false)
+    setOverrideOpen(false)
+    setOverrideReason('')
+    // Open edit modal
+    setEditOpen(true)
+  }
 
   const loadComments = useCallback(async () => {
     const supabase = createClient()
@@ -432,6 +482,7 @@ export default function ContainerDetailPage() {
         ) : (
           <button
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
+            disabled={!editOpen || container?.approval_status === 'approved' || hasActiveSalesOrder}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value || (useAutosave ? 'Click to set' : 'Not set')}
@@ -503,11 +554,24 @@ export default function ContainerDetailPage() {
               </span>
             </div>
           )}
-          {hasActiveSalesOrder && (
-            <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
-              <Lock size={14} />
-              Locked — active sales order
+          {hasActiveSalesOrder ? (
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
+                <Lock size={14} />
+                Locked — active sales order
+              </div>
+              {canOverride && (
+                <button onClick={() => setOverrideOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                  <AlertTriangle size={14} /> Override & edit
+                </button>
+              )}
             </div>
+          ) : (
+            <button onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Pencil size={14} /> Edit container
+            </button>
           )}
         </div>
       </div>
@@ -967,6 +1031,38 @@ export default function ContainerDetailPage() {
             <button type="submit" disabled={uploading || !uploadFile}
               className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : 'Upload'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={overrideOpen} onClose={() => setOverrideOpen(false)} title="Override edit lock" size="sm">
+        <form onSubmit={handleOverrideEdit} className="space-y-4">
+          <div className="p-3 bg-red-50 rounded-xl border border-red-100">
+            <p className="text-xs font-semibold text-red-800">Admin override — this action is logged</p>
+            <p className="text-xs text-red-600 mt-1">
+              This container has an active sales order ({salesOrderRef}).
+              Editing may affect ongoing sales. The presale creator will be notified.
+              Your reason will be recorded in the activity log.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Reason for override <span className="text-red-400">*</span>
+            </label>
+            <textarea required rows={3} value={overrideReason}
+              onChange={e => setOverrideReason(e.target.value)}
+              placeholder="Explain why you need to edit this container while a sales order is active..."
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => setOverrideOpen(false)}
+              className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={overriding || !overrideReason.trim()}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {overriding ? <><Loader2 size={14} className="animate-spin" /> Processing…</> : 'Confirm override'}
             </button>
           </div>
         </form>

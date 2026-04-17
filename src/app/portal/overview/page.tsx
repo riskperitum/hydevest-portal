@@ -75,7 +75,7 @@ export default function OverviewPage() {
 
   const [loading, setLoading]       = useState(true)
   const [userName, setUserName]     = useState('')
-  const [range, setRange]           = useState('30d')
+  const [range, setRange]           = useState('all')
 
   // KPIs
   const [activeContainers, setActiveContainers]     = useState(0)

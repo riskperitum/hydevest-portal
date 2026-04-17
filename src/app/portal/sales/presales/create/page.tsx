@@ -79,12 +79,21 @@ export default function CreatePresalePage() {
       .select('container_id')
       .then(({ data: existingPresales }) => {
         const presoldIds = new Set((existingPresales ?? []).map(p => p.container_id))
-        // Then load containers excluding already presold ones
+        // Only load containers from COMPLETED trips that have not been presold yet
         supabase.from('containers')
-          .select('*, trip:trips(title, source_location, trip_id)')
+          .select(`
+            id, container_id, tracking_number, container_number,
+            pieces_purchased, average_weight, status, trip_id,
+            trip:trips!containers_trip_id_fkey(title, source_location, trip_id, status)
+          `)
           .order('created_at', { ascending: false })
           .then(({ data }) => {
-            setContainers((data ?? []).filter(c => !presoldIds.has(c.id)))
+            setContainers(
+              (data ?? []).filter(c =>
+                !presoldIds.has(c.id) &&
+                (c.trip as any)?.status === 'completed'
+              )
+            )
           })
       })
   }, [])

@@ -98,9 +98,12 @@ export default function CreateSalesOrderPage() {
       const ids = [...new Set(availablePresales.map(p => p.container_id))]
       if (!ids.length) { setContainers([]); return }
       supabase.from('containers')
-        .select('*, trip:trips(trip_id, title)')
+        .select('*, trip:trips!containers_trip_id_fkey(trip_id, title, status)')
         .in('id', ids)
-        .then(({ data: c }) => setContainers(c ?? []))
+        .then(({ data: c }) => {
+          // Only show containers from completed trips
+          setContainers((c ?? []).filter(con => (con.trip as any)?.status === 'completed'))
+        })
     })
     supabase.from('customers')
       .select('id, customer_id, name, phone')

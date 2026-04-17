@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Plus, Trash2, Check, X,
   Pencil, Upload, Eye, RefreshCw, MessageSquare,
-  Activity, Paperclip
+  Activity, Paperclip, AlertTriangle, Lock
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
@@ -108,6 +108,9 @@ export default function ContainerDetailPage() {
   const [documents, setDocuments] = useState<{ id: string; name: string; file_url: string; file_type: string | null; created_at: string }[]>([])
   const [tripData, setTripData] = useState<{ source_port: string | null; destination_port: string | null; status: string; trip_id: string; title: string } | null>(null)
 
+  const [hasActiveSalesOrder, setHasActiveSalesOrder] = useState(false)
+  const [salesOrderRef, setSalesOrderRef] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: con }, { data: fund }, { data: docs }] = await Promise.all([
@@ -118,6 +121,26 @@ export default function ContainerDetailPage() {
     setContainer(con)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
+
+    // Check if container has an active sales order
+    if (con?.id) {
+      const { data: activeSO } = await supabase
+        .from('sales_orders')
+        .select('id, order_id, payment_status')
+        .eq('container_id', con.id)
+        .neq('payment_status', 'paid')
+        .limit(1)
+        .single()
+
+      if (activeSO) {
+        setHasActiveSalesOrder(true)
+        setSalesOrderRef(activeSO.order_id)
+      } else {
+        setHasActiveSalesOrder(false)
+        setSalesOrderRef(null)
+      }
+    }
+
     if (con?.trip_id) {
       const { data: trip } = await supabase
         .from('trips')
@@ -187,6 +210,7 @@ export default function ContainerDetailPage() {
   }
 
   async function updateField(field: string, value: string) {
+    if (hasActiveSalesOrder) return
     const supabase = createClient()
     const oldValue = String((container as unknown as Record<string, unknown>)[field] ?? '')
     await supabase.from('containers').update({ [field]: value || null }).eq('id', containerId)
@@ -207,6 +231,7 @@ export default function ContainerDetailPage() {
 
   async function saveFunder(e: React.FormEvent) {
     e.preventDefault()
+    if (hasActiveSalesOrder) return
     const newPct = parseFloat(funderForm.percentage)
 
     if (newPct <= 0) {
@@ -266,6 +291,7 @@ export default function ContainerDetailPage() {
 
   async function deleteFunder(id: string, name: string) {
     if (!confirm(`Remove ${name} as funder?`)) return
+    if (hasActiveSalesOrder) return
     const supabase = createClient()
     await supabase.from('container_funders').delete().eq('id', id)
     await logActivity('Funder removed', 'funders', name, '')
@@ -429,8 +455,9 @@ export default function ContainerDetailPage() {
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <select
         value={value}
-        disabled={container?.approval_status === 'approved'}
+        disabled={container?.approval_status === 'approved' || hasActiveSalesOrder}
         onChange={async e => {
+          if (hasActiveSalesOrder) return
           const supabase = createClient()
           await supabase.from('containers').update({ [fieldKey]: e.target.value }).eq('id', containerId)
           await logActivity('Updated field', fieldKey, value, e.target.value)
@@ -438,7 +465,7 @@ export default function ContainerDetailPage() {
           loadActivity()
         }}
         className={`w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white
-          ${container?.approval_status === 'approved' ? 'opacity-60 cursor-not-allowed' : ''}`}
+          ${container?.approval_status === 'approved' || hasActiveSalesOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <option value="">Select...</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -476,8 +503,29 @@ export default function ContainerDetailPage() {
               </span>
             </div>
           )}
+          {hasActiveSalesOrder && (
+            <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
+              <Lock size={14} />
+              Locked — active sales order
+            </div>
+          )}
         </div>
       </div>
+
+      {hasActiveSalesOrder && (
+        <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Container locked — active sales order exists</p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              This container has an active sales order
+              {salesOrderRef ? ` (${salesOrderRef})` : ''}.
+              Container details cannot be modified while a sales order is outstanding.
+              Contact an administrator if changes are required.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── SECTION 1: Container Details ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -531,13 +579,15 @@ export default function ContainerDetailPage() {
               <select
                 value={container.funding_type}
                 onChange={async e => {
+                  if (hasActiveSalesOrder) return
                   const supabase = createClient()
                   await supabase.from('containers').update({ funding_type: e.target.value }).eq('id', containerId)
                   await logActivity('Funding type changed', 'funding_type', container.funding_type, e.target.value)
                   load()
                   loadActivity()
                 }}
-                className="px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium"
+                className={`px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium ${hasActiveSalesOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
+                disabled={hasActiveSalesOrder}
               >
                 <option value="entity">Entity</option>
                 <option value="partner">Partner</option>
@@ -545,7 +595,12 @@ export default function ContainerDetailPage() {
             </div>
             <button
               onClick={() => setFunderOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors">
+              disabled={hasActiveSalesOrder}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                hasActiveSalesOrder
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'
+              }`}>
               <Plus size={13} /> {totalPct >= 100 ? 'Update funder' : 'Add funder'}
             </button>
           </div>

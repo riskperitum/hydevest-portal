@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Check, X, Pencil, Plus,
-  Trash2, CheckCircle2, Eye, AlertTriangle, Activity
+  Trash2, CheckCircle2, Eye, AlertTriangle, Activity, Lock
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
@@ -92,12 +92,16 @@ export default function PresaleDetailPage() {
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
+  const [hasActiveSalesOrder, setHasActiveSalesOrder] = useState(false)
+  const [salesOrderRef, setSalesOrderRef] = useState<string | null>(null)
+
   const [addPalletOpen, setAddPalletOpen] = useState(false)
   const [newPalletPieces, setNewPalletPieces] = useState('')
   const [newPalletCount, setNewPalletCount] = useState('')
   const [savingPallet, setSavingPallet] = useState(false)
 
   const [containerStatus, setContainerStatus] = useState<ContainerStatusInput | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -126,6 +130,23 @@ export default function PresaleDetailPage() {
 
     const presaleData = ps as { id: string; container_id?: string; container?: { id: string } | null } | null
     const cid = presaleData?.container?.id ?? presaleData?.container_id
+
+    // Check if container has active sales order
+    if (cid) {
+      const { data: activeSO } = await supabase
+        .from('sales_orders')
+        .select('id, order_id, payment_status')
+        .eq('container_id', cid)
+        .neq('payment_status', 'paid')
+        .limit(1)
+        .single()
+
+      setHasActiveSalesOrder(!!(activeSO))
+      setSalesOrderRef((activeSO as any)?.order_id ?? null)
+    } else {
+      setHasActiveSalesOrder(false)
+      setSalesOrderRef(null)
+    }
 
     if (cid) {
       const [
@@ -199,6 +220,7 @@ export default function PresaleDetailPage() {
   }
 
   async function updateField(field: string, value: string) {
+    if (hasActiveSalesOrder) return
     const supabase = createClient()
     const oldValue = String((presale as unknown as Record<string, unknown>)[field] ?? '')
     const wasApproved = presale?.approval_status === 'approved'
@@ -286,6 +308,7 @@ export default function PresaleDetailPage() {
 
   async function addPalletRow(e: React.FormEvent) {
     e.preventDefault()
+    if (hasActiveSalesOrder) return
     if (!newPalletPieces || !newPalletCount) return
     setSavingPallet(true)
     const supabase = createClient()
@@ -365,6 +388,7 @@ export default function PresaleDetailPage() {
         ) : (
           <button type="button"
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
+            disabled={!editOpen || hasActiveSalesOrder}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value || 'Not set'}
@@ -449,6 +473,17 @@ export default function PresaleDetailPage() {
             {presale.approval_status === 'approved' ? '✓ Approved' :
              presale.approval_status === 'reviewed' ? '✓ Reviewed' : 'Not approved'}
           </span>
+          {hasActiveSalesOrder ? (
+            <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
+              <Lock size={14} />
+              Locked — active sales order
+            </div>
+          ) : (
+            <button onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Pencil size={14} /> Edit presale
+            </button>
+          )}
           <button onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">
             <Eye size={13} /> Request review
@@ -471,6 +506,21 @@ export default function PresaleDetailPage() {
           <div>
             <p className="text-sm font-semibold text-orange-800">This presale has been modified after approval</p>
             <p className="text-xs text-orange-600 mt-0.5">Status has been reset to <strong>Altered</strong>. A new approval request is required before this presale can be confirmed again.</p>
+          </div>
+        </div>
+      )}
+
+      {hasActiveSalesOrder && (
+        <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Presale locked — active sales order exists</p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              This container has an active sales order
+              {salesOrderRef ? ` (${salesOrderRef})` : ''}.
+              Presale details cannot be modified while a sales order is outstanding.
+              Contact an administrator if changes are required.
+            </p>
           </div>
         </div>
       )}

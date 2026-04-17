@@ -85,6 +85,8 @@ export default function ContainerDetailPage() {
   const { permissions, isSuperAdmin } = usePermissions()
   const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
+  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
+
   const [container, setContainer] = useState<Container | null>(null)
   const [funders, setFunders] = useState<Funder[]>([])
   const [comments, setComments] = useState<Comment[]>([])
@@ -244,6 +246,8 @@ export default function ContainerDetailPage() {
     loadComments()
     loadActivity()
     loadDropdowns()
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user ? { id: user.id } : null))
   }, [load, loadComments, loadActivity, loadDropdowns])
 
   const totalPct = funders.reduce((s, f) => s + Number(f.percentage), 0)
@@ -265,7 +269,13 @@ export default function ContainerDetailPage() {
     if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     const oldValue = String((container as unknown as Record<string, unknown>)[field] ?? '')
-    await supabase.from('containers').update({ [field]: value || null }).eq('id', containerId)
+    const updatePayload268: any = { [field]: value || null }
+    if (overrideConfirmed) {
+      updatePayload268.is_modified = true
+      updatePayload268.modified_after_approval_at = new Date().toISOString()
+      updatePayload268.modified_after_approval_by = currentUser?.id ?? null
+    }
+    await supabase.from('containers').update(updatePayload268).eq('id', containerId)
     await logActivity('Updated field', field, oldValue, value)
     // Flag trip as needing review if it was previously reviewed
     const { data: tripData } = await supabase
@@ -515,7 +525,13 @@ export default function ContainerDetailPage() {
         onChange={async e => {
           if (hasActiveSalesOrder && !overrideConfirmed) return
           const supabase = createClient()
-          await supabase.from('containers').update({ [fieldKey]: e.target.value }).eq('id', containerId)
+          const updatePayload518: any = { [fieldKey]: e.target.value }
+          if (overrideConfirmed) {
+            updatePayload518.is_modified = true
+            updatePayload518.modified_after_approval_at = new Date().toISOString()
+            updatePayload518.modified_after_approval_by = currentUser?.id ?? null
+          }
+          await supabase.from('containers').update(updatePayload518).eq('id', containerId)
           await logActivity('Updated field', fieldKey, value, e.target.value)
           load()
           setOverrideConfirmed(false)
@@ -651,7 +667,13 @@ export default function ContainerDetailPage() {
                 onChange={async e => {
                   if (hasActiveSalesOrder && !overrideConfirmed) return
                   const supabase = createClient()
-                  await supabase.from('containers').update({ funding_type: e.target.value }).eq('id', containerId)
+                  const updatePayload654: any = { funding_type: e.target.value }
+                  if (overrideConfirmed) {
+                    updatePayload654.is_modified = true
+                    updatePayload654.modified_after_approval_at = new Date().toISOString()
+                    updatePayload654.modified_after_approval_by = currentUser?.id ?? null
+                  }
+                  await supabase.from('containers').update(updatePayload654).eq('id', containerId)
                   await logActivity('Funding type changed', 'funding_type', container.funding_type, e.target.value)
                   load()
                   setOverrideConfirmed(false)

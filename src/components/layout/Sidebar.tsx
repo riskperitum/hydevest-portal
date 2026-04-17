@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
-  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, AlertTriangle
+  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -29,11 +29,6 @@ const NAV: NavItem[] = [
       { label: 'Trips',      href: '/portal/purchase/trips' },
       { label: 'Containers', href: '/portal/purchase/containers' },
     ]
-  },
-  {
-    href: '/portal/containers',
-    label: 'Containers',
-    icon: Package,
   },
   {
     label: 'Sales', icon: TrendingUp,
@@ -63,18 +58,7 @@ const NAV: NavItem[] = [
     partnerOnly: true,
   },
   { label: 'Finance',     href: '/portal/finance',    icon: BarChart3 },
-  {
-    label: 'Reports',
-    icon: BarChart2,
-    children: [
-      { label: 'Overview', href: '/portal/reports', exactMatch: true },
-      {
-        href: '/portal/reports/bad-debts',
-        label: 'Bad debts',
-        icon: AlertTriangle,
-      },
-    ],
-  },
+  { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
 ]
@@ -86,7 +70,7 @@ const PARTNER_NAV: NavItem[] = [
 
 export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
-  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales', 'Reports'])
+  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 

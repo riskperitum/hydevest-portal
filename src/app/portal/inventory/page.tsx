@@ -9,6 +9,12 @@ import {
   FileText, Download
 } from 'lucide-react'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import {
+  computeContainerStatus,
+  getContainerStatusBadge,
+  type ContainerStatusInput,
+  normalizeSaleTypeForStatus,
+} from '@/lib/utils/containerStatus'
 
 interface ContainerInventory {
   // Container info
@@ -73,19 +79,113 @@ export default function InventoryPage() {
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
+  const [presaleMap, setPresaleMap] = useState<Record<string, number>>({})
+  const [salesMap, setSalesMap] = useState<Record<string, number>>({})
+  const [paidMap, setPaidMap] = useState<Record<string, number>>({})
+  const [settledMap, setSettledMap] = useState<Record<string, number>>({})
+  const [outstandingMap, setOutstandingMap] = useState<Record<string, number>>({})
+  const [presaleTypeMap, setPresaleTypeMap] = useState<Record<string, string>>({})
+  const [presalePalletsMap, setPresalePalletsMap] = useState<Record<string, number>>({})
+  const [palletDistMap, setPalletDistMap] = useState<Record<string, number>>({})
+  const [tripStatusMap, setTripStatusMap] = useState<Record<string, string>>({})
+
   const load = useCallback(async () => {
+    setLoading(true)
     const supabase = createClient()
 
+    const { data: inventoryData } = await supabase
+      .from('containers')
+      .select(`
+        id, container_id, tracking_number, pieces_purchased, status, trip_id,
+        trip:trips!containers_trip_id_fkey(status, trip_id, title, source_location)
+      `)
+      .order('created_at', { ascending: false })
+
+    const containerIds = (inventoryData ?? []).map((c: { id: string }) => c.id)
+
+    const [{ data: presaleCounts }, { data: salesCounts }, { data: paidCounts }, { data: settledCounts }] = await Promise.all([
+      containerIds.length > 0
+        ? supabase.from('presales').select('container_id').in('container_id', containerIds)
+        : { data: [] as { container_id: string }[] },
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id, payment_status').in('container_id', containerIds)
+        : { data: [] as { container_id: string; payment_status: string }[] },
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id').in('container_id', containerIds).eq('payment_status', 'paid')
+        : { data: [] as { container_id: string }[] },
+      containerIds.length > 0
+        ? supabase.from('sales_orders').select('container_id, outstanding_balance, write_off_status').in('container_id', containerIds)
+        : { data: [] as { container_id: string; outstanding_balance: unknown; write_off_status: string | null }[] },
+    ])
+
+    const presaleMap: Record<string, number> = {}
+    for (const p of (presaleCounts ?? [])) {
+      presaleMap[p.container_id] = (presaleMap[p.container_id] ?? 0) + 1
+    }
+    const salesMap: Record<string, number> = {}
+    for (const s of (salesCounts ?? [])) {
+      salesMap[s.container_id] = (salesMap[s.container_id] ?? 0) + 1
+    }
+    const paidMap: Record<string, number> = {}
+    for (const p of (paidCounts ?? [])) {
+      paidMap[p.container_id] = (paidMap[p.container_id] ?? 0) + 1
+    }
+    const settledMap: Record<string, number> = {}
+    for (const s of (settledCounts ?? [])) {
+      if (Number(s.outstanding_balance) <= 0 || s.write_off_status === 'approved') {
+        settledMap[s.container_id] = (settledMap[s.container_id] ?? 0) + 1
+      }
+    }
+    const outstandingMap: Record<string, number> = {}
+    for (const s of (settledCounts ?? [])) {
+      outstandingMap[s.container_id] = (outstandingMap[s.container_id] ?? 0) + Number(s.outstanding_balance ?? 0)
+    }
+
+    const presaleTypeMap: Record<string, string> = {}
+    const presalePalletsMap: Record<string, number> = {}
+    const palletDistMap: Record<string, number> = {}
+    if (containerIds.length > 0) {
+      const { data: presaleDetails } = await supabase
+        .from('presales')
+        .select('id, container_id, sale_type, total_number_of_pallets')
+        .in('container_id', containerIds)
+      for (const p of (presaleDetails ?? [])) {
+        presaleTypeMap[p.container_id] = p.sale_type
+        presalePalletsMap[p.container_id] = p.total_number_of_pallets ?? 0
+      }
+      const presaleIds = [...new Set((presaleDetails ?? []).map(p => p.id))]
+      const { data: palletDistRows } = presaleIds.length > 0
+        ? await supabase.from('presale_pallet_distributions').select('presale_id').in('presale_id', presaleIds)
+        : { data: [] as { presale_id: string }[] }
+      const presaleIdToContainer = Object.fromEntries((presaleDetails ?? []).map(p => [p.id, p.container_id]))
+      for (const pd of (palletDistRows ?? [])) {
+        const cid = presaleIdToContainer[pd.presale_id]
+        if (cid) palletDistMap[cid] = (palletDistMap[cid] ?? 0) + 1
+      }
+    }
+
+    const tsMap: Record<string, string> = {}
+    for (const c of (inventoryData ?? [])) {
+      const t = c.trip as { status?: string } | { status?: string }[] | null | undefined
+      const trip = Array.isArray(t) ? t[0] : t
+      tsMap[c.id] = trip?.status ?? 'not_started'
+    }
+    setTripStatusMap(tsMap)
+    setPresaleMap(presaleMap)
+    setSalesMap(salesMap)
+    setPaidMap(paidMap)
+    setSettledMap(settledMap)
+    setOutstandingMap(outstandingMap)
+    setPresaleTypeMap(presaleTypeMap)
+    setPresalePalletsMap(presalePalletsMap)
+    setPalletDistMap(palletDistMap)
+
     const [
-      { data: containers },
       { data: presales },
       { data: palletDists },
       { data: salesOrders },
       { data: orderPallets },
     ] = await Promise.all([
-      supabase.from('containers')
-        .select('id, container_id, tracking_number, pieces_purchased, status, trip_id')
-        .order('created_at', { ascending: false }),
       supabase.from('presales')
         .select('id, presale_id, container_id, sale_type, status, warehouse_confirmed_pieces, total_number_of_pallets, price_per_piece'),
       supabase.from('presale_pallet_distributions')
@@ -96,29 +196,29 @@ export default function InventoryPage() {
         .select('id, order_id, pallet_distribution_id, pallets_sold, total_pieces'),
     ])
 
-    // Load trips for container info
-    const tripIds = [...new Set((containers ?? []).map(c => c.trip_id).filter(Boolean))]
-    const { data: trips } = tripIds.length > 0
-      ? await supabase.from('trips').select('id, trip_id, title, source_location').in('id', tripIds)
-      : { data: [] }
-
-    const tripMap = Object.fromEntries((trips ?? []).map(t => [t.id, t]))
-    const presaleMap = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+    const presaleByContainerId = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+    type PalletDistRow = NonNullable<typeof palletDists>[number]
+    type SalesOrderRow = NonNullable<typeof salesOrders>[number]
     const palletsByPresale = (palletDists ?? []).reduce((acc, pd) => {
       if (!acc[pd.presale_id]) acc[pd.presale_id] = []
       acc[pd.presale_id].push(pd)
       return acc
-    }, {} as Record<string, typeof palletDists[0][]>)
+    }, {} as Record<string, PalletDistRow[]>)
 
     const ordersByContainer = (salesOrders ?? []).reduce((acc, so) => {
       if (!acc[so.container_id]) acc[so.container_id] = []
       acc[so.container_id].push(so)
       return acc
-    }, {} as Record<string, typeof salesOrders[0][]>)
+    }, {} as Record<string, SalesOrderRow[]>)
 
     // Build inventory rows
-    const rows: ContainerInventory[] = (containers ?? []).map(container => {
-      const presale = presaleMap[container.id] ?? null
+    const rows: ContainerInventory[] = (inventoryData ?? []).map(container => {
+      const presale = presaleByContainerId[container.id] ?? null
+      const tripRaw = container.trip as { trip_id: string; title: string; source_location: string | null } | { trip_id: string; title: string; source_location: string | null }[] | null | undefined
+      const tripObj = Array.isArray(tripRaw) ? tripRaw[0] : tripRaw
+      const trip = tripObj
+        ? { trip_id: tripObj.trip_id, title: tripObj.title, source_location: tripObj.source_location }
+        : null
       const orders = ordersByContainer[container.id] ?? []
       const pallets = presale ? (palletsByPresale[presale.id] ?? []) : []
 
@@ -164,7 +264,7 @@ export default function InventoryPage() {
         pieces_purchased: container.pieces_purchased ?? 0,
         status: container.status,
         trip_id: container.trip_id,
-        trip: tripMap[container.trip_id] ?? null,
+        trip,
         presale_db_id: presale?.id ?? null,
         presale_id: presale?.presale_id ?? null,
         sale_type: presale?.sale_type ?? null,
@@ -455,7 +555,7 @@ export default function InventoryPage() {
       {/* Inventory table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1040px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="px-3 py-3 w-8" />
@@ -464,20 +564,22 @@ export default function InventoryPage() {
                   'Pallets total', 'Pallets sold', 'Pallets available', 'Orders'].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Stage</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">Status</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 14 }).map((_, j) => (
+                    {Array.from({ length: 16 }).map((_, j) => (
                       <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-16 text-center">
+                  <td colSpan={16} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <Package size={24} className="text-gray-200" />
                       <p className="text-sm text-gray-400">No containers found.</p>
@@ -558,12 +660,48 @@ export default function InventoryPage() {
                           <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">{row.total_orders} order{row.total_orders !== 1 ? 's' : ''}</span>
                         ) : <span className="text-gray-300 text-xs">No orders</span>}
                       </td>
+                      {(() => {
+                        const statusInput: ContainerStatusInput = {
+                          trip_status: tripStatusMap[row.container_db_id] ?? 'not_started',
+                          presale_count: presaleMap[row.container_db_id] ?? 0,
+                          sale_type: normalizeSaleTypeForStatus(presaleTypeMap[row.container_db_id] ?? null),
+                          presale_pallets: presalePalletsMap[row.container_db_id] ?? 0,
+                          pallet_dist_count: palletDistMap[row.container_db_id] ?? 0,
+                          sales_order_count: salesMap[row.container_db_id] ?? 0,
+                          fully_paid_count: paidMap[row.container_db_id] ?? 0,
+                          settled_count: settledMap[row.container_db_id] ?? 0,
+                          total_outstanding: outstandingMap[row.container_db_id] ?? 0,
+                          total_written_off: 0,
+                        }
+                        const computedStatus = computeContainerStatus(statusInput)
+                        const badge = getContainerStatusBadge(computedStatus)
+                        return (
+                          <>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full
+                                ${badge.stage === 'Trip' ? 'bg-blue-50 text-blue-600' :
+                                  badge.stage === 'Presale' ? 'bg-purple-50 text-purple-600' :
+                                  badge.stage === 'Sale' ? 'bg-amber-50 text-amber-600' :
+                                  badge.stage === 'Recovery' ? 'bg-green-50 text-green-600' :
+                                  'bg-gray-100 text-gray-500'}`}>
+                                {badge.stage}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                                {badge.label}
+                              </span>
+                            </td>
+                          </>
+                        )
+                      })()}
                     </tr>
 
                     {/* Expanded pallet distribution rows */}
                     {isExpanded && hasDetails && (
                       <tr className="border-b border-gray-100 bg-brand-50/10">
-                        <td colSpan={14} className="px-6 py-4">
+                        <td colSpan={16} className="px-6 py-4">
                           <div className="ml-4">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                               Pallet distribution breakdown — {row.container_id}
@@ -704,6 +842,9 @@ export default function InventoryPage() {
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.total_orders, 0)}
                   </td>
+                  {/* col 15–16: Stage / pipeline status */}
+                  <td className="px-3 py-3" />
+                  <td className="px-3 py-3" />
                 </tr>
               </tfoot>
             )}

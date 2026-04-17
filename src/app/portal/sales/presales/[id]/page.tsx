@@ -10,6 +10,12 @@ import {
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import AmountInput from '@/components/ui/AmountInput'
+import {
+  computeContainerStatus,
+  getContainerStatusBadge,
+  type ContainerStatusInput,
+  normalizeSaleTypeForStatus,
+} from '@/lib/utils/containerStatus'
 
 interface Presale {
   id: string
@@ -91,6 +97,8 @@ export default function PresaleDetailPage() {
   const [newPalletCount, setNewPalletCount] = useState('')
   const [savingPallet, setSavingPallet] = useState(false)
 
+  const [containerStatus, setContainerStatus] = useState<ContainerStatusInput | null>(null)
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: ps }, { data: pd }, { data: al }] = await Promise.all([
@@ -115,6 +123,55 @@ export default function PresaleDetailPage() {
     setPresale(ps)
     setPallets(pd ?? [])
     setActivityLogs(al ?? [])
+
+    const presaleData = ps as { id: string; container_id?: string; container?: { id: string } | null } | null
+    const cid = presaleData?.container?.id ?? presaleData?.container_id
+
+    if (cid) {
+      const [
+        { data: tripData },
+        { data: presaleCounts },
+        { data: salesCounts },
+        { data: paidCounts },
+        { data: settledData },
+        { data: presaleInfo },
+        { data: palletDists },
+      ] = await Promise.all([
+        supabase.from('containers').select('trip:trips!containers_trip_id_fkey(status)').eq('id', cid).single(),
+        supabase.from('presales').select('id').eq('container_id', cid),
+        supabase.from('sales_orders').select('id, payment_status, outstanding_balance').eq('container_id', cid),
+        supabase.from('sales_orders').select('id').eq('container_id', cid).eq('payment_status', 'paid'),
+        supabase.from('sales_orders').select('outstanding_balance, write_off_status').eq('container_id', cid),
+        supabase.from('presales').select('sale_type, total_number_of_pallets').eq('container_id', cid).order('created_at', { ascending: true }).limit(1).maybeSingle(),
+        supabase.from('presale_pallet_distributions').select('id').eq('presale_id', presaleData.id),
+      ])
+
+      const tripRaw = (tripData as { trip?: { status?: string } | { status?: string }[] } | null)?.trip
+      const tripOne = Array.isArray(tripRaw) ? tripRaw[0] : tripRaw
+
+      const totalOrders = (salesCounts ?? []).length
+      const settledCount = (settledData ?? []).filter(s => Number(s.outstanding_balance) <= 0 || s.write_off_status === 'approved').length
+      const totalOutstand = (settledData ?? []).reduce((s, r) => s + Number(r.outstanding_balance ?? 0), 0)
+
+      const info = presaleInfo as { sale_type?: string | null; total_number_of_pallets?: number | null } | null
+      const presaleRow = ps as Presale | null
+
+      setContainerStatus({
+        trip_status: tripOne?.status ?? 'not_started',
+        presale_count: (presaleCounts ?? []).length,
+        sale_type: normalizeSaleTypeForStatus(presaleRow?.sale_type ?? info?.sale_type ?? null),
+        presale_pallets: Number(presaleRow?.total_number_of_pallets ?? info?.total_number_of_pallets ?? 0),
+        pallet_dist_count: (palletDists ?? []).length,
+        sales_order_count: totalOrders,
+        fully_paid_count: (paidCounts ?? []).length,
+        settled_count: settledCount,
+        total_outstanding: totalOutstand,
+        total_written_off: 0,
+      })
+    } else {
+      setContainerStatus(null)
+    }
+
     setLoading(false)
   }, [presaleId])
 
@@ -424,19 +481,49 @@ export default function PresaleDetailPage() {
           <h2 className="text-sm font-semibold text-gray-700">Container information</h2>
         </div>
         <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Container ID', value: presale.container?.container_id ?? '—' },
-            { label: 'Tracking No.', value: presale.container?.tracking_number ?? '—' },
-            { label: 'Title', value: presale.container?.container_number ?? '—' },
-            { label: 'Pieces', value: presale.container?.pieces_purchased?.toLocaleString() ?? '—' },
-            { label: 'Avg weight', value: presale.container?.average_weight ? `${presale.container.average_weight} kg` : '—' },
-            { label: 'Status', value: presale.container?.status ?? '—' },
-            { label: 'Trip', value: presale.container?.trip?.trip_id ?? '—' },
-            { label: 'Trip location', value: presale.container?.trip?.source_location ?? '—' },
-          ].map(item => (
+          {(
+            [
+              { label: 'Container ID', value: presale.container?.container_id ?? '—' },
+              { label: 'Tracking No.', value: presale.container?.tracking_number ?? '—' },
+              { label: 'Title', value: presale.container?.container_number ?? '—' },
+              { label: 'Pieces', value: presale.container?.pieces_purchased?.toLocaleString() ?? '—' },
+              { label: 'Avg weight', value: presale.container?.average_weight ? `${presale.container.average_weight} kg` : '—' },
+              { label: 'Status', pipeline: true as const },
+              { label: 'Trip', value: presale.container?.trip?.trip_id ?? '—' },
+              { label: 'Trip location', value: presale.container?.trip?.source_location ?? '—' },
+            ] as (
+              | { label: string; value: string; pipeline?: undefined }
+              | { label: string; pipeline: true }
+            )[]
+          ).map(item => (
             <div key={item.label}>
               <p className="text-xs text-gray-400 mb-0.5">{item.label}</p>
-              <p className="text-sm font-medium text-gray-900">{item.value}</p>
+              {'pipeline' in item && item.pipeline ? (
+                containerStatus ? (() => {
+                  const computedStatus = computeContainerStatus(containerStatus)
+                  const badge = getContainerStatusBadge(computedStatus)
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full
+                        ${badge.stage === 'Trip' ? 'bg-blue-50 text-blue-600' :
+                          badge.stage === 'Presale' ? 'bg-purple-50 text-purple-600' :
+                          badge.stage === 'Sale' ? 'bg-amber-50 text-amber-600' :
+                          badge.stage === 'Recovery' ? 'bg-green-50 text-green-600' :
+                          'bg-gray-100 text-gray-500'}`}>
+                        {badge.stage}
+                      </span>
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${badge.color}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                        {badge.label}
+                      </span>
+                    </div>
+                  )
+                })() : (
+                  <p className="text-sm font-medium text-gray-400">—</p>
+                )
+              ) : (
+                <p className="text-sm font-medium text-gray-900">{'value' in item ? item.value : '—'}</p>
+              )}
             </div>
           ))}
         </div>

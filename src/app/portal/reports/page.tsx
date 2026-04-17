@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import {
-  BarChart2, Users, Truck, TrendingUp, ArrowRightLeft, ChevronRight
+  BarChart2, Users, Truck, TrendingUp, ArrowRightLeft, ChevronRight, AlertTriangle
 } from 'lucide-react'
 
 const REPORTS = [
@@ -22,6 +22,16 @@ const REPORTS = [
     title: 'Customer Debt Report',
     description: 'View outstanding balances owed by customers across all sales',
     color: 'bg-red-50 border-red-100',
+    iconBg: 'bg-red-100',
+    tag: 'Finance',
+    tagColor: 'bg-red-50 text-red-600',
+  },
+  {
+    href: '/portal/reports/bad-debts',
+    icon: <AlertTriangle size={24} className="text-red-600" />,
+    title: 'Bad debts',
+    description: 'Outstanding balances written off as uncollectable bad debt',
+    color: 'bg-red-50 text-red-600',
     iconBg: 'bg-red-100',
     tag: 'Finance',
     tagColor: 'bg-red-50 text-red-600',

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, ArrowRightLeft, XCircle,
@@ -144,6 +145,9 @@ function SupplierReceivablesDrilldownInner() {
   const params = useParams()
   const searchParams = useSearchParams()
   const tripId = params.id as string
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   const [tripReceivable, setTripReceivable] = useState<TripReceivable | null>(null)
   const [containers, setContainers] = useState<ContainerRow[]>([])
@@ -355,7 +359,8 @@ function SupplierReceivablesDrilldownInner() {
 
   async function submitReallocation(e: React.FormEvent) {
     e.preventDefault()
-    if (!allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || !allocForm.assignee) return
+    if (!allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd) return
+    if (!canSelfApprove && !allocForm.assignee) return
     setSavingAlloc(true)
     const supabase = createClient()
     const amount = parseFloat(allocForm.amount_usd)
@@ -368,48 +373,122 @@ function SupplierReceivablesDrilldownInner() {
       c.status !== 'written_off' &&
       c.status !== 'no_receivable'
     )
-    if (!firstReceivable) return
+    if (!firstReceivable) {
+      setSavingAlloc(false)
+      return
+    }
+
+    const allocStatus = canSelfApprove ? 'approved' : 'pending'
 
     const { data: alloc } = await supabase.from('supplier_receivable_allocations').insert({
-      receivable_id:       firstReceivable.receivable_id,
-      target_trip_id:     allocForm.target_trip_id,
-      target_container_id: allocForm.target_container_id || null,
-      amount_usd:         amount,
-      percentage:         pct,
-      status:             'pending',
-      notes:              allocForm.notes || null,
-      requested_by:       currentUser?.id,
+      receivable_id:        firstReceivable.receivable_id,
+      target_trip_id:       allocForm.target_trip_id,
+      target_container_id:  allocForm.target_container_id || null,
+      amount_usd:           amount,
+      percentage:           pct,
+      status:               allocStatus,
+      notes:                allocForm.notes || null,
+      requested_by:         currentUser?.id,
     }).select().single()
 
     const targetTrip = otherTrips.find(t => t.id === allocForm.target_trip_id)
-    const { data: task } = await supabase.from('tasks').insert({
-      type: 'approval_request',
-      title: `Supplier receivable reallocation — ${tripReceivable?.trip_id}`,
-      description: `Reallocation of ${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to trip ${targetTrip?.trip_id ?? ''}`,
-      module: 'supplier_receivables',
-      record_id: tripId,
-      record_ref: tripReceivable?.trip_id ?? '',
-      requested_by: currentUser?.id,
-      assigned_to: allocForm.assignee,
-      priority: 'normal',
-    }).select().single()
 
-    await supabase.from('notifications').insert({
-      user_id: allocForm.assignee,
-      type: 'task_approval_request',
-      title: 'New task: Reallocation approval',
-      message: `${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to ${targetTrip?.trip_id ?? ''}`,
-      task_id: task?.id,
-      record_id: tripId,
-      module: 'supplier_receivables',
-    })
+    if (!canSelfApprove) {
+      const { data: task } = await supabase.from('tasks').insert({
+        type:         'approval_request',
+        title:        `Supplier receivable reallocation — ${tripReceivable?.trip_id}`,
+        description:  `Reallocation of ${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to trip ${targetTrip?.trip_id ?? ''}`,
+        module:       'supplier_receivables',
+        record_id:    tripId,
+        record_ref:   tripReceivable?.trip_id ?? '',
+        requested_by: currentUser?.id,
+        assigned_to:  allocForm.assignee,
+        priority:     'normal',
+      }).select().single()
 
-    await logActivity(
-      [firstReceivable.receivable_id].filter(Boolean),
-      'Reallocation requested',
-      `${fmtUSD(amount)} to trip ${targetTrip?.trip_id ?? ''}${pct ? ` (${pct}%)` : ''}`,
-      amount
-    )
+      await supabase.from('notifications').insert({
+        user_id:   allocForm.assignee,
+        type:      'task_approval_request',
+        title:     'New task: Reallocation approval',
+        message:   `${fmtUSD(amount)} from trip ${tripReceivable?.trip_id} to ${targetTrip?.trip_id ?? ''}`,
+        task_id:   task?.id,
+        record_id: tripId,
+        module:    'supplier_receivables',
+      })
+
+      await logActivity(
+        [firstReceivable.receivable_id].filter(Boolean),
+        'Reallocation requested',
+        `${fmtUSD(amount)} to trip ${targetTrip?.trip_id ?? ''}${pct ? ` (${pct}%)` : ''}`,
+        amount
+      )
+    } else if (alloc) {
+      const { data: targetTripData } = await supabase
+        .from('trips').select('id, trip_id').eq('id', allocForm.target_trip_id).single()
+
+      if (targetTripData) {
+        const { data: originExpenses } = await supabase
+          .from('trip_expenses')
+          .select('amount, amount_ngn, currency')
+          .eq('trip_id', tripId)
+
+        const usdExpenses = (originExpenses ?? []).filter(e => e.currency === 'USD')
+        const totalUSD = usdExpenses.reduce((s, e) => s + Number(e.amount), 0)
+        const totalNGN = usdExpenses.reduce((s, e) => s + Number(e.amount_ngn ?? 0), 0)
+        const originWAER = totalUSD > 0 ? totalNGN / totalUSD : 1
+        const amountNGN = amount * originWAER
+
+        const { data: expense } = await supabase.from('trip_expenses').insert({
+          trip_id:       targetTripData.id,
+          container_id:  allocForm.target_container_id || null,
+          category:      'container',
+          currency:      'USD',
+          amount:        amount,
+          exchange_rate: originWAER,
+          amount_ngn:    amountNGN,
+          description:   `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
+          expense_date:  new Date().toISOString().split('T')[0],
+          created_by:    currentUser?.id,
+        }).select().single()
+
+        if (expense) {
+          await supabase.from('supplier_receivable_allocations')
+            .update({
+              trip_expense_id: expense.id,
+              approved_by:     currentUser?.id,
+              approved_at:     new Date().toISOString(),
+            }).eq('id', alloc.id)
+        }
+
+        const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
+        const receivableContainers = containers.filter(c => c.receivable_id)
+        for (const container of receivableContainers) {
+          const { data: rec } = await supabase.from('supplier_receivables')
+            .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
+            .eq('id', container.receivable_id).single()
+          if (!rec) continue
+          const proportion = totalRemaining > 0
+            ? container.remaining_usd / totalRemaining
+            : 1 / Math.max(receivableContainers.length, 1)
+          const containerAmount = amount * proportion
+          const newApplied = Number(rec.total_applied_usd) + containerAmount
+          const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+          const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
+          const newStatus = newRemaining <= 0 ? 'fully_applied' : newApplied > 0 ? 'partially_applied' : 'open'
+          await supabase.from('supplier_receivables').update({
+            total_applied_usd: newApplied,
+            status: newStatus,
+          }).eq('id', container.receivable_id)
+        }
+      }
+
+      await logActivity(
+        [firstReceivable.receivable_id].filter(Boolean),
+        'Reallocation applied (admin)',
+        `${fmtUSD(amount)} applied to trip ${targetTrip?.trip_id ?? ''} — container ${allocForm.target_container_id} (WAER used from originating trip)`,
+        amount
+      )
+    }
 
     setSavingAlloc(false)
     setReallocateOpen(false)
@@ -1186,20 +1265,22 @@ function SupplierReceivablesDrilldownInner() {
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
                   placeholder="e.g. Agreed amount after negotiation..." />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>
-                <select required value={allocForm.assignee} onChange={e => setAllocForm(f => ({ ...f, assignee: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                  <option value="">Select approver...</option>
-                  {profiles.filter(p => p.id !== currentUser?.id).map(p => (
-                    <option key={p.id} value={p.id}>{p.full_name ?? p.email}</option>
-                  ))}
-                </select>
-              </div>
+              {!canSelfApprove && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>
+                  <select required value={allocForm.assignee} onChange={e => setAllocForm(f => ({ ...f, assignee: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                    <option value="">Select approver...</option>
+                    {profiles.filter(p => p.id !== currentUser?.id).map(p => (
+                      <option key={p.id} value={p.id}>{p.full_name ?? p.email}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setReallocateOpen(false)}
                   className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || !allocForm.assignee}
+                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || (!canSelfApprove && !allocForm.assignee)}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingAlloc ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><ArrowRightLeft size={14} /> Submit for approval</>}
                 </button>

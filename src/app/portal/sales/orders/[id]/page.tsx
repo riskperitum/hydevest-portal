@@ -4,11 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Loader2, Check, X, Pencil,
-  Trash2, CheckCircle2, Eye, Activity,
-  FileText, AlertTriangle, ChevronDown
+  ArrowLeft, FileText, CheckCircle2, Trash2,
+  Loader2, Check, X, Pencil, Eye, Activity, AlertTriangle, ChevronDown,
 } from 'lucide-react'
-import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 
@@ -547,60 +545,53 @@ export default function SalesOrderDetailPage() {
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Link href="/portal/sales/orders"
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-            <ArrowLeft size={18} />
-          </Link>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{order.order_id}</span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${order.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                {order.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
+        <div>
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <button onClick={() => router.back()}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+              <ArrowLeft size={16} />
+            </button>
+            <h1 className="text-lg font-semibold text-gray-900">{order.order_id}</h1>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${order.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+              {order.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}
+            </span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${paymentCfg.color}`}>
+              {paymentCfg.label}
+            </span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${approvalCfg.color}`}>
+              {approvalCfg.label}
+            </span>
+            {order.needs_approval && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Modified — needs approval
               </span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${paymentCfg.color}`}>
-                {paymentCfg.label}
-              </span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${approvalCfg.color}`}>
-                {approvalCfg.label}
-              </span>
-              {order.needs_approval && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  Modified — needs approval
-                </span>
-              )}
-            </div>
-            <h1 className="text-lg font-semibold text-gray-900 mt-0.5">
-              {order.customer?.name ?? 'Sales order'}
-            </h1>
-            <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs text-gray-400">
-              <span>Created by <span className="text-gray-600">{order.created_by_profile?.full_name ?? order.created_by_profile?.email ?? '—'}</span></span>
-              <span>on {new Date(order.created_at).toLocaleDateString()}</span>
-              {order.last_approved_at && (
-                <>
-                  <span className="text-gray-200">·</span>
-                  <span>Last approved by <span className="text-gray-600">{order.last_approver?.full_name ?? order.last_approver?.email ?? '—'}</span></span>
-                  <span>on {new Date(order.last_approved_at).toLocaleDateString()}</span>
-                </>
-              )}
-            </div>
+            )}
           </div>
+          <p className="text-sm text-gray-400 ml-8">
+            {order.customer?.name ?? '—'} · {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Action buttons — always top right */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             onClick={() => router.push(`/portal/sales/orders/${params.id}/invoice`)}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100">
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90 transition-opacity"
+            style={{ background: '#55249E' }}>
             <FileText size={14} /> View invoice
           </button>
-          <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
-            <CheckCircle2 size={13} /> Request approval
-          </button>
+
+          {order.approval_status !== 'approved' && (
+            <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
+              <CheckCircle2 size={14} /> Request approval
+            </button>
+          )}
+
           <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
-            <Trash2 size={13} /> Delete
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+            <Trash2 size={14} /> Delete
           </button>
         </div>
       </div>

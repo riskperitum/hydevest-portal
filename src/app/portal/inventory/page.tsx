@@ -555,12 +555,12 @@ export default function InventoryPage() {
       {/* Inventory table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1040px]">
+          <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="px-3 py-3 w-8" />
                 {['Container', 'Tracking No.', 'Trip', 'Sale type', 'Inventory status',
-                  'Pieces purchased', 'W/H pieces', 'Pieces sold', 'Pieces remaining',
+                  'Pieces purchased', 'W/H pieces',
                   'Pallets total', 'Pallets sold', 'Pallets available', 'Orders'].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
@@ -572,14 +572,14 @@ export default function InventoryPage() {
               {loading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 16 }).map((_, j) => (
+                    {Array.from({ length: 14 }).map((_, j) => (
                       <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="px-4 py-16 text-center">
+                  <td colSpan={14} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <Package size={24} className="text-gray-200" />
                       <p className="text-sm text-gray-400">No containers found.</p>
@@ -629,16 +629,6 @@ export default function InventoryPage() {
                       <td className="px-3 py-3 text-gray-700 whitespace-nowrap font-medium">{row.pieces_purchased.toLocaleString()}</td>
                       <td className="px-3 py-3 text-gray-700 whitespace-nowrap">
                         {row.warehouse_confirmed_pieces?.toLocaleString() ?? <span className="text-gray-300">—</span>}
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={row.pieces_sold > 0 ? 'text-green-600 font-medium' : 'text-gray-300'}>
-                          {row.pieces_sold > 0 ? row.pieces_sold.toLocaleString() : '—'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`font-semibold ${row.pieces_remaining > 0 ? 'text-brand-700' : 'text-gray-300'}`}>
-                          {row.pieces_remaining > 0 ? row.pieces_remaining.toLocaleString() : '0'}
-                        </span>
                       </td>
                       <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
                         {row.pallets_total > 0 ? row.pallets_total : <span className="text-gray-300">—</span>}
@@ -701,7 +691,7 @@ export default function InventoryPage() {
                     {/* Expanded pallet distribution rows */}
                     {isExpanded && hasDetails && (
                       <tr className="border-b border-gray-100 bg-brand-50/10">
-                        <td colSpan={16} className="px-6 py-4">
+                        <td colSpan={14} className="px-6 py-4">
                           <div className="ml-4">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                               Pallet distribution breakdown — {row.container_id}
@@ -818,31 +808,23 @@ export default function InventoryPage() {
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + (r.warehouse_confirmed_pieces ?? 0), 0).toLocaleString()} pcs
                   </td>
-                  {/* col 9: Pieces sold */}
-                  <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.pieces_sold, 0).toLocaleString()} pcs
-                  </td>
-                  {/* col 10: Pieces remaining */}
-                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
-                    {filtered.reduce((s, r) => s + r.pieces_remaining, 0).toLocaleString()} pcs
-                  </td>
-                  {/* col 11: Pallets total */}
+                  {/* col 9: Pallets total */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pallets_total, 0)}
                   </td>
-                  {/* col 12: Pallets sold */}
+                  {/* col 10: Pallets sold */}
                   <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pallets_sold, 0)}
                   </td>
-                  {/* col 13: Pallets available */}
+                  {/* col 11: Pallets available */}
                   <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.pallets_available, 0)}
                   </td>
-                  {/* col 14: Orders */}
+                  {/* col 12: Orders */}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 whitespace-nowrap">
                     {filtered.reduce((s, r) => s + r.total_orders, 0)}
                   </td>
-                  {/* col 15–16: Stage / pipeline status */}
+                  {/* col 13–14: Stage / pipeline status */}
                   <td className="px-3 py-3" />
                   <td className="px-3 py-3" />
                 </tr>

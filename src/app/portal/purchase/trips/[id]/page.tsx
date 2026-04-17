@@ -793,6 +793,27 @@ export default function TripDetailPage() {
   // Total USD = sum of all container purchase subtotals
   const containerPaymentUSD = containersTotalUSD
 
+  // Supplier payables calculation
+  // Total cost of containers = (unit_price_usd × pieces_purchased) + shipping_amount_usd per container
+  const totalContainerCostUSD = containers.reduce((s, c) => {
+    const purchase = (c.unit_price_usd && c.pieces_purchased)
+      ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+      : 0
+    const shipping = Number(c.shipping_amount_usd ?? 0)
+    return s + purchase + shipping
+  }, 0)
+
+  // Total paid to supplier = all container category expenses in USD
+  const totalPaidToSupplierUSD = expenses
+    .filter(e => e.category === 'container' && e.currency === 'USD')
+    .reduce((s, e) => s + Number(e.amount ?? 0), 0)
+
+  // Outstanding payable to supplier
+  const supplierOutstandingUSD = Math.max(0, totalContainerCostUSD - totalPaidToSupplierUSD)
+  const supplierPaidPct = totalContainerCostUSD > 0
+    ? Math.min(100, (totalPaidToSupplierUSD / totalContainerCostUSD) * 100)
+    : 0
+
   const metrics = [
     { label: 'Total landing amount (₦)', value: fmt(totalLanding), icon: <TrendingUp size={16} />, color: 'text-brand-600 bg-brand-50' },
     { label: 'Total container payment ($)', value: `$${containerPaymentUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <DollarSign size={16} />, color: 'text-green-600 bg-green-50' },
@@ -1143,6 +1164,51 @@ export default function TripDetailPage() {
             <p className="text-base font-semibold text-gray-900 truncate">{m.value}</p>
           </div>
         ))}
+        </div>
+
+        {/* Supplier payables bar */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Supplier payables</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Amount outstanding to supplier for this trip
+              </p>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <span className="text-gray-500">
+                Total cost: <span className="font-semibold text-gray-800">
+                  ${totalContainerCostUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
+              <span className="text-green-600">
+                Paid: <span className="font-semibold">
+                  ${totalPaidToSupplierUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
+              <span className={supplierOutstandingUSD > 0 ? 'text-red-600' : 'text-green-600'}>
+                Outstanding: <span className="font-bold text-base">
+                  ${supplierOutstandingUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
+            </div>
+          </div>
+          <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                supplierPaidPct >= 100 ? 'bg-green-500' :
+                supplierPaidPct >= 50  ? 'bg-brand-500' :
+                'bg-amber-400'
+              }`}
+              style={{ width: `${supplierPaidPct}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <p className="text-xs text-gray-400">{supplierPaidPct.toFixed(1)}% paid</p>
+            {supplierOutstandingUSD <= 0 && (
+              <p className="text-xs font-medium text-green-600">✓ Fully paid</p>
+            )}
+          </div>
         </div>
       </div>
 

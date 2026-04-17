@@ -163,9 +163,7 @@ function SupplierReceivablesDrilldownInner() {
 
   // Reallocation modal
   const [reallocateOpen, setReallocateOpen] = useState(searchParams.get('action') === 'reallocate')
-  const [allocForm, setAllocForm] = useState({ target_trip_id: '', target_container_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
-  const [targetTripContainers, setTargetTripContainers] = useState<{ id: string; container_id: string }[]>([])
-  const [loadingTargetContainers, setLoadingTargetContainers] = useState(false)
+  const [allocForm, setAllocForm] = useState({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
   const [savingAlloc, setSavingAlloc] = useState(false)
 
   // Write-off modal
@@ -359,7 +357,7 @@ function SupplierReceivablesDrilldownInner() {
 
   async function submitReallocation(e: React.FormEvent) {
     e.preventDefault()
-    if (!allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd) return
+    if (!allocForm.target_trip_id || !allocForm.amount_usd) return
     if (!canSelfApprove && !allocForm.assignee) return
     setSavingAlloc(true)
     const supabase = createClient()
@@ -381,14 +379,13 @@ function SupplierReceivablesDrilldownInner() {
     const allocStatus = canSelfApprove ? 'approved' : 'pending'
 
     const { data: alloc } = await supabase.from('supplier_receivable_allocations').insert({
-      receivable_id:        firstReceivable.receivable_id,
-      target_trip_id:       allocForm.target_trip_id,
-      target_container_id:  allocForm.target_container_id || null,
-      amount_usd:           amount,
-      percentage:           pct,
-      status:               allocStatus,
-      notes:                allocForm.notes || null,
-      requested_by:         currentUser?.id,
+      receivable_id:  firstReceivable.receivable_id,
+      target_trip_id: allocForm.target_trip_id,
+      amount_usd:     amount,
+      percentage:     pct,
+      status:         allocStatus,
+      notes:          allocForm.notes || null,
+      requested_by:   currentUser?.id,
     }).select().single()
 
     const targetTrip = otherTrips.find(t => t.id === allocForm.target_trip_id)
@@ -423,24 +420,23 @@ function SupplierReceivablesDrilldownInner() {
         amount
       )
     } else if (alloc) {
+      const { data: originExpenses } = await supabase
+        .from('trip_expenses')
+        .select('amount, amount_ngn, currency')
+        .eq('trip_id', tripId)
+      const usdExpenses = (originExpenses ?? []).filter(e => e.currency === 'USD')
+      const totalUSD = usdExpenses.reduce((s, e) => s + Number(e.amount), 0)
+      const totalNGN = usdExpenses.reduce((s, e) => s + Number(e.amount_ngn ?? 0), 0)
+      const originWAER = totalUSD > 0 ? totalNGN / totalUSD : 1
+
       const { data: targetTripData } = await supabase
         .from('trips').select('id, trip_id').eq('id', allocForm.target_trip_id).single()
 
       if (targetTripData) {
-        const { data: originExpenses } = await supabase
-          .from('trip_expenses')
-          .select('amount, amount_ngn, currency')
-          .eq('trip_id', tripId)
-
-        const usdExpenses = (originExpenses ?? []).filter(e => e.currency === 'USD')
-        const totalUSD = usdExpenses.reduce((s, e) => s + Number(e.amount), 0)
-        const totalNGN = usdExpenses.reduce((s, e) => s + Number(e.amount_ngn ?? 0), 0)
-        const originWAER = totalUSD > 0 ? totalNGN / totalUSD : 1
         const amountNGN = amount * originWAER
 
         const { data: expense } = await supabase.from('trip_expenses').insert({
           trip_id:       targetTripData.id,
-          container_id:  allocForm.target_container_id || null,
           category:      'container',
           currency:      'USD',
           amount:        amount,
@@ -485,15 +481,14 @@ function SupplierReceivablesDrilldownInner() {
       await logActivity(
         [firstReceivable.receivable_id].filter(Boolean),
         'Reallocation applied (admin)',
-        `${fmtUSD(amount)} applied to trip ${targetTrip?.trip_id ?? ''} — container ${allocForm.target_container_id} (WAER used from originating trip)`,
+        `${fmtUSD(amount)} applied to trip ${targetTrip?.trip_id ?? ''} as container payment (WAER from originating trip: ₦${originWAER.toFixed(2)}/$)`,
         amount
       )
     }
 
     setSavingAlloc(false)
     setReallocateOpen(false)
-    setAllocForm({ target_trip_id: '', target_container_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
-    setTargetTripContainers([])
+    setAllocForm({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
     load()
   }
 
@@ -530,7 +525,6 @@ function SupplierReceivablesDrilldownInner() {
 
       const { data: expense } = await supabase.from('trip_expenses').insert({
         trip_id:       targetTrip.id,
-        container_id:  alloc.target_container_id ?? null,
         category:      'container',
         currency:      'USD',
         amount:        alloc.amount_usd,
@@ -1179,23 +1173,7 @@ function SupplierReceivablesDrilldownInner() {
                 <select
                   required
                   value={allocForm.target_trip_id}
-                  onChange={async e => {
-                    const selectedTripId = e.target.value
-                    setAllocForm(f => ({ ...f, target_trip_id: selectedTripId, target_container_id: '' }))
-                    if (selectedTripId) {
-                      setLoadingTargetContainers(true)
-                      const supabase = createClient()
-                      const { data: tripContainers } = await supabase
-                        .from('containers')
-                        .select('id, container_id')
-                        .eq('trip_id', selectedTripId)
-                        .order('container_id', { ascending: true })
-                      setTargetTripContainers(tripContainers ?? [])
-                      setLoadingTargetContainers(false)
-                    } else {
-                      setTargetTripContainers([])
-                    }
-                  }}
+                  onChange={e => setAllocForm(f => ({ ...f, target_trip_id: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
                 >
                   <option value="">Select a trip...</option>
@@ -1280,7 +1258,7 @@ function SupplierReceivablesDrilldownInner() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setReallocateOpen(false)}
                   className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || (!canSelfApprove && !allocForm.assignee)}
+                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.amount_usd || (!canSelfApprove && !allocForm.assignee)}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingAlloc ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><ArrowRightLeft size={14} /> Submit for approval</>}
                 </button>

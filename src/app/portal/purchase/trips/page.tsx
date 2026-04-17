@@ -24,6 +24,8 @@ interface Trip {
   supplier: { name: string } | null
   clearing_agent: { name: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
+  hasModifiedContainers?: boolean
+  modified_containers?: { id: string; is_modified: boolean | null }[] | null
 }
 
 interface Supplier { id: string; name: string }
@@ -81,10 +83,14 @@ export default function TripsPage() {
         *,
         supplier:suppliers(name),
         clearing_agent:clearing_agents(name),
-        created_by_profile:profiles!trips_created_by_fkey(full_name, email)
+        created_by_profile:profiles!trips_created_by_fkey(full_name, email),
+        modified_containers:containers(id, is_modified)
       `)
       .order('created_at', { ascending: false })
-    setTrips(data ?? [])
+    setTrips((data ?? []).map(t => ({
+      ...t,
+      hasModifiedContainers: ((t as any).modified_containers ?? []).some((c: any) => c.is_modified === true),
+    })))
     setLoading(false)
   }, [])
 
@@ -502,7 +508,19 @@ export default function TripsPage() {
                     className="border-b border-gray-50 hover:bg-brand-50/40 transition-colors cursor-pointer group"
                   >
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
+                      <div className="flex items-center">
+                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{trip.trip_id}</span>
+                        {trip.hasModifiedContainers && (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 ml-1">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                              <line x1="12" y1="9" x2="12" y2="13"/>
+                              <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            Modified
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">

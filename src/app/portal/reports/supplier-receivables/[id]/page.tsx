@@ -357,7 +357,6 @@ function SupplierReceivablesDrilldownInner() {
 
   async function submitReallocation(e: React.FormEvent) {
     e.preventDefault()
-    console.log('canSelfApprove:', canSelfApprove, 'isSuperAdmin:', isSuperAdmin, 'permissions:', Array.from(permissions))
     if (!allocForm.target_trip_id || !allocForm.amount_usd) return
     if (!canSelfApprove && !allocForm.assignee) return
     setSavingAlloc(true)
@@ -425,25 +424,26 @@ function SupplierReceivablesDrilldownInner() {
         .from('trip_expenses')
         .select('amount, amount_ngn, currency')
         .eq('trip_id', tripId)
-      const usdExpenses = (originExpenses ?? []).filter(e => e.currency === 'USD')
-      const totalUSD = usdExpenses.reduce((s, e) => s + Number(e.amount), 0)
-      const totalNGN = usdExpenses.reduce((s, e) => s + Number(e.amount_ngn ?? 0), 0)
-      const originWAER = totalUSD > 0 ? totalNGN / totalUSD : 1
+      // Calculate WAER before targetTripData check so it is in scope
+      const usdExpensesForRate = (originExpenses ?? []).filter((e: any) => e.currency === 'USD')
+      const totalUSDRate = usdExpensesForRate.reduce((s: number, e: any) => s + Number(e.amount), 0)
+      const totalNGNRate = usdExpensesForRate.reduce((s: number, e: any) => s + Number(e.amount_ngn ?? 0), 0)
+      const originWAERFinal = totalUSDRate > 0 ? totalNGNRate / totalUSDRate : 1
 
       const { data: targetTripData } = await supabase
         .from('trips').select('id, trip_id').eq('id', allocForm.target_trip_id).single()
 
       if (targetTripData) {
-        const amountNGN = amount * originWAER
+        const amountNGN = amount * originWAERFinal
 
         const { data: expense } = await supabase.from('trip_expenses').insert({
           trip_id:       targetTripData.id,
           category:      'container',
           currency:      'USD',
           amount:        amount,
-          exchange_rate: originWAER,
+          exchange_rate: originWAERFinal,
           amount_ngn:    amountNGN,
-          description:   `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
+          description:   `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAERFinal.toFixed(2)}/$)`,
           expense_date:  new Date().toISOString().split('T')[0],
           created_by:    currentUser?.id,
         }).select().single()
@@ -482,7 +482,7 @@ function SupplierReceivablesDrilldownInner() {
       await logActivity(
         [firstReceivable.receivable_id].filter(Boolean),
         'Reallocation applied (admin)',
-        `${fmtUSD(amount)} applied to trip ${targetTrip?.trip_id ?? ''} as container payment (WAER from originating trip: ₦${originWAER.toFixed(2)}/$)`,
+        `${fmtUSD(amount)} applied to trip ${targetTrip?.trip_id ?? ''} as container payment`,
         amount
       )
     }

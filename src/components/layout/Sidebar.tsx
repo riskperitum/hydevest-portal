@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
-  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw
+  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, AlertTriangle
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -15,7 +15,7 @@ interface NavItem {
   label: string
   href?: string
   icon: any
-  children?: { label: string; href: string }[]
+  children?: { label: string; href: string; icon?: any; exactMatch?: boolean }[]
   adminOnly?: boolean
   partnerOnly?: boolean
 }
@@ -63,7 +63,18 @@ const NAV: NavItem[] = [
     partnerOnly: true,
   },
   { label: 'Finance',     href: '/portal/finance',    icon: BarChart3 },
-  { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
+  {
+    label: 'Reports',
+    icon: BarChart2,
+    children: [
+      { label: 'Overview', href: '/portal/reports', exactMatch: true },
+      {
+        href: '/portal/reports/bad-debts',
+        label: 'Bad debts',
+        icon: AlertTriangle,
+      },
+    ],
+  },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
 ]
@@ -75,7 +86,7 @@ const PARTNER_NAV: NavItem[] = [
 
 export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
-  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
+  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales', 'Reports'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -101,6 +112,13 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
 
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + '/')
+  }
+
+  function isChildActive(href: string, exactMatch?: boolean) {
+    if (exactMatch) {
+      return pathname === href || pathname === `${href}/`
+    }
+    return isActive(href)
   }
 
   const SidebarContent = () => (
@@ -139,7 +157,7 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
         ).map(item => {
           if (item.children) {
             const isOpen = openGroups.includes(item.label)
-            const hasActive = item.children.some(c => isActive(c.href))
+            const hasActive = item.children.some(c => isChildActive(c.href, c.exactMatch))
             const Icon = item.icon
             return (
               <div key={item.label}>
@@ -157,15 +175,24 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
                 </button>
                 {isOpen && !collapsed && (
                   <div className="ml-9 mt-0.5 space-y-0.5">
-                    {item.children.map(child => (
-                      <Link key={child.href} href={child.href}
-                        className={`block px-3 py-1.5 rounded-lg text-sm transition-colors
-                          ${isActive(child.href)
-                            ? 'bg-brand-50 text-brand-700 font-medium'
-                            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}>
-                        {child.label}
-                      </Link>
-                    ))}
+                    {item.children.map(child => {
+                      const ChildIcon = child.icon
+                      const active = isChildActive(child.href, child.exactMatch)
+                      return (
+                        <Link key={child.href} href={child.href}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors
+                            ${active
+                              ? 'bg-brand-50 text-brand-700 font-medium'
+                              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}>
+                          {ChildIcon && (
+                            <span className={active ? 'text-brand-600' : 'text-gray-400'}>
+                              <ChildIcon size={16} />
+                            </span>
+                          )}
+                          {child.label}
+                        </Link>
+                      )
+                    })}
                   </div>
                 )}
               </div>

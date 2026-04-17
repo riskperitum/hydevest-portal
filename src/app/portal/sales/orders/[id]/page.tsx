@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface SalesOrder {
   id: string
@@ -29,6 +30,11 @@ interface SalesOrder {
   last_approved_by: string | null
   status: string
   created_at: string
+  write_off_status: string | null
+  written_off_amount: number | null
+  written_off_note: string | null
+  written_off_by: string | null
+  written_off_at: string | null
   container: {
     container_id: string
     tracking_number: string | null
@@ -105,9 +111,20 @@ export default function SalesOrderDetailPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
 
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
+
+  const [writeOffOpen, setWriteOffOpen] = useState(false)
+  const [writeOffNote, setWriteOffNote] = useState('')
+  const [writeOffAmount, setWriteOffAmount] = useState('')
+  const [writeOffSaving, setWriteOffSaving] = useState(false)
+  const [writeOffError, setWriteOffError] = useState('')
+  const [currentUser, setCurrentUser] = useState<{ id: string; full_name: string | null } | null>(null)
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: o }, { data: pl }, { data: al }] = await Promise.all([
+      // * includes write_off_status, written_off_amount, written_off_note, written_off_by, written_off_at when present on sales_orders
       supabase.from('sales_orders')
         .select(`*,
           container:containers(container_id, tracking_number, container_number,
@@ -138,8 +155,13 @@ export default function SalesOrderDetailPage() {
   useEffect(() => {
     load()
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
-    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
+    void supabase.auth.getUser().then(async ({ data: { user } }) => {
+      setCurrentUserId(user?.id ?? null)
+      if (!user) return
+      const { data } = await supabase.from('profiles').select('id, full_name').eq('id', user.id).single()
+      setCurrentUser(data)
+    })
+    void supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
       .then(({ data }) => setEmployees(data ?? []))
   }, [load])
 
@@ -154,6 +176,151 @@ export default function SalesOrderDetailPage() {
       old_value: oldValue ?? null, new_value: newValue ?? null,
       performed_by: user?.id,
     })
+  }
+
+  async function submitWriteOff(e: React.FormEvent) {
+    e.preventDefault()
+    if (!order || !currentUser) return
+    setWriteOffError('')
+    const amount = parseFloat(writeOffAmount)
+    if (!amount || amount <= 0) { setWriteOffError('Enter a valid amount.'); return }
+    if (amount > order.outstanding_balance) { setWriteOffError('Amount cannot exceed outstanding balance.'); return }
+    if (!writeOffNote.trim()) { setWriteOffError('A note is required for write-offs.'); return }
+    setWriteOffSaving(true)
+    const supabase = createClient()
+
+    try {
+      const bdSeq = Date.now().toString().slice(-5)
+      const taskSeq = Date.now().toString().slice(-4) + Math.floor(Math.random() * 10)
+
+      let containerUuid: string | null = null
+      if (order.container?.container_id) {
+        const { data: conRow } = await supabase
+          .from('containers')
+          .select('id')
+          .eq('container_id', order.container.container_id)
+          .maybeSingle()
+        containerUuid = conRow?.id ?? null
+      }
+
+      await supabase.from('bad_debts').insert({
+        bad_debt_id:    `BD-${bdSeq}`,
+        sales_order_id: order.id,
+        container_id:   containerUuid,
+        customer_id:    order.customer?.id ?? null,
+        amount_ngn:     amount,
+        note:           writeOffNote.trim(),
+        status:         'pending',
+        requested_by:   currentUser.id,
+      })
+
+      await supabase.from('sales_orders').update({
+        write_off_status:    'pending_approval',
+        written_off_amount:  amount,
+        written_off_note:    writeOffNote.trim(),
+        written_off_by:      currentUser.id,
+      }).eq('id', order.id)
+
+      await supabase.from('tasks').insert({
+        task_id:      `TASK-${taskSeq}`,
+        title:        `Approve write-off — ${order.order_id} (${order.customer?.name ?? 'Customer'})`,
+        module:       'sales_orders',
+        record_id:    order.id,
+        record_ref:   order.order_id,
+        status:       'pending',
+        priority:     'high',
+        requested_by: currentUser.id,
+        type:         'write_off',
+        description:  `Write-off of ₦${amount.toLocaleString()} — ${writeOffNote.trim()}`,
+      })
+
+      const { data: adminRows } = await supabase
+        .from('user_roles')
+        .select('user_id, roles(name)')
+      for (const admin of adminRows ?? []) {
+        const roleName = (admin.roles as { name?: string } | null)?.name
+        if (roleName === 'admin' || roleName === 'super_admin') {
+          await supabase.from('notifications').insert({
+            user_id:   admin.user_id,
+            type:      'task_assigned',
+            title:     `Write-off request — ${order.order_id}`,
+            message:   `₦${amount.toLocaleString()} write-off requested for ${order.customer?.name ?? 'Customer'}`,
+            record_id: order.id,
+            module:    'sales_orders',
+          })
+        }
+      }
+
+      setWriteOffOpen(false)
+      setWriteOffNote('')
+      setWriteOffAmount('')
+      await load()
+    } catch (err) {
+      console.error(err)
+      setWriteOffError('Something went wrong. Please try again.')
+    } finally {
+      setWriteOffSaving(false)
+    }
+  }
+
+  async function approveWriteOff() {
+    if (!order || !currentUser) return
+    const supabase = createClient()
+    const written = Number(order.written_off_amount ?? 0)
+    const newOutstanding = Math.max(0, order.outstanding_balance - written)
+    const newPaymentStatus = newOutstanding <= 0 ? 'paid' : order.payment_status
+
+    await supabase.from('sales_orders').update({
+      write_off_status:   'approved',
+      written_off_at:     new Date().toISOString(),
+      outstanding_balance: newOutstanding,
+      payment_status:     newPaymentStatus,
+    }).eq('id', order.id)
+
+    await supabase.from('bad_debts').update({
+      status:      'approved',
+      approved_by: currentUser.id,
+      approved_at: new Date().toISOString(),
+    }).eq('sales_order_id', order.id).eq('status', 'pending')
+
+    await supabase.from('tasks').update({ status: 'actioned' })
+      .eq('record_id', order.id)
+      .eq('type', 'write_off')
+      .eq('status', 'pending')
+
+    if (order.written_off_by) {
+      await supabase.from('notifications').insert({
+        user_id:   order.written_off_by,
+        type:      'task_approved',
+        title:     `Write-off approved — ${order.order_id}`,
+        message:   `₦${written.toLocaleString()} write-off has been approved.`,
+        record_id: order.id,
+        module:    'sales_orders',
+      })
+    }
+
+    await load()
+  }
+
+  async function rejectWriteOff() {
+    if (!order || !currentUser) return
+    const supabase = createClient()
+
+    await supabase.from('sales_orders').update({
+      write_off_status:   'rejected',
+      written_off_amount: 0,
+      written_off_note:   null,
+    }).eq('id', order.id)
+
+    await supabase.from('bad_debts').update({ status: 'rejected' })
+      .eq('sales_order_id', order.id).eq('status', 'pending')
+
+    await supabase.from('tasks').update({ status: 'rejected' })
+      .eq('record_id', order.id)
+      .eq('type', 'write_off')
+      .eq('status', 'pending')
+
+    await load()
   }
 
   async function updateField(field: string, value: string) {
@@ -718,6 +885,62 @@ export default function SalesOrderDetailPage() {
                 </span>
               </div>
             </div>
+
+            {/* Write-off panel */}
+            {order.outstanding_balance > 0 && order.write_off_status !== 'approved' && (
+              <div className={`p-4 rounded-xl border ${
+                order.write_off_status === 'pending_approval'
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-gray-50 border-gray-100'
+              }`}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">
+                      {order.write_off_status === 'pending_approval'
+                        ? 'Write-off pending approval'
+                        : 'Outstanding balance'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {order.write_off_status === 'pending_approval'
+                        ? `₦${Number(order.written_off_amount ?? 0).toLocaleString()} requested — ${order.written_off_note}`
+                        : `₦${order.outstanding_balance.toLocaleString()} remaining`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {order.write_off_status === 'pending_approval' && canApprove && (
+                      <>
+                        <button type="button" onClick={() => void approveWriteOff()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700">
+                          <Check size={12} /> Approve write-off
+                        </button>
+                        <button type="button" onClick={() => void rejectWriteOff()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                          <X size={12} /> Reject
+                        </button>
+                      </>
+                    )}
+                    {!order.write_off_status || order.write_off_status === 'rejected' ? (
+                      <button type="button" onClick={() => {
+                        setWriteOffAmount(order.outstanding_balance.toString())
+                        setWriteOffOpen(true)
+                      }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                        <AlertTriangle size={12} /> Write off as bad debt
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {order.write_off_status === 'approved' && (
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <p className="text-xs text-gray-500">
+                  <span className="font-medium text-gray-700">₦{Number(order.written_off_amount ?? 0).toLocaleString()}</span> written off as bad debt
+                  {order.written_off_note && <span> — {order.written_off_note}</span>}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -838,6 +1061,60 @@ export default function SalesOrderDetailPage() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={writeOffOpen} onClose={() => { setWriteOffOpen(false); setWriteOffError('') }} title="Write off as bad debt" size="sm">
+        {order && (
+          <form onSubmit={submitWriteOff} className="space-y-4">
+            <div className="p-3 bg-red-50 rounded-xl border border-red-100">
+              <p className="text-xs font-semibold text-red-800">This action pushes the outstanding balance to bad debt.</p>
+              <p className="text-xs text-red-600 mt-1">
+                It requires admin approval. Once approved, the outstanding balance will be reduced by the written-off amount
+                and the recovery can be closed.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Amount to write off (NGN) <span className="text-red-400">*</span>
+              </label>
+              <input type="number" step="0.01" min="0.01"
+                max={order.outstanding_balance}
+                required value={writeOffAmount}
+                onChange={e => setWriteOffAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <p className="text-xs text-gray-400 mt-1">
+                Outstanding: ₦{order.outstanding_balance.toLocaleString()}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Reason <span className="text-red-400">*</span>
+              </label>
+              <textarea required rows={3} value={writeOffNote}
+                onChange={e => setWriteOffNote(e.target.value)}
+                placeholder="Explain why this amount is being written off (e.g. customer insolvent, uncontactable, disputed amount agreed to be waived)..."
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            </div>
+
+            {writeOffError && (
+              <p className="text-xs text-red-600 font-medium">{writeOffError}</p>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={() => { setWriteOffOpen(false); setWriteOffError('') }}
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={writeOffSaving}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {writeOffSaving ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit for approval'}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   )

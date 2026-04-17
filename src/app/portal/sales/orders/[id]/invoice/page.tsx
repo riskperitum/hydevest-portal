@@ -315,11 +315,13 @@ export default function InvoicePage() {
           </div>
 
           {/* Legal statement */}
-          <div style={{ borderLeft: '4px solid #55249E', background: '#f0ecfc', padding: '10px 14px', borderRadius: '0 8px 8px 0', fontSize: 11, color: '#2d2d2d', lineHeight: 1.7, fontWeight: 500 }}>
-            <strong style={{ color: '#55249E' }}>Note:</strong> The customer agrees to settle the outstanding balance in full
-            by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
-            including but not limited to property seizure.
-          </div>
+          {Number(invoice.outstanding_balance) > 0 && (
+            <div style={{ borderLeft: '4px solid #55249E', background: '#f0ecfc', padding: '10px 14px', borderRadius: '0 8px 8px 0', fontSize: 11, color: '#2d2d2d', lineHeight: 1.7, fontWeight: 500 }}>
+              <strong style={{ color: '#55249E' }}>Note:</strong> The customer agrees to settle the outstanding balance in full
+              by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
+              including but not limited to property seizure.
+            </div>
+          )}
 
           {/* Signatures */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 8 }}>

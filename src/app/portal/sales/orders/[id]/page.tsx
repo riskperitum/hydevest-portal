@@ -109,7 +109,6 @@ export default function SalesOrderDetailPage() {
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [invoiceOpen, setInvoiceOpen] = useState(false)
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
@@ -401,102 +400,6 @@ export default function SalesOrderDetailPage() {
     load()
   }
 
-  function generateInvoice() {
-    if (!order) return
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Invoice ${order.order_id} — Hydevest</title>
-    <style>
-      *{margin:0;padding:0;box-sizing:border-box}
-      body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1a1a2e;background:#fff;padding:40px}
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px}
-      .company{font-size:24px;font-weight:800;color:#55249E}
-      .company-sub{font-size:12px;color:#6b7280;margin-top:4px}
-      .invoice-title{text-align:right}
-      .invoice-title h1{font-size:32px;font-weight:700;color:#55249E}
-      .invoice-title p{font-size:13px;color:#6b7280;margin-top:4px}
-      .divider{height:2px;background:#55249E;margin:24px 0;border-radius:1px}
-      .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px}
-      .section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;margin-bottom:8px}
-      .section-value{font-size:14px;font-weight:600;color:#111827}
-      .section-sub{font-size:12px;color:#6b7280;margin-top:2px}
-      table{width:100%;border-collapse:collapse;margin-bottom:24px}
-      thead th{background:#55249E;color:white;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-      tbody td{padding:10px 14px;font-size:13px;border-bottom:1px solid #f0ebff}
-      tbody tr:nth-child(even){background:#faf8ff}
-      .totals{margin-left:auto;width:280px}
-      .total-row{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px solid #f0ebff}
-      .total-row.final{font-size:16px;font-weight:700;color:#55249E;border-top:2px solid #55249E;border-bottom:none;padding-top:12px}
-      .total-row.outstanding{color:#ef4444;font-weight:600}
-      .footer{margin-top:48px;text-align:center;font-size:11px;color:#9ca3af;border-top:1px solid #f0ebff;padding-top:20px}
-      .badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600}
-      .badge-outstanding{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
-      .badge-partial{background:#fffbeb;color:#d97706;border:1px solid #fde68a}
-      .badge-paid{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
-      @media print{body{padding:20px}button{display:none}}
-    </style></head><body>
-    <div class="header">
-      <div>
-        <div class="company">HYDEVEST</div>
-        <div class="company-sub">Nigerian Hides Trading Company</div>
-      </div>
-      <div class="invoice-title">
-        <h1>INVOICE</h1>
-        <p>${order.order_id}</p>
-        <p style="margin-top:8px">${new Date(order.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })}</p>
-      </div>
-    </div>
-    <div class="divider"></div>
-    <div class="grid-2">
-      <div>
-        <div class="section-label">Bill to</div>
-        <div class="section-value">${order.customer?.name ?? '—'}</div>
-        <div class="section-sub">${order.customer?.customer_id ?? ''}</div>
-        ${order.customer?.phone ? `<div class="section-sub">${order.customer.phone}</div>` : ''}
-      </div>
-      <div>
-        <div class="section-label">Container details</div>
-        <div class="section-value">${order.container?.tracking_number ?? order.container?.container_id ?? '—'}</div>
-        <div class="section-sub">${order.container?.trip?.trip_id ?? ''} — ${order.container?.trip?.title ?? ''}</div>
-        <div class="section-sub" style="margin-top:8px">Sale type: <strong>${order.sale_type === 'box_sale' ? 'Box sale' : 'Split sale'}</strong></div>
-        <div class="section-sub">Payment method: <strong style="text-transform:capitalize">${order.payment_method}</strong></div>
-      </div>
-    </div>
-    ${order.sale_type === 'split_sale' && palletLines.length > 0 ? `
-    <table>
-      <thead><tr><th>Pallet type</th><th>Pallets</th><th>Total pieces</th><th>Price / piece</th><th>Line total</th></tr></thead>
-      <tbody>
-        ${palletLines.map(l => `<tr>
-          <td>${l.pieces_per_pallet.toLocaleString()} pcs/pallet</td>
-          <td>${l.pallets_sold}</td>
-          <td>${l.total_pieces.toLocaleString()}</td>
-          <td>₦${Number(l.selling_price_per_piece).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-          <td><strong>₦${Number(l.line_total).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></td>
-        </tr>`).join('')}
-      </tbody>
-    </table>` : ''}
-    <div class="totals">
-      <div class="total-row"><span>Sale amount</span><span>₦${Number(order.sale_amount).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
-      ${Number(order.discount) > 0 ? `<div class="total-row"><span>Discount</span><span style="color:#ef4444">-₦${Number(order.discount).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>` : ''}
-      ${Number(order.overages) > 0 ? `<div class="total-row"><span>Overages</span><span style="color:#16a34a">+₦${Number(order.overages).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>` : ''}
-      <div class="total-row final"><span>Total payable</span><span>₦${Number(order.customer_payable).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
-      <div class="total-row"><span>Amount paid</span><span style="color:#16a34a">₦${Number(order.amount_paid).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
-      <div class="total-row outstanding"><span>Outstanding balance</span><span>₦${Number(order.outstanding_balance).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
-    </div>
-    <div style="margin-top:24px">
-      <span class="badge badge-${order.payment_status}">${order.payment_status === 'paid' ? 'Fully Paid' : order.payment_status === 'partial' ? 'Partially Paid' : 'Payment Outstanding'}</span>
-    </div>
-    <div class="footer">
-      <p>Thank you for your business — Hydevest</p>
-      <p style="margin-top:4px">Generated ${new Date().toLocaleString()} · ${order.order_id}</p>
-    </div>
-    <script>window.onload=()=>window.print()</script>
-    </body></html>`
-    const blob = new Blob([html], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
-    setInvoiceOpen(false)
-  }
-
   const EditableField = ({ fieldKey, label, value, type = 'text' }: {
     fieldKey: string; label: string; value: string; type?: string
   }) => (
@@ -686,10 +589,6 @@ export default function SalesOrderDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => setInvoiceOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors">
-            <FileText size={13} /> Invoice
-          </button>
           <button
             onClick={() => router.push(`/portal/sales/orders/${params.id}/invoice`)}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100">
@@ -1028,41 +927,6 @@ export default function SalesOrderDetailPage() {
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
               {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Invoice preview modal */}
-      <Modal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} title="Generate invoice" size="md">
-        <div className="space-y-4">
-          <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Order</span>
-              <span className="font-medium text-gray-900">{order.order_id}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Customer</span>
-              <span className="font-medium text-gray-900">{order.customer?.name}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Total payable</span>
-              <span className="font-bold text-gray-900">{fmt(order.customer_payable)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Outstanding</span>
-              <span className={`font-semibold ${Number(order.outstanding_balance) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {fmt(order.outstanding_balance)}
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-gray-400">The invoice will open in a new tab and auto-print.</p>
-          <div className="flex gap-3">
-            <button onClick={() => setInvoiceOpen(false)}
-              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-            <button onClick={generateInvoice}
-              className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors flex items-center justify-center gap-2">
-              <FileText size={14} /> Generate invoice
             </button>
           </div>
         </div>

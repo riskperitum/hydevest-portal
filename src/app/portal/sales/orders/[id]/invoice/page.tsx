@@ -8,7 +8,6 @@ import { ArrowLeft, Printer, Loader2 } from 'lucide-react'
 interface InvoiceData {
   order_id: string
   created_at: string
-  due_date: string
   sale_type: string
   sale_amount: number
   discount: number
@@ -68,7 +67,6 @@ export default function InvoicePage() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-
     const [{ data: order }, { data: settingsData }] = await Promise.all([
       supabase.from('sales_orders').select(`
         id, order_id, sale_type, sale_amount, discount, overages,
@@ -91,7 +89,6 @@ export default function InvoicePage() {
       `).eq('id', orderId).single(),
       supabase.from('finance_settings').select('key, value'),
     ])
-
     if (order) setInvoice(order as any)
     const sMap = Object.fromEntries((settingsData ?? []).map(s => [s.key, s.value]))
     setSettings(sMap)
@@ -99,8 +96,6 @@ export default function InvoicePage() {
   }, [orderId])
 
   useEffect(() => { load() }, [load])
-
-  function handlePrint() { window.print() }
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[400px]">
@@ -114,273 +109,235 @@ export default function InvoicePage() {
     </div>
   )
 
-  const invoiceNumber  = `INV-${invoice.order_id}`
-  const invoiceDate    = new Date(invoice.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-  const dueDate        = addDays(invoice.created_at, 14)
-  const companyName    = settings.company_name    ?? 'Hydevest Solutions Limited'
-  const companyRC      = settings.company_rc      ?? ''
-  const companyTIN     = settings.company_tin     ?? ''
-  const sigName        = settings.authorized_signatory_name ?? 'Authorized Signatory'
-  const sigImage       = settings.authorized_signature ?? ''
-  const isSplit        = invoice.sale_type === 'split_sale'
+  const invoiceNumber = `INV-${invoice.order_id}`
+  const invoiceDate   = new Date(invoice.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  const dueDate       = addDays(invoice.created_at, 14)
+  const companyName   = settings.company_name ?? 'Hydevest Solutions Limited'
+  const companyRC     = settings.company_rc ?? ''
+  const companyTIN    = settings.company_tin ?? ''
+  const sigName       = settings.authorized_signatory_name ?? 'Authorized Signatory'
+  const sigImage      = settings.authorized_signature ?? ''
+  const isSplit       = invoice.sale_type === 'split_sale'
+  const hideType      = invoice.container?.hide_type ?? ''
+  const description   = `${hideType ? hideType.charAt(0).toUpperCase() + hideType.slice(1) + ' ' : ''}Purchase of cow hides`
 
   return (
     <div className="max-w-4xl mx-auto">
 
-      {/* Print controls — hidden when printing */}
-      <div className="flex items-center gap-3 mb-6 print:hidden">
+      {/* Screen controls */}
+      <div className="flex items-center gap-3 mb-4 print:hidden">
         <button onClick={() => router.back()}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
-          <ArrowLeft size={14} /> Back
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+          <ArrowLeft size={13} /> Back
         </button>
-        <button onClick={handlePrint}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Printer size={14} /> Print / Save PDF
+        <button onClick={() => window.print()}
+          className="inline-flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-lg text-white"
+          style={{ background: '#55249E' }}>
+          <Printer size={13} /> Print / Save PDF
         </button>
       </div>
 
-      {/* ── INVOICE DOCUMENT ── */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden print:border-0 print:rounded-none"
-        id="invoice-document">
+      {/* INVOICE DOCUMENT */}
+      <div id="invoice-document"
+        className="bg-white border border-gray-200 print:border-0"
+        style={{ fontFamily: 'Arial, sans-serif', fontSize: 11 }}>
 
-        {/* Header bar */}
-        <div style={{ background: '#55249E' }} className="px-10 py-8 text-white">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">{companyName}</h1>
-              {companyRC  && <p className="text-sm opacity-80 mt-1">RC: {companyRC}</p>}
-              {companyTIN && <p className="text-sm opacity-80">TIN: {companyTIN}</p>}
+        {/* Header */}
+        <div style={{ background: '#55249E', padding: '16px 28px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <img src="/logo.png" alt="Hydevest logo"
+                style={{ height: 48, width: 'auto', objectFit: 'contain' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+              <div style={{ color: 'white' }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{companyName}</div>
+                <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>
+                  {companyRC && `RC: ${companyRC}`}{companyRC && companyTIN ? ' · ' : ''}{companyTIN && `TIN: ${companyTIN}`}
+                </div>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-3xl font-bold tracking-tight opacity-90">INVOICE</p>
-              <p className="text-lg font-semibold mt-1">{invoiceNumber}</p>
-              <p className="text-sm opacity-70 mt-1">{invoiceDate}</p>
+            <div style={{ color: 'white', textAlign: 'right' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: 2 }}>INVOICE</div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>{invoiceNumber}</div>
+              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>Sales Order: {invoice.order_id}</div>
+              <div style={{ fontSize: 10, opacity: 0.7 }}>{invoiceDate}</div>
             </div>
           </div>
         </div>
 
-        <div className="px-10 py-8 space-y-8">
+        <div style={{ padding: '16px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* Bill to + Invoice details */}
-          <div className="grid grid-cols-2 gap-8">
+          {/* Bill to + Invoice meta */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Bill to</p>
-              <p className="text-base font-bold text-gray-900">{invoice.customer?.name ?? '—'}</p>
-              <p className="text-sm text-gray-500">{invoice.customer?.customer_id ?? '—'}</p>
-              {invoice.customer?.phone && <p className="text-sm text-gray-500">{invoice.customer.phone}</p>}
-              {invoice.customer?.address && <p className="text-sm text-gray-500">{invoice.customer.address}</p>}
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#55249E', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Bill to</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{invoice.customer?.name ?? '—'}</div>
+              {invoice.customer?.phone && <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{invoice.customer.phone}</div>}
+              {invoice.customer?.address && <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{invoice.customer.address}</div>}
             </div>
-            <div className="text-right">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Invoice details</p>
-              <table className="ml-auto text-sm">
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#55249E', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Invoice details</div>
+              <table style={{ marginLeft: 'auto', fontSize: 10 }}>
                 <tbody>
-                  <tr>
-                    <td className="text-gray-500 pr-6 py-0.5">Invoice no.</td>
-                    <td className="font-semibold text-gray-900">{invoiceNumber}</td>
+                  <tr><td style={{ color: '#666', paddingRight: 16, paddingBottom: 2 }}>Invoice no.</td><td style={{ fontWeight: 600, color: '#111' }}>{invoiceNumber}</td></tr>
+                  <tr><td style={{ color: '#666', paddingRight: 16, paddingBottom: 2 }}>Date</td><td style={{ fontWeight: 600, color: '#111' }}>{invoiceDate}</td></tr>
+                  <tr><td style={{ color: '#666', paddingRight: 16, paddingBottom: 2 }}>Due date</td><td style={{ fontWeight: 600, color: '#111' }}>{dueDate}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Line items table */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+            <thead>
+              <tr style={{ background: '#55249E', color: 'white' }}>
+                <th style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 600 }}>Description</th>
+                {isSplit && <>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Pallets</th>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Pcs/pallet</th>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Total pcs</th>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Price/pc</th>
+                </>}
+                {!isSplit && <>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Pieces</th>
+                  <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Price/piece</th>
+                </>}
+                <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isSplit ? (
+                invoice.pallet_lines.map((line, i) => (
+                  <tr key={line.id} style={{ background: i % 2 === 0 ? '#f8f7ff' : '#fff' }}>
+                    <td style={{ padding: '6px 10px', color: '#333' }}>{description} — Pallet {i + 1}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>{line.pallets_sold}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>{line.pieces_per_pallet}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>{line.total_pieces.toLocaleString()}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>{fmt(line.selling_price_per_piece)}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#111' }}>{fmt(line.line_total)}</td>
                   </tr>
-                  <tr>
-                    <td className="text-gray-500 pr-6 py-0.5">Invoice date</td>
-                    <td className="font-semibold text-gray-900">{invoiceDate}</td>
+                ))
+              ) : (
+                <tr style={{ background: '#f8f7ff' }}>
+                  <td style={{ padding: '6px 10px', color: '#333' }}>{description}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>
+                    {invoice.presale?.warehouse_confirmed_pieces?.toLocaleString() ?? '—'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: '#333' }}>
+                    {invoice.presale?.price_per_piece ? fmt(invoice.presale.price_per_piece) : '—'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#111' }}>
+                    {fmt(invoice.sale_amount)}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Totals + Payment side by side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+
+            {/* Payment details */}
+            <div style={{ background: '#f8f7ff', borderRadius: 8, padding: '10px 14px', border: '1px solid #e8e4f8' }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#55249E', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Payment details</div>
+              <table style={{ fontSize: 10, width: '100%' }}>
+                <tbody>
+                  <tr><td style={{ color: '#666', paddingBottom: 4, paddingRight: 12 }}>Bank</td><td style={{ fontWeight: 600, color: '#111' }}>Providus Bank</td></tr>
+                  <tr><td style={{ color: '#666', paddingBottom: 4, paddingRight: 12 }}>Account name</td><td style={{ fontWeight: 600, color: '#111' }}>HYDEVEST SOLUTIONS LIMITED</td></tr>
+                  <tr><td style={{ color: '#666', paddingRight: 12 }}>Account number</td><td style={{ fontWeight: 700, color: '#111', fontSize: 13, letterSpacing: 1 }}>1308744742</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals */}
+            <div>
+              <table style={{ width: '100%', fontSize: 10 }}>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '4px 0', color: '#666' }}>Subtotal</td>
+                    <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 500, color: '#111' }}>{fmt(invoice.sale_amount)}</td>
                   </tr>
-                  <tr>
-                    <td className="text-gray-500 pr-6 py-0.5">Due date</td>
-                    <td className="font-semibold text-gray-900">{dueDate}</td>
-                  </tr>
-                  <tr>
-                    <td className="text-gray-500 pr-6 py-0.5">Container</td>
-                    <td className="font-semibold text-gray-900">{invoice.container?.container_id ?? '—'}</td>
-                  </tr>
-                  {invoice.container?.tracking_number && (
-                    <tr>
-                      <td className="text-gray-500 pr-6 py-0.5">Tracking</td>
-                      <td className="font-semibold text-gray-900">{invoice.container.tracking_number}</td>
+                  {Number(invoice.discount) > 0 && (
+                    <tr style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px 0', color: '#666' }}>Discount</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 500, color: '#dc2626' }}>({fmt(Number(invoice.discount))})</td>
                     </tr>
                   )}
-                  <tr>
-                    <td className="text-gray-500 pr-6 py-0.5">Sale type</td>
-                    <td className="font-semibold text-gray-900 capitalize">{invoice.sale_type.replace('_', ' ')}</td>
+                  {Number(invoice.overages) > 0 && (
+                    <tr style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px 0', color: '#666' }}>Overages</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 500, color: '#111' }}>{fmt(Number(invoice.overages))}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderBottom: '2px solid #55249E' }}>
+                    <td style={{ padding: '6px 0', fontWeight: 700, color: '#111', fontSize: 12 }}>Total payable</td>
+                    <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 700, color: '#55249E', fontSize: 12 }}>{fmt(invoice.customer_payable)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '4px 0', color: '#666' }}>Amount paid</td>
+                    <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 500, color: '#16a34a' }}>{fmt(invoice.amount_paid)}</td>
+                  </tr>
+                  {Number(invoice.written_off_amount) > 0 && (
+                    <tr style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px 0', color: '#666' }}>Written off</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 500, color: '#999' }}>{fmt(Number(invoice.written_off_amount))}</td>
+                    </tr>
+                  )}
+                  <tr style={{ background: Number(invoice.outstanding_balance) > 0 ? '#fef2f2' : '#f0fdf4', borderRadius: 4 }}>
+                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#111' }}>Outstanding</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: Number(invoice.outstanding_balance) > 0 ? '#dc2626' : '#16a34a', fontSize: 12 }}>
+                      {fmt(invoice.outstanding_balance)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Line items */}
-          <div>
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr style={{ background: '#55249E' }} className="text-white">
-                  <th className="px-4 py-3 text-left font-semibold rounded-tl-lg">Description</th>
-                  {isSplit && <>
-                    <th className="px-4 py-3 text-right font-semibold">Pallets</th>
-                    <th className="px-4 py-3 text-right font-semibold">Pieces/pallet</th>
-                    <th className="px-4 py-3 text-right font-semibold">Total pieces</th>
-                    <th className="px-4 py-3 text-right font-semibold">Price/piece</th>
-                  </>}
-                  {!isSplit && <>
-                    <th className="px-4 py-3 text-right font-semibold">Pieces</th>
-                    <th className="px-4 py-3 text-right font-semibold">Price/piece</th>
-                  </>}
-                  <th className="px-4 py-3 text-right font-semibold rounded-tr-lg">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isSplit ? (
-                  invoice.pallet_lines.map((line, i) => (
-                    <tr key={line.id} className={i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                      <td className="px-4 py-3 text-gray-700">
-                        {invoice.container?.hide_type ?? 'Hides'} — Pallet {i + 1}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700">{line.pallets_sold}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{line.pieces_per_pallet}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{line.total_pieces.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{fmt(line.selling_price_per_piece)}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(line.line_total)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr className="bg-gray-50">
-                    <td className="px-4 py-3 text-gray-700">
-                      {invoice.container?.hide_type ?? 'Hides'} — {invoice.container?.container_id}
-                      {invoice.container?.tracking_number && ` (${invoice.container.tracking_number})`}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-700">
-                      {invoice.presale?.warehouse_confirmed_pieces?.toLocaleString() ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-700">
-                      {invoice.presale?.price_per_piece ? fmt(invoice.presale.price_per_piece) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(invoice.sale_amount)}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Totals */}
-          <div className="flex justify-end">
-            <table className="text-sm w-72">
-              <tbody className="divide-y divide-gray-100">
-                <tr>
-                  <td className="py-2 text-gray-500">Subtotal</td>
-                  <td className="py-2 text-right font-medium text-gray-800">{fmt(invoice.sale_amount)}</td>
-                </tr>
-                {Number(invoice.discount) > 0 && (
-                  <tr>
-                    <td className="py-2 text-gray-500">Discount</td>
-                    <td className="py-2 text-right font-medium text-red-600">({fmt(Number(invoice.discount))})</td>
-                  </tr>
-                )}
-                {Number(invoice.overages) > 0 && (
-                  <tr>
-                    <td className="py-2 text-gray-500">Overages</td>
-                    <td className="py-2 text-right font-medium text-gray-800">{fmt(Number(invoice.overages))}</td>
-                  </tr>
-                )}
-                <tr className="font-bold">
-                  <td className="py-3 text-gray-900 text-base">Total payable</td>
-                  <td className="py-3 text-right text-base" style={{ color: '#55249E' }}>{fmt(invoice.customer_payable)}</td>
-                </tr>
-                <tr>
-                  <td className="py-2 text-gray-500">Amount paid</td>
-                  <td className="py-2 text-right font-medium text-green-700">{fmt(invoice.amount_paid)}</td>
-                </tr>
-                {Number(invoice.written_off_amount) > 0 && (
-                  <tr>
-                    <td className="py-2 text-gray-500">Written off</td>
-                    <td className="py-2 text-right font-medium text-gray-500">{fmt(Number(invoice.written_off_amount))}</td>
-                  </tr>
-                )}
-                <tr className={Number(invoice.outstanding_balance) > 0 ? 'bg-red-50' : 'bg-green-50'}>
-                  <td className="py-2 px-2 font-bold text-gray-900 rounded-l">Outstanding</td>
-                  <td className={`py-2 px-2 text-right font-bold rounded-r ${Number(invoice.outstanding_balance) > 0 ? 'text-red-600' : 'text-green-700'}`}>
-                    {fmt(invoice.outstanding_balance)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Payment details */}
-          <div className="p-5 bg-gray-50 rounded-xl border border-gray-100">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Payment details</p>
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <p className="text-xs text-gray-400">Bank name</p>
-                <p className="font-semibold text-gray-800">Providus Bank</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400">Account name</p>
-                <p className="font-semibold text-gray-800">HYDEVEST SOLUTIONS LIMITED</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400">Account number</p>
-                <p className="font-semibold text-gray-800 text-lg tracking-widest">1308744742</p>
-              </div>
-            </div>
-          </div>
-
           {/* Legal statement */}
           {Number(invoice.outstanding_balance) > 0 && (
-            <div className="p-4 border-l-4 rounded-r-xl text-sm text-gray-600 italic leading-relaxed"
-              style={{ borderLeftColor: '#55249E', background: '#f9f7fe' }}>
-              <strong className="not-italic text-gray-800">Note:</strong> The customer agrees to settle the outstanding
-              balance of <strong>{fmt(invoice.outstanding_balance)}</strong> in full by <strong>{dueDate}</strong>.
-              Failure to meet this obligation may result in alternative recovery actions, including but not limited
-              to property seizure.
+            <div style={{ borderLeft: '3px solid #55249E', background: '#f9f7fe', padding: '8px 12px', borderRadius: '0 6px 6px 0', fontSize: 9.5, color: '#444', lineHeight: 1.6 }}>
+              <strong>Note:</strong> The customer agrees to settle the outstanding balance of <strong>{fmt(invoice.outstanding_balance)}</strong> in full
+              by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
+              including but not limited to property seizure.
             </div>
           )}
 
-          {/* Signature section */}
-          <div className="grid grid-cols-2 gap-16 pt-6">
-
-            {/* Hydevest signature */}
+          {/* Signatures */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 8 }}>
             <div>
-              <div className="border-b-2 border-gray-300 mb-3 pb-2" style={{ minHeight: 80 }}>
+              <div style={{ borderBottom: '1.5px solid #333', minHeight: 56, marginBottom: 6, display: 'flex', alignItems: 'flex-end' }}>
                 {sigImage ? (
-                  <img src={sigImage} alt="Authorized signature"
-                    style={{ height: 70, maxWidth: 220 }}
-                    className="object-contain" />
+                  <img src={sigImage} alt="Signature" style={{ height: 52, maxWidth: 200, objectFit: 'contain' }} />
                 ) : (
-                  <p className="text-xs text-gray-400 italic">Signature</p>
+                  <span style={{ fontSize: 9, color: '#aaa', fontStyle: 'italic' }}>Signature</span>
                 )}
               </div>
-              <p className="text-sm font-bold text-gray-900">{sigName}</p>
-              <p className="text-xs text-gray-500">Authorized Signatory</p>
-              <p className="text-xs text-gray-500">{companyName}</p>
-              <p className="text-xs text-gray-400 mt-1">{invoiceDate}</p>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>{sigName}</div>
+              <div style={{ fontSize: 9, color: '#666' }}>Authorized Signatory, {companyName}</div>
             </div>
-
-            {/* Customer signature */}
             <div>
-              <div className="border-b-2 border-gray-300 mb-3" style={{ minHeight: 80 }}>
-              </div>
-              <p className="text-sm font-bold text-gray-900">{invoice.customer?.name ?? 'Customer'}</p>
-              <p className="text-xs text-gray-500">Customer Signature</p>
-              <p className="text-xs text-gray-500">{invoice.customer?.customer_id ?? ''}</p>
-              <p className="text-xs text-gray-400 mt-1">Date: ___________________</p>
+              <div style={{ borderBottom: '1.5px solid #333', minHeight: 56, marginBottom: 6 }}></div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>{invoice.customer?.name ?? 'Customer'}</div>
+              <div style={{ fontSize: 9, color: '#666' }}>Customer Signature &nbsp;&nbsp; Date: ___________</div>
             </div>
           </div>
 
           {/* Footer */}
-          <div className="border-t border-gray-100 pt-4 text-center">
-            <p className="text-xs text-gray-400">
-              {companyName} · Providus Bank · HYDEVEST SOLUTIONS LIMITED · 1308744742
-            </p>
-            <p className="text-xs text-gray-300 mt-1">
-              This is a computer generated invoice.
-            </p>
+          <div style={{ borderTop: '1px solid #eee', paddingTop: 8, textAlign: 'center', fontSize: 9, color: '#aaa' }}>
+            {companyName} · Providus Bank · HYDEVEST SOLUTIONS LIMITED · 1308744742 · Computer generated invoice
           </div>
         </div>
       </div>
 
-      {/* Print styles */}
       <style>{`
         @media print {
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body * { visibility: hidden; }
           #invoice-document, #invoice-document * { visibility: visible; }
-          #invoice-document { position: absolute; left: 0; top: 0; width: 100%; }
-          @page { margin: 1cm; size: A4; }
+          #invoice-document { position: fixed; left: 0; top: 0; width: 100%; }
+          .print\\:hidden { display: none !important; }
+          @page { margin: 0.5cm; size: A4 portrait; }
         }
       `}</style>
     </div>

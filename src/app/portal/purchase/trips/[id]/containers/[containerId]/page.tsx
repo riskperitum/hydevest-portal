@@ -119,6 +119,7 @@ export default function ContainerDetailPage() {
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
   const [overriding, setOverriding] = useState(false)
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -129,6 +130,7 @@ export default function ContainerDetailPage() {
     ])
     setContainer(con)
     setEditOpen(false)
+    setOverrideConfirmed(false)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
 
@@ -200,7 +202,7 @@ export default function ContainerDetailPage() {
     setOverriding(false)
     setOverrideOpen(false)
     setOverrideReason('')
-    // Open edit modal
+    setOverrideConfirmed(true)
     setEditOpen(true)
   }
 
@@ -260,7 +262,7 @@ export default function ContainerDetailPage() {
   }
 
   async function updateField(field: string, value: string) {
-    if (hasActiveSalesOrder) return
+    if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     const oldValue = String((container as unknown as Record<string, unknown>)[field] ?? '')
     await supabase.from('containers').update({ [field]: value || null }).eq('id', containerId)
@@ -276,12 +278,13 @@ export default function ContainerDetailPage() {
     }
     setEditField(null)
     load()
+    setOverrideConfirmed(false)
     loadActivity()
   }
 
   async function saveFunder(e: React.FormEvent) {
     e.preventDefault()
-    if (hasActiveSalesOrder) return
+    if (hasActiveSalesOrder && !overrideConfirmed) return
     const newPct = parseFloat(funderForm.percentage)
 
     if (newPct <= 0) {
@@ -336,16 +339,18 @@ export default function ContainerDetailPage() {
     setFunderOpen(false)
     setFunderForm({ funder_type: 'entity', funder_id: '', percentage: '' })
     load()
+    setOverrideConfirmed(false)
     loadActivity()
   }
 
   async function deleteFunder(id: string, name: string) {
     if (!confirm(`Remove ${name} as funder?`)) return
-    if (hasActiveSalesOrder) return
+    if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     await supabase.from('container_funders').delete().eq('id', id)
     await logActivity('Funder removed', 'funders', name, '')
     load()
+    setOverrideConfirmed(false)
     loadActivity()
   }
 
@@ -482,7 +487,7 @@ export default function ContainerDetailPage() {
         ) : (
           <button
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
-            disabled={!editOpen || container?.approval_status === 'approved' || hasActiveSalesOrder}
+            disabled={!editOpen || container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed)}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value || (useAutosave ? 'Click to set' : 'Not set')}
@@ -506,17 +511,18 @@ export default function ContainerDetailPage() {
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <select
         value={value}
-        disabled={container?.approval_status === 'approved' || hasActiveSalesOrder}
+        disabled={container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed)}
         onChange={async e => {
-          if (hasActiveSalesOrder) return
+          if (hasActiveSalesOrder && !overrideConfirmed) return
           const supabase = createClient()
           await supabase.from('containers').update({ [fieldKey]: e.target.value }).eq('id', containerId)
           await logActivity('Updated field', fieldKey, value, e.target.value)
           load()
+          setOverrideConfirmed(false)
           loadActivity()
         }}
         className={`w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white
-          ${container?.approval_status === 'approved' || hasActiveSalesOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
+          ${container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed) ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <option value="">Select...</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -554,7 +560,7 @@ export default function ContainerDetailPage() {
               </span>
             </div>
           )}
-          {hasActiveSalesOrder ? (
+          {hasActiveSalesOrder && !overrideConfirmed ? (
             <div className="flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
                 <Lock size={14} />
@@ -576,7 +582,7 @@ export default function ContainerDetailPage() {
         </div>
       </div>
 
-      {hasActiveSalesOrder && (
+      {hasActiveSalesOrder && !overrideConfirmed && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
           <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
           <div>
@@ -643,15 +649,16 @@ export default function ContainerDetailPage() {
               <select
                 value={container.funding_type}
                 onChange={async e => {
-                  if (hasActiveSalesOrder) return
+                  if (hasActiveSalesOrder && !overrideConfirmed) return
                   const supabase = createClient()
                   await supabase.from('containers').update({ funding_type: e.target.value }).eq('id', containerId)
                   await logActivity('Funding type changed', 'funding_type', container.funding_type, e.target.value)
                   load()
+                  setOverrideConfirmed(false)
                   loadActivity()
                 }}
-                className={`px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium ${hasActiveSalesOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
-                disabled={hasActiveSalesOrder}
+                className={`px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium ${hasActiveSalesOrder && !overrideConfirmed ? 'opacity-60 cursor-not-allowed' : ''}`}
+                disabled={hasActiveSalesOrder && !overrideConfirmed}
               >
                 <option value="entity">Entity</option>
                 <option value="partner">Partner</option>
@@ -659,9 +666,9 @@ export default function ContainerDetailPage() {
             </div>
             <button
               onClick={() => setFunderOpen(true)}
-              disabled={hasActiveSalesOrder}
+              disabled={hasActiveSalesOrder && !overrideConfirmed}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                hasActiveSalesOrder
+                hasActiveSalesOrder && !overrideConfirmed
                   ? 'bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed'
                   : 'bg-brand-600 text-white hover:bg-brand-700'
               }`}>

@@ -103,6 +103,7 @@ export default function PresaleDetailPage() {
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
   const [overriding, setOverriding] = useState(false)
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false)
 
   const [addPalletOpen, setAddPalletOpen] = useState(false)
   const [newPalletPieces, setNewPalletPieces] = useState('')
@@ -229,7 +230,7 @@ export default function PresaleDetailPage() {
   }
 
   async function updateField(field: string, value: string) {
-    if (hasActiveSalesOrder) return
+    if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     const oldValue = String((presale as unknown as Record<string, unknown>)[field] ?? '')
     const wasApproved = presale?.approval_status === 'approved'
@@ -262,6 +263,7 @@ export default function PresaleDetailPage() {
     await logActivity('Updated field', field, oldValue, value)
     setEditField(null)
     load()
+    setOverrideConfirmed(false)
   }
 
   async function submitWorkflow() {
@@ -317,7 +319,7 @@ export default function PresaleDetailPage() {
 
   async function addPalletRow(e: React.FormEvent) {
     e.preventDefault()
-    if (hasActiveSalesOrder) return
+    if (hasActiveSalesOrder && !overrideConfirmed) return
     if (!newPalletPieces || !newPalletCount) return
     setSavingPallet(true)
     const supabase = createClient()
@@ -341,6 +343,7 @@ export default function PresaleDetailPage() {
       await supabase2.from('presales').update({ needs_review: true }).eq('id', presaleId)
     }
     load()
+    setOverrideConfirmed(false)
   }
 
   async function handleOverrideEdit(e: React.FormEvent) {
@@ -373,6 +376,7 @@ export default function PresaleDetailPage() {
     setOverriding(false)
     setOverrideOpen(false)
     setOverrideReason('')
+    setOverrideConfirmed(true)
     setEditOpen(true)
   }
 
@@ -386,6 +390,7 @@ export default function PresaleDetailPage() {
       await supabase.from('presales').update({ needs_review: true }).eq('id', presaleId)
     }
     load()
+    setOverrideConfirmed(false)
   }
 
   const EditableField = ({ fieldKey, label, value, type = 'text' }: {
@@ -430,7 +435,7 @@ export default function PresaleDetailPage() {
         ) : (
           <button type="button"
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
-            disabled={!editOpen || hasActiveSalesOrder}
+            disabled={!editOpen || (hasActiveSalesOrder && !overrideConfirmed)}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value || 'Not set'}
@@ -515,7 +520,7 @@ export default function PresaleDetailPage() {
             {presale.approval_status === 'approved' ? '✓ Approved' :
              presale.approval_status === 'reviewed' ? '✓ Reviewed' : 'Not approved'}
           </span>
-          {hasActiveSalesOrder ? (
+          {hasActiveSalesOrder && !overrideConfirmed ? (
             <div className="flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg cursor-not-allowed">
                 <Lock size={14} />
@@ -560,7 +565,7 @@ export default function PresaleDetailPage() {
         </div>
       )}
 
-      {hasActiveSalesOrder && (
+      {hasActiveSalesOrder && !overrideConfirmed && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
           <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
           <div>

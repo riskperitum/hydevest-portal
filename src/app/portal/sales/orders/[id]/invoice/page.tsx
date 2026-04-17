@@ -140,20 +140,40 @@ export default function InvoicePage() {
       {/* INVOICE DOCUMENT */}
       <div id="invoice-document"
         className="bg-white border border-gray-200 print:border-0"
-        style={{ fontFamily: 'Arial, sans-serif', fontSize: 11 }}>
+        style={{ fontFamily: 'Arial, sans-serif', fontSize: 11, position: 'relative', overflow: 'hidden' }}>
+
+        {/* Watermark */}
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 320,
+          height: 320,
+          backgroundImage: 'url(/logo.png)',
+          backgroundSize: 'contain',
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center',
+          opacity: 0.04,
+          pointerEvents: 'none',
+          zIndex: 0,
+        }} />
+
+        {/* All existing content needs to be wrapped in a relative div so it sits above watermark */}
+        <div style={{ position: 'relative', zIndex: 1 }}>
 
         {/* Header */}
         <div style={{ background: '#55249E', padding: '16px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
               <div style={{ background: 'white', borderRadius: 8, padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <img src="/logo.png" alt="Hydevest logo"
                   style={{ height: 40, width: 'auto', objectFit: 'contain' }}
                   onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
               </div>
-              <div style={{ color: 'white' }}>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>{companyName}</div>
-                <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>
+              <div style={{ color: 'white', textAlign: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{companyName}</div>
+                <div style={{ fontSize: 9, opacity: 0.75, marginTop: 1 }}>
                   {companyRC && `RC: ${companyRC}`}{companyRC && companyTIN ? ' · ' : ''}{companyTIN && `TIN: ${companyTIN}`}
                 </div>
               </div>
@@ -297,8 +317,8 @@ export default function InvoicePage() {
           </div>
 
           {/* Legal statement */}
-          <div style={{ borderLeft: '3px solid #55249E', background: '#f9f7fe', padding: '8px 12px', borderRadius: '0 6px 6px 0', fontSize: 9.5, color: '#444', lineHeight: 1.6 }}>
-            <strong>Note:</strong> The customer agrees to settle the outstanding balance in full
+          <div style={{ borderLeft: '4px solid #55249E', background: '#f0ecfc', padding: '10px 14px', borderRadius: '0 8px 8px 0', fontSize: 11, color: '#2d2d2d', lineHeight: 1.7, fontWeight: 500 }}>
+            <strong style={{ color: '#55249E' }}>Note:</strong> The customer agrees to settle the outstanding balance in full
             by <strong>{dueDate}</strong>. Failure to meet this obligation may result in alternative recovery actions,
             including but not limited to property seizure.
           </div>
@@ -328,6 +348,7 @@ export default function InvoicePage() {
           <div style={{ borderTop: '1px solid #eee', paddingTop: 8, textAlign: 'center', fontSize: 9, color: '#aaa' }}>
             {companyName} · Providus Bank · HYDEVEST SOLUTIONS LIMITED · 1308744742 · Computer generated invoice
           </div>
+        </div>
         </div>
       </div>
 

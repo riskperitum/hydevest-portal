@@ -45,6 +45,7 @@ interface ContainerRow {
 interface AllocationRow {
   id: string
   target_trip_id: string
+  target_container_id: string | null
   target_trip_title: string
   amount_usd: number
   percentage: number | null
@@ -158,7 +159,9 @@ function SupplierReceivablesDrilldownInner() {
 
   // Reallocation modal
   const [reallocateOpen, setReallocateOpen] = useState(searchParams.get('action') === 'reallocate')
-  const [allocForm, setAllocForm] = useState({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
+  const [allocForm, setAllocForm] = useState({ target_trip_id: '', target_container_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
+  const [targetTripContainers, setTargetTripContainers] = useState<{ id: string; container_id: string }[]>([])
+  const [loadingTargetContainers, setLoadingTargetContainers] = useState(false)
   const [savingAlloc, setSavingAlloc] = useState(false)
 
   // Write-off modal
@@ -221,7 +224,7 @@ function SupplierReceivablesDrilldownInner() {
     const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, { data: allProfiles }, { data: allTrips }] = await Promise.all([
       receivableIds.length > 0
         ? supabase.from('supplier_receivable_allocations').select(`
-            id, amount_usd, percentage, status, notes, created_at,
+            id, amount_usd, percentage, status, notes, created_at, target_container_id,
             target_trip:trips!supplier_receivable_allocations_target_trip_id_fkey(id, trip_id, title),
             requester:profiles!supplier_receivable_allocations_requested_by_fkey(full_name, email),
             approver:profiles!supplier_receivable_allocations_approved_by_fkey(full_name, email)
@@ -287,6 +290,7 @@ function SupplierReceivablesDrilldownInner() {
     setAllocations((allocs ?? []).map(a => ({
       id: a.id,
       target_trip_id: (a.target_trip as any)?.trip_id ?? '—',
+      target_container_id: (a as { target_container_id?: string | null }).target_container_id ?? null,
       target_trip_title: (a.target_trip as any)?.title ?? '—',
       amount_usd: Number(a.amount_usd),
       percentage: a.percentage ? Number(a.percentage) : null,
@@ -351,7 +355,7 @@ function SupplierReceivablesDrilldownInner() {
 
   async function submitReallocation(e: React.FormEvent) {
     e.preventDefault()
-    if (!allocForm.target_trip_id || !allocForm.amount_usd || !allocForm.assignee) return
+    if (!allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || !allocForm.assignee) return
     setSavingAlloc(true)
     const supabase = createClient()
     const amount = parseFloat(allocForm.amount_usd)
@@ -367,13 +371,14 @@ function SupplierReceivablesDrilldownInner() {
     if (!firstReceivable) return
 
     const { data: alloc } = await supabase.from('supplier_receivable_allocations').insert({
-      receivable_id: firstReceivable.receivable_id,
-      target_trip_id: allocForm.target_trip_id,
-      amount_usd: amount,
-      percentage: pct,
-      status: 'pending',
-      notes: allocForm.notes || null,
-      requested_by: currentUser?.id,
+      receivable_id:       firstReceivable.receivable_id,
+      target_trip_id:     allocForm.target_trip_id,
+      target_container_id: allocForm.target_container_id || null,
+      amount_usd:         amount,
+      percentage:         pct,
+      status:             'pending',
+      notes:              allocForm.notes || null,
+      requested_by:       currentUser?.id,
     }).select().single()
 
     const targetTrip = otherTrips.find(t => t.id === allocForm.target_trip_id)
@@ -408,7 +413,8 @@ function SupplierReceivablesDrilldownInner() {
 
     setSavingAlloc(false)
     setReallocateOpen(false)
-    setAllocForm({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
+    setAllocForm({ target_trip_id: '', target_container_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
+    setTargetTripContainers([])
     load()
   }
 
@@ -444,15 +450,16 @@ function SupplierReceivablesDrilldownInner() {
       const amountNGN = Number(alloc.amount_usd) * originWAER
 
       const { data: expense } = await supabase.from('trip_expenses').insert({
-        trip_id:      targetTrip.id,
-        category:     'container',
-        currency:     'USD',
-        amount:       alloc.amount_usd,
+        trip_id:       targetTrip.id,
+        container_id:  alloc.target_container_id ?? null,
+        category:      'container',
+        currency:      'USD',
+        amount:        alloc.amount_usd,
         exchange_rate: originWAER,
-        amount_ngn:   amountNGN,
-        description:  `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
-        expense_date: new Date().toISOString().split('T')[0],
-        created_by:   currentUser?.id,
+        amount_ngn:    amountNGN,
+        description:   `Supplier receivable applied — from trip ${tripReceivable?.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
+        expense_date:  new Date().toISOString().split('T')[0],
+        created_by:    currentUser?.id,
       }).select().single()
 
       if (expense) {
@@ -1090,14 +1097,56 @@ function SupplierReceivablesDrilldownInner() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Target trip <span className="text-red-400">*</span></label>
-                <select required value={allocForm.target_trip_id} onChange={e => setAllocForm(f => ({ ...f, target_trip_id: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                <select
+                  required
+                  value={allocForm.target_trip_id}
+                  onChange={async e => {
+                    const selectedTripId = e.target.value
+                    setAllocForm(f => ({ ...f, target_trip_id: selectedTripId, target_container_id: '' }))
+                    if (selectedTripId) {
+                      setLoadingTargetContainers(true)
+                      const supabase = createClient()
+                      const { data: tripContainers } = await supabase
+                        .from('containers')
+                        .select('id, container_id')
+                        .eq('trip_id', selectedTripId)
+                        .order('container_id', { ascending: true })
+                      setTargetTripContainers(tripContainers ?? [])
+                      setLoadingTargetContainers(false)
+                    } else {
+                      setTargetTripContainers([])
+                    }
+                  }}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+                >
                   <option value="">Select a trip...</option>
                   {otherTrips.map(t => (
                     <option key={t.id} value={t.id}>{t.trip_id} — {t.title}</option>
                   ))}
                 </select>
               </div>
+              {allocForm.target_trip_id && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Target container <span className="text-red-400">*</span>
+                  </label>
+                  {loadingTargetContainers ? (
+                    <div className="text-xs text-gray-400 py-2">Loading containers...</div>
+                  ) : (
+                    <select
+                      required
+                      value={allocForm.target_container_id}
+                      onChange={e => setAllocForm(f => ({ ...f, target_container_id: e.target.value }))}
+                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+                    >
+                      <option value="">Select container...</option>
+                      {targetTripContainers.map(c => (
+                        <option key={c.id} value={c.id}>{c.container_id}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (USD) <span className="text-red-400">*</span></label>
@@ -1150,7 +1199,7 @@ function SupplierReceivablesDrilldownInner() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setReallocateOpen(false)}
                   className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.amount_usd || !allocForm.assignee}
+                <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.target_container_id || !allocForm.amount_usd || !allocForm.assignee}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingAlloc ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><ArrowRightLeft size={14} /> Submit for approval</>}
                 </button>

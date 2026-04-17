@@ -146,7 +146,7 @@ function SupplierReceivablesDrilldownInner() {
   const searchParams = useSearchParams()
   const tripId = params.id as string
 
-  const { permissions, isSuperAdmin } = usePermissions()
+  const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
   const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   const [tripReceivable, setTripReceivable] = useState<TripReceivable | null>(null)
@@ -357,6 +357,7 @@ function SupplierReceivablesDrilldownInner() {
 
   async function submitReallocation(e: React.FormEvent) {
     e.preventDefault()
+    console.log('canSelfApprove:', canSelfApprove, 'isSuperAdmin:', isSuperAdmin, 'permissions:', Array.from(permissions))
     if (!allocForm.target_trip_id || !allocForm.amount_usd) return
     if (!canSelfApprove && !allocForm.assignee) return
     setSavingAlloc(true)
@@ -1182,28 +1183,6 @@ function SupplierReceivablesDrilldownInner() {
                   ))}
                 </select>
               </div>
-              {allocForm.target_trip_id && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Target container <span className="text-red-400">*</span>
-                  </label>
-                  {loadingTargetContainers ? (
-                    <div className="text-xs text-gray-400 py-2">Loading containers...</div>
-                  ) : (
-                    <select
-                      required
-                      value={allocForm.target_container_id}
-                      onChange={e => setAllocForm(f => ({ ...f, target_container_id: e.target.value }))}
-                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-                    >
-                      <option value="">Select container...</option>
-                      {targetTripContainers.map(c => (
-                        <option key={c.id} value={c.id}>{c.container_id}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (USD) <span className="text-red-400">*</span></label>

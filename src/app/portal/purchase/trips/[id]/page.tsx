@@ -324,7 +324,7 @@ export default function TripDetailPage() {
     const [{ data: t }, { data: exp }, { data: con }] = await Promise.all([
       supabase.from('trips').select(`*, supplier:suppliers(name), clearing_agent:clearing_agents(name), created_by_profile:profiles!trips_created_by_fkey(full_name, email), last_reviewer:profiles!trips_last_reviewed_by_fkey(full_name, email)`).eq('id', tripId).single(),
       supabase.from('trip_expenses').select(`*, created_by_profile:profiles!trip_expenses_created_by_fkey(full_name, email)`).eq('trip_id', tripId).order('created_at', { ascending: false }),
-      supabase.from('containers').select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)').eq('trip_id', tripId).order('created_at', { ascending: false }),
+      supabase.from('containers').select('*, is_modified, modified_after_approval_at, created_by_profile:profiles!containers_created_by_fkey(full_name, email)').eq('trip_id', tripId).order('created_at', { ascending: false }),
     ])
     setTrip(t)
     setExpenses(exp ?? [])
@@ -334,7 +334,7 @@ export default function TripDetailPage() {
       await recalculateLandingCosts(containersData, exp ?? [])
       const { data: conFresh } = await supabase
         .from('containers')
-        .select('*, created_by_profile:profiles!containers_created_by_fkey(full_name, email)')
+        .select('*, is_modified, modified_after_approval_at, created_by_profile:profiles!containers_created_by_fkey(full_name, email)')
         .eq('trip_id', tripId)
         .order('created_at', { ascending: false })
       containersData = conFresh ?? []
@@ -385,6 +385,7 @@ export default function TripDetailPage() {
           modified_after_approval_at: null,
           modified_after_approval_by: null,
         }).eq('trip_id', trip.id)
+        load()
         await supabase.from('trip_activity_log').insert({
           trip_id:      trip.id,
           action:       'Trip reviewed',
@@ -430,6 +431,7 @@ export default function TripDetailPage() {
           modified_after_approval_at: null,
           modified_after_approval_by: null,
         }).eq('trip_id', trip.id)
+        load()
         await supabase.from('trip_activity_log').insert({
           trip_id:      trip.id,
           action:       'Trip approved',
@@ -473,11 +475,11 @@ export default function TripDetailPage() {
           .eq('status', 'pending')
       }
     } finally {
+      void load()
+      void loadActivity()
       setApprovingTrip(false)
       setTripActionNote('')
       setShowTripApproval(false)
-      void load()
-      void loadActivity()
     }
   }
 
@@ -971,6 +973,23 @@ export default function TripDetailPage() {
           </button>
         </div>
       </div>
+
+        {containers.some(c => c.is_modified) && (
+          <div className="flex items-start gap-3 p-4 bg-orange-50 rounded-xl border border-orange-200">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ea580c" strokeWidth="2" className="shrink-0 mt-0.5">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div>
+              <p className="text-sm font-semibold text-orange-800">Trip modified after approval</p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                {containers.filter(c => c.is_modified).length} container{containers.filter(c => c.is_modified).length !== 1 ? 's were' : ' was'} edited after this trip was reviewed or approved.
+                Please re-review the changes before re-approving.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Trip approval action panel */}
         <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">

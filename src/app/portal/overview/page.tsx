@@ -84,12 +84,9 @@ export default function OverviewPage() {
   const [totalOutstanding, setTotalOutstanding]     = useState(0)
   const [totalRecovered, setTotalRecovered]         = useState(0)
   const [pendingTasks, setPendingTasks]             = useState(0)
-  const [grossMargin, setGrossMargin]               = useState(0)
-  const [totalCost, setTotalCost]                   = useState(0)
   const [tripsCount, setTripsCount]                 = useState(0)
   const [approvalQueue, setApprovalQueue]           = useState(0)
   const [totalSalesOrders, setTotalSalesOrders]     = useState(0)
-  const [completedContainers, setCompletedContainers] = useState(0)
 
   // Activity
   const [recentSales, setRecentSales]           = useState<any[]>([])
@@ -134,7 +131,6 @@ export default function OverviewPage() {
       { data: allSalesOrders },
       { data: recoveries },
       { data: tasks },
-      { data: tripExpenses },
       { data: trips },
       { data: recentSalesData },
       { data: recentRecovData },
@@ -151,7 +147,6 @@ export default function OverviewPage() {
       `)),
       dateFilter(supabase.from('recoveries').select('amount_paid, created_at')),
       supabase.from('tasks').select('id, status').eq('status', 'pending'),
-      supabase.from('trip_expenses').select('amount_ngn, category'),
       dateFilter(supabase.from('trips').select('id, created_at')),
       dateFilter(supabase.from('sales_orders').select(`
         id, customer_payable, created_at,
@@ -181,16 +176,12 @@ export default function OverviewPage() {
 
     // KPI calculations
     const active    = (containers ?? []).filter(c => c.status !== 'completed').length
-    const completed = (containers ?? []).filter(c => c.status === 'completed').length
     const invVal    = (containers ?? []).filter(c => c.status !== 'completed')
       .reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
 
     const revenue     = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.customer_payable), 0)
     const outstanding = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.outstanding_balance ?? 0), 0)
     const recovered   = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
-    const cost        = (tripExpenses ?? []).filter(te => te.category === 'container')
-      .reduce((s, te) => s + Number(te.amount_ngn ?? 0), 0)
-    const margin      = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0
 
     // Top debtors
     const debtorMap: Record<string, { name: string; billed: number; outstanding: number; collected: number }> = {}
@@ -278,14 +269,11 @@ export default function OverviewPage() {
 
     if (!isMountedRef.current) return
     setActiveContainers(active)
-    setCompletedContainers(completed)
     setInventoryValue(invVal)
     setTotalRevenue(revenue)
     setTotalOutstanding(outstanding)
     setTotalRecovered(recovered)
     setPendingTasks((tasks ?? []).length)
-    setGrossMargin(margin)
-    setTotalCost(cost)
     setTripsCount((trips ?? []).length)
     setApprovalQueue((pendingTaskData ?? []).filter((t: any) => ['urgent','high'].includes(t.priority)).length)
     setTotalSalesOrders((allSalesOrders ?? []).length)
@@ -317,25 +305,27 @@ export default function OverviewPage() {
       value: fmt(totalRevenue),
       sub: `${totalSalesOrders} sales orders`,
       icon: <TrendingUp size={16} className="text-green-600" />,
-      color: 'text-green-700', bg: 'bg-green-50',
+      color: 'text-green-700',
+      bg: 'bg-green-50',
       href: '/portal/sales/orders',
     },
     {
-      label: 'Outstanding receivables',
+      label: 'Total recovery',
+      value: fmt(totalRecovered),
+      sub: `${fmtPct(recoveryRate)} of revenue collected`,
+      icon: <CheckCircle2 size={16} className={recoveryRate >= 80 ? 'text-green-600' : 'text-amber-600'} />,
+      color: recoveryRate >= 80 ? 'text-green-700' : 'text-amber-700',
+      bg: recoveryRate >= 80 ? 'bg-green-50' : 'bg-amber-50',
+      href: '/portal/recoveries',
+    },
+    {
+      label: 'Outstanding balance',
       value: fmt(totalOutstanding),
-      sub: `${fmtPct(100 - recoveryRate)} remaining`,
+      sub: `${fmtPct(100 - recoveryRate)} still to collect`,
       icon: <Clock size={16} className={totalOutstanding > 0 ? 'text-amber-600' : 'text-green-600'} />,
       color: totalOutstanding > 0 ? 'text-amber-700' : 'text-green-700',
       bg: totalOutstanding > 0 ? 'bg-amber-50' : 'bg-green-50',
       href: '/portal/reports/customer-debt',
-    },
-    {
-      label: 'Active containers',
-      value: activeContainers.toString(),
-      sub: `${completedContainers} completed`,
-      icon: <Package size={16} className="text-blue-600" />,
-      color: 'text-blue-700', bg: 'bg-blue-50',
-      href: '/portal/purchase/containers',
     },
     {
       label: 'Pending tasks',
@@ -349,26 +339,6 @@ export default function OverviewPage() {
   ]
 
   const kpiRow2 = [
-    {
-      label: 'Recovery rate',
-      value: fmtPct(recoveryRate),
-      sub: `${fmt(totalRecovered)} collected`,
-      icon: <CheckCircle2 size={16} className={recoveryRate >= 80 ? 'text-green-600' : 'text-amber-600'} />,
-      color: recoveryRate >= 80 ? 'text-green-700' : 'text-amber-700',
-      bg: recoveryRate >= 80 ? 'bg-green-50' : 'bg-amber-50',
-      href: '/portal/recoveries',
-      show: true,
-    },
-    {
-      label: 'Gross margin',
-      value: fmtPct(grossMargin),
-      sub: `${fmt(totalRevenue - totalCost)} gross profit`,
-      icon: <BarChart3 size={16} className={grossMargin >= 20 ? 'text-green-600' : 'text-amber-600'} />,
-      color: grossMargin >= 20 ? 'text-green-700' : 'text-amber-700',
-      bg: grossMargin >= 20 ? 'bg-green-50' : 'bg-amber-50',
-      href: '/portal/reports/container-profit',
-      show: canViewCosts,
-    },
     {
       label: 'Trips this period',
       value: tripsCount.toString(),
@@ -478,32 +448,6 @@ export default function OverviewPage() {
           ))}
         </div>
       )}
-
-      {/* Recovery progress bar */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-gray-800">Recovery progress</h2>
-          <button onClick={() => router.push('/portal/reports/customer-debt')}
-            className="text-xs text-brand-600 hover:underline">View details →</button>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Collected: <span className="font-semibold text-green-700">{fmt(totalRecovered)}</span></span>
-            <span>Outstanding: <span className="font-semibold text-amber-700">{fmt(totalOutstanding)}</span></span>
-            <span>Total billed: <span className="font-semibold text-gray-700">{fmt(totalRevenue)}</span></span>
-          </div>
-          <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-            <div className={`h-full rounded-full transition-all duration-700 ${recoveryRate >= 80 ? 'bg-green-500' : recoveryRate >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
-              style={{ width: `${Math.min(recoveryRate, 100)}%` }} />
-          </div>
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400">{fmtPct(recoveryRate)} of total revenue collected</p>
-            {recoveryRate >= 90 && <span className="text-xs font-medium text-green-600">Excellent</span>}
-            {recoveryRate >= 70 && recoveryRate < 90 && <span className="text-xs font-medium text-brand-600">On track</span>}
-            {recoveryRate < 70 && recoveryRate > 0 && <span className="text-xs font-medium text-amber-600">Needs attention</span>}
-          </div>
-        </div>
-      </div>
 
       {/* Three column activity */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

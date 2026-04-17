@@ -783,15 +783,15 @@ export default function SalesOrderDetailPage() {
                   <td className="px-4 py-3 font-semibold text-brand-700">{fmt(l.line_total)}</td>
                 </tr>
               ))}
-              <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-gray-200">
-                  <td colSpan={2} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase">Total</td>
-                  <td className="px-4 py-2.5 text-xs font-bold text-gray-700">{palletLines.reduce((s, l) => s + l.total_pieces, 0).toLocaleString()} pcs</td>
-                  <td />
-                  <td className="px-4 py-2.5 text-xs font-bold text-brand-700">{fmt(palletLines.reduce((s, l) => s + l.line_total, 0))}</td>
-                </tr>
-              </tfoot>
             </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 border-t-2 border-gray-200">
+                <td colSpan={2} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase">Total</td>
+                <td className="px-4 py-2.5 text-xs font-bold text-gray-700">{palletLines.reduce((s, l) => s + l.total_pieces, 0).toLocaleString()} pcs</td>
+                <td />
+                <td className="px-4 py-2.5 text-xs font-bold text-brand-700">{fmt(palletLines.reduce((s, l) => s + l.line_total, 0))}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

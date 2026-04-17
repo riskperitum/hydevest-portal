@@ -115,8 +115,6 @@ export default function InvoicePage() {
   const companyName   = settings.company_name ?? 'Hydevest Solutions Limited'
   const companyRC     = settings.company_rc ?? ''
   const companyTIN    = settings.company_tin ?? ''
-  const sigName       = settings.authorized_signatory_name ?? 'Authorized Signatory'
-  const sigImage      = settings.authorized_signature ?? ''
   const isSplit       = invoice.sale_type === 'split_sale'
   const hideType      = invoice.container?.hide_type ?? ''
   const description   = `${hideType ? hideType.charAt(0).toUpperCase() + hideType.slice(1) + ' ' : ''}Purchase of cow hides`
@@ -326,18 +324,24 @@ export default function InvoicePage() {
           {/* Signatures */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 8 }}>
             <div>
-              <div style={{ borderBottom: '1.5px solid #333', minHeight: 56, marginBottom: 6, display: 'flex', alignItems: 'flex-end' }}>
-                {sigImage ? (
-                  <img src={sigImage} alt="Signature" style={{ height: 52, maxWidth: 200, objectFit: 'contain' }} />
-                ) : (
-                  <span style={{ fontSize: 9, color: '#aaa', fontStyle: 'italic' }}>Signature</span>
-                )}
+              <div style={{ borderBottom: '1.5px solid #333', minHeight: 96, marginBottom: 6, display: 'flex', alignItems: 'flex-end' }}>
+                <img
+                  src="/signature_black.png"
+                  alt="Authorized signature"
+                  style={{
+                    height: 90,
+                    maxWidth: 280,
+                    objectFit: 'contain',
+                    mixBlendMode: 'multiply',
+                  }}
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>Authorized Signatory</div>
               <div style={{ fontSize: 9, color: '#666' }}>{companyName}</div>
               <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>Date: {invoiceDate}</div>
             </div>
-            <div>
+            <div style={{ paddingTop: 40 }}>
               <div style={{ borderBottom: '1.5px solid #333', minHeight: 56, marginBottom: 6 }}></div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#111' }}>{invoice.customer?.name ?? 'Customer'}</div>
               <div style={{ fontSize: 9, color: '#666' }}>Customer Signature &nbsp;&nbsp; Date: ___________</div>

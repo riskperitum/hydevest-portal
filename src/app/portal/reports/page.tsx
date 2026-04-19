@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import {
   Package, Users, TrendingDown, TrendingUp,
   AlertTriangle, BarChart3, DollarSign,
@@ -15,6 +16,7 @@ const REPORTS = [
     bg:          'bg-blue-50',
     iconColor:   'text-blue-600',
     border:      'hover:border-blue-200',
+    permKey:     'reports.view',
   },
   {
     href:        '/portal/reports/customer-debt',
@@ -24,6 +26,7 @@ const REPORTS = [
     bg:          'bg-red-50',
     iconColor:   'text-red-600',
     border:      'hover:border-red-200',
+    permKey:     'reports.view',
   },
   {
     href:        '/portal/reports/supplier-payables',
@@ -33,6 +36,7 @@ const REPORTS = [
     bg:          'bg-amber-50',
     iconColor:   'text-amber-600',
     border:      'hover:border-amber-200',
+    permKey:     'reports.supplier_payables',
   },
   {
     href:        '/portal/reports/supplier-receivables',
@@ -42,6 +46,7 @@ const REPORTS = [
     bg:          'bg-green-50',
     iconColor:   'text-green-600',
     border:      'hover:border-green-200',
+    permKey:     'reports.supplier_receivables',
   },
   {
     href:        '/portal/reports/container-profit',
@@ -51,6 +56,7 @@ const REPORTS = [
     bg:          'bg-purple-50',
     iconColor:   'text-purple-600',
     border:      'hover:border-purple-200',
+    permKey:     'reports.container_profit',
   },
   {
     href:        '/portal/reports/bad-debts',
@@ -60,6 +66,7 @@ const REPORTS = [
     bg:          'bg-orange-50',
     iconColor:   'text-orange-600',
     border:      'hover:border-orange-200',
+    permKey:     'reports.bad_debts',
   },
   {
     href:        '/portal/accounts/customers',
@@ -69,11 +76,17 @@ const REPORTS = [
     bg:          'bg-teal-50',
     iconColor:   'text-teal-600',
     border:      'hover:border-teal-200',
+    permKey:     'reports.customer_profiles',
   },
 ]
 
 export default function ReportsPage() {
   const router = useRouter()
+  const { permissions, isSuperAdmin } = usePermissions()
+
+  function canSeeReport(permKey: string): boolean {
+    return isSuperAdmin || can(permissions, isSuperAdmin, 'reports.*') || can(permissions, isSuperAdmin, permKey)
+  }
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -84,7 +97,7 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {REPORTS.map(report => {
+        {REPORTS.filter(report => canSeeReport(report.permKey)).map(report => {
           const Icon = report.icon
           return (
             <button key={report.href}

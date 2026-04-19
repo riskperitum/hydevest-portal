@@ -67,7 +67,7 @@ export default function ContainersPage() {
   const [statusMetricsByContainer, setStatusMetricsByContainer] = useState<Record<string, ContainerStatusMetrics>>({})
 
   const { permissions, isSuperAdmin } = usePermissions()
-  const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
+  const canViewCosts = isSuperAdmin || can(permissions, isSuperAdmin, 'view_costs')
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -198,16 +198,18 @@ export default function ContainersPage() {
   function exportCSV() {
     const headers = [
       'Container ID', 'Title', 'Tracking No.', 'Trip ID', 'Trip Title',
-      'Status', 'Hide Type', 'Funding', 'Pieces', 'Avg Weight', 'Unit Price ($)',
-      'Shipping ($)', 'Landing Cost (₦)', 'Created', 'Created By'
+      'Status', 'Hide Type', 'Funding', 'Pieces', 'Avg Weight',
+      ...(canViewCosts ? ['Unit Price ($)', 'Shipping ($)', 'Landing Cost (₦)'] : []),
+      'Created', 'Created By'
     ]
     const rows = filtered.map(c => [
       c.container_id, c.container_number ?? '', c.tracking_number ?? '',
       c.trip?.trip_id ?? '', c.trip?.title ?? '',
       computedStatusLabel(c), c.hide_type ?? '', c.funding_type,
       c.pieces_purchased ?? '', c.average_weight ?? '',
-      c.unit_price_usd ?? '', c.shipping_amount_usd ?? '',
-      c.estimated_landing_cost ?? '',
+      ...(canViewCosts
+        ? [c.unit_price_usd ?? '', c.shipping_amount_usd ?? '', c.estimated_landing_cost ?? '']
+        : []),
       new Date(c.created_at).toLocaleDateString(),
       c.created_by_profile?.full_name ?? c.created_by_profile?.email ?? ''
     ])
@@ -264,7 +266,7 @@ export default function ContainersPage() {
     .meta { display: flex; gap: 32px; margin-top: 16px; }
     .meta-item { font-size: 12px; opacity: 0.9; }
     .meta-item span { font-weight: 600; }
-    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px 40px; background: #f8f7ff; border-bottom: 1px solid #e8e0ff; }
+    .summary { display: grid; gap: 16px; padding: 24px 40px; background: #f8f7ff; border-bottom: 1px solid #e8e0ff; }
     .summary-card { background: white; border-radius: 8px; padding: 16px; border: 1px solid #ede9f7; }
     .summary-card .label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
     .summary-card .value { font-size: 20px; font-weight: 700; color: #55249E; }
@@ -301,7 +303,7 @@ export default function ContainersPage() {
     </div>
   </div>
 
-  <div class="summary">
+  <div class="summary" style="grid-template-columns: repeat(${canViewCosts ? 4 : 2}, minmax(0, 1fr));">
     <div class="summary-card">
       <div class="label">Total containers</div>
       <div class="value">${data.length}</div>
@@ -310,6 +312,7 @@ export default function ContainersPage() {
       <div class="label">Total pieces</div>
       <div class="value">${totalPiecesReport.toLocaleString()}</div>
     </div>
+    ${canViewCosts ? `
     <div class="summary-card">
       <div class="label">Total purchase subtotal</div>
       <div class="value">$${totalSubtotalReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
@@ -317,7 +320,7 @@ export default function ContainersPage() {
     <div class="summary-card">
       <div class="label">Total landing cost</div>
       <div class="value">₦${totalLandingReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-    </div>
+    </div>` : ''}
   </div>
 
   <div class="content">
@@ -334,9 +337,7 @@ export default function ContainersPage() {
           <th>Funding</th>
           <th>Pieces</th>
           <th>Avg Weight</th>
-          <th>Unit Price</th>
-          <th>Purchase Subtotal</th>
-          <th>Landing Cost (₦)</th>
+          ${canViewCosts ? '<th>Unit Price</th><th>Purchase Subtotal</th><th>Landing Cost (₦)</th>' : ''}
           <th>Created</th>
           <th>Created By</th>
         </tr>
@@ -353,9 +354,7 @@ export default function ContainersPage() {
           <td><span class="badge badge-${r.funding}">${r.funding}</span></td>
           <td style="text-align:center">${r.pieces}</td>
           <td>${r.avgWeight}</td>
-          <td>${r.unitPrice}</td>
-          <td style="color:#55249E;font-weight:600">${r.purchaseSubtotal}</td>
-          <td style="font-weight:600">${r.landingCost}</td>
+          ${canViewCosts ? `<td>${r.unitPrice}</td><td style="color:#55249E;font-weight:600">${r.purchaseSubtotal}</td><td style="font-weight:600">${r.landingCost}</td>` : ''}
           <td>${r.created}</td>
           <td>${r.createdBy}</td>
         </tr>`).join('')}
@@ -365,9 +364,7 @@ export default function ContainersPage() {
           <td colspan="7">TOTALS</td>
           <td style="text-align:center">${totalPiecesReport.toLocaleString()}</td>
           <td>—</td>
-          <td>—</td>
-          <td>$${totalSubtotalReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>₦${totalLandingReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          ${canViewCosts ? `<td>—</td><td>$${totalSubtotalReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td>₦${totalLandingReport.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>` : ''}
           <td colspan="2"></td>
         </tr>
       </tfoot>
@@ -417,7 +414,7 @@ export default function ContainersPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className={`grid gap-3 ${canViewCosts ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 sm:grid-cols-2'}`}>
         {[
           {
             label: 'Total containers',
@@ -426,16 +423,6 @@ export default function ContainersPage() {
             icon: <Package size={15} />,
             iconBg: 'bg-brand-100 text-brand-600',
             valueCls: 'text-brand-600',
-          },
-          {
-            label: 'Avg landing cost',
-            value: filtered.length > 0 && totalLanding > 0
-              ? fmt(totalLanding / filtered.filter(c => c.estimated_landing_cost).length)
-              : '—',
-            sub: `total: ${totalLanding > 0 ? fmt(totalLanding) : '—'}`,
-            icon: <TrendingUp size={15} />,
-            iconBg: 'bg-green-100 text-green-600',
-            valueCls: 'text-gray-900',
           },
           {
             label: 'Avg pieces',
@@ -447,30 +434,42 @@ export default function ContainersPage() {
             iconBg: 'bg-blue-100 text-blue-600',
             valueCls: 'text-gray-900',
           },
-          {
-            label: 'Avg quoted price',
-            value: (() => {
-              const w = filtered.filter(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
-              if (!w.length) return '—'
-              return fmtUSD(w.reduce((s, c) => s + Number(c.quoted_price_usd), 0) / w.length)
-            })(),
-            sub: 'partner containers',
-            icon: <Tag size={15} />,
-            iconBg: 'bg-amber-100 text-amber-600',
-            valueCls: 'text-gray-900',
-          },
-          {
-            label: 'Avg unit price',
-            value: (() => {
-              const w = filtered.filter(c => c.unit_price_usd && Number(c.unit_price_usd) > 0)
-              if (!w.length) return '—'
-              return fmtUSD(w.reduce((s, c) => s + Number(c.unit_price_usd), 0) / w.length)
-            })(),
-            sub: 'per piece',
-            icon: <DollarSign size={15} />,
-            iconBg: 'bg-purple-100 text-purple-600',
-            valueCls: 'text-gray-900',
-          },
+          ...(canViewCosts ? [
+            {
+              label: 'Avg landing cost',
+              value: filtered.length > 0 && totalLanding > 0
+                ? fmt(totalLanding / filtered.filter(c => c.estimated_landing_cost).length)
+                : '—',
+              sub: `total: ${totalLanding > 0 ? fmt(totalLanding) : '—'}`,
+              icon: <TrendingUp size={15} />,
+              iconBg: 'bg-green-100 text-green-600',
+              valueCls: 'text-gray-900',
+            },
+            {
+              label: 'Avg quoted price',
+              value: (() => {
+                const w = filtered.filter(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
+                if (!w.length) return '—'
+                return fmtUSD(w.reduce((s, c) => s + Number(c.quoted_price_usd), 0) / w.length)
+              })(),
+              sub: 'partner containers',
+              icon: <Tag size={15} />,
+              iconBg: 'bg-amber-100 text-amber-600',
+              valueCls: 'text-gray-900',
+            },
+            {
+              label: 'Avg unit price',
+              value: (() => {
+                const w = filtered.filter(c => c.unit_price_usd && Number(c.unit_price_usd) > 0)
+                if (!w.length) return '—'
+                return fmtUSD(w.reduce((s, c) => s + Number(c.unit_price_usd), 0) / w.length)
+              })(),
+              sub: 'per piece',
+              icon: <DollarSign size={15} />,
+              iconBg: 'bg-purple-100 text-purple-600',
+              valueCls: 'text-gray-900',
+            },
+          ] : []),
         ].map(metric => (
           <div key={metric.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow">
             <div className={`inline-flex p-1.5 rounded-lg ${metric.iconBg} mb-3`}>
@@ -567,15 +566,15 @@ export default function ContainersPage() {
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Title</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Tracking No.</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Trip Status</th>
-                {canViewCosts && (
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Landing Cost (₦)</th>
-                )}
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Pieces</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Avg Weight</th>
                 {canViewCosts && (
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Unit Price ($)</th>
+                  <>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Unit Price ($)</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Purchase Subtotal ($)</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Landing Cost (₦)</th>
+                  </>
                 )}
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Purchase Subtotal ($)</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Hide Type</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Funding</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50/80">Created</th>
@@ -587,7 +586,7 @@ export default function ContainersPage() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 15 }).map((_, j) => (
+                    {Array.from({ length: canViewCosts ? 15 : 12 }).map((_, j) => (
                       <td key={j} className="px-3 py-3.5">
                         <div className="h-3.5 bg-gray-100 rounded-full animate-pulse" style={{ width: `${40 + Math.random() * 40}%` }} />
                       </td>
@@ -596,7 +595,7 @@ export default function ContainersPage() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="px-4 py-20 text-center">
+                  <td colSpan={canViewCosts ? 15 : 12} className="px-4 py-20 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
                         <Package size={20} className="text-gray-300" />
@@ -661,23 +660,23 @@ export default function ContainersPage() {
                         )}
                       </div>
                     </td>
-                    {canViewCosts && (
-                      <td className="px-3 py-3.5 whitespace-nowrap">
-                        {con.estimated_landing_cost
-                          ? <span className="font-semibold text-gray-900">{fmt(con.estimated_landing_cost)}</span>
-                          : <span className="text-gray-300">—</span>}
-                      </td>
-                    )}
                     <td className="px-3 py-3.5 text-gray-700 text-right pr-6 font-medium">{con.pieces_purchased?.toLocaleString() ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-3.5 text-gray-600 whitespace-nowrap">{con.average_weight ? `${con.average_weight} kg` : <span className="text-gray-300">—</span>}</td>
                     {canViewCosts && (
-                      <td className="px-3 py-3.5 text-gray-700 whitespace-nowrap font-medium">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : <span className="text-gray-300">—</span>}</td>
+                      <>
+                        <td className="px-3 py-3.5 text-gray-700 whitespace-nowrap font-medium">{con.unit_price_usd ? fmtUSD(con.unit_price_usd) : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-3.5 whitespace-nowrap">
+                          {purchaseSubtotal > 0
+                            ? <span className="font-semibold text-brand-700">{fmtUSD(purchaseSubtotal)}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-3.5 whitespace-nowrap">
+                          {con.estimated_landing_cost
+                            ? <span className="font-semibold text-gray-900">{fmt(con.estimated_landing_cost)}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                      </>
                     )}
-                    <td className="px-3 py-3.5 whitespace-nowrap">
-                      {purchaseSubtotal > 0
-                        ? <span className="font-semibold text-brand-700">{fmtUSD(purchaseSubtotal)}</span>
-                        : <span className="text-gray-300">—</span>}
-                    </td>
                     <td className="px-3 py-3.5 text-gray-500 whitespace-nowrap text-xs">
                       {con.hide_type ? HIDE_TYPE_LABELS[con.hide_type] ?? con.hide_type : <span className="text-gray-300">—</span>}
                     </td>
@@ -706,21 +705,21 @@ export default function ContainersPage() {
                     Totals · {filtered.length} container{filtered.length !== 1 ? 's' : ''}
                   </td>
                   <td className="px-3 py-3 text-xs text-gray-300">—</td>
-                  {canViewCosts && (
-                    <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">
-                      {totalLanding > 0 ? fmt(totalLanding) : '—'}
-                    </td>
-                  )}
                   <td className="px-3 py-3 text-xs font-bold text-gray-700 text-right pr-6">
                     {totalPieces.toLocaleString()}
                   </td>
                   <td className="px-3 py-3 text-xs text-gray-300">—</td>
                   {canViewCosts && (
-                    <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                    <>
+                      <td className="px-3 py-3 text-xs text-gray-300">—</td>
+                      <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
+                        {fmtUSD(totalUSD)}
+                      </td>
+                      <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">
+                        {totalLanding > 0 ? fmt(totalLanding) : '—'}
+                      </td>
+                    </>
                   )}
-                  <td className="px-3 py-3 text-xs font-bold text-brand-700 whitespace-nowrap">
-                    {fmtUSD(totalUSD)}
-                  </td>
                   <td colSpan={5} />
                 </tr>
               </tfoot>

@@ -27,6 +27,8 @@ interface Presale {
   status: string
   approval_status: string
   needs_review: boolean
+  last_approved_at?: string | null
+  last_approved_by?: string | null
   last_reviewed_at: string | null
   last_reviewed_by: string | null
   warehouse_confirmed_avg_weight: number | null
@@ -347,27 +349,40 @@ export default function PresaleDetailPage() {
     const typeKeys = { delete: 'delete_approval', review: 'review_request', approval: 'approval_request' }
     const typeLabels = { delete: 'Delete approval', review: 'Review request', approval: 'Approval request' }
 
-    // Build detailed changes summary from activity logs since last approval
-    const relevantLogs = activityLogs.filter(log => {
-      // Only include field update logs since last approval
-      return log.action && (
-        log.action.includes('Updated') ||
-        log.action.includes('auto-recalculated') ||
-        log.action.includes('added') ||
-        log.action.includes('deleted')
-      )
-    })
+    // Cutoff = last approved date if exists, else last reviewed date
+    const cutoffDate = presale.last_approved_at ?? presale.last_reviewed_at ?? null
+
+    const logsAfterCutoff = cutoffDate
+      ? activityLogs.filter(l => new Date(l.created_at) > new Date(cutoffDate))
+      : activityLogs
+
+    const relevantLogs = logsAfterCutoff.filter(log =>
+      log.action?.includes('Updated') ||
+      log.action?.includes('auto-recalculated') ||
+      log.action?.includes('added') ||
+      log.action?.includes('deleted') ||
+      log.action?.includes('override')
+    )
+
+    const logsToUse = relevantLogs.length > 0 ? relevantLogs : logsAfterCutoff
 
     let changesSummary: string | null
-    if (relevantLogs.length > 0) {
-      changesSummary = relevantLogs.slice(0, 10).map(log => {
+    if (logsToUse.length > 0) {
+      const cutoffLabel = presale.last_approved_at
+        ? `last approved (${new Date(presale.last_approved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})`
+        : presale.last_reviewed_at
+          ? `last reviewed (${new Date(presale.last_reviewed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})`
+          : 'start'
+      changesSummary = `Changes since ${cutoffLabel}:\n` + logsToUse.slice(0, 10).map(log => {
         if (log.field_name && log.old_value !== null && log.new_value !== null) {
           return `• ${log.field_name}: ${log.old_value || '(empty)'} → ${log.new_value || '(empty)'}`
         }
         return `• ${log.action}`
       }).join('\n')
     } else {
-      changesSummary = 'No specific field changes recorded.'
+      changesSummary = cutoffDate
+        ? `No changes since last ${presale.last_approved_at ? 'approval' : 'review'}.`
+        : 'No changes recorded.'
     }
 
     const { data: task } = await supabase.from('tasks').insert({
@@ -419,11 +434,13 @@ export default function PresaleDetailPage() {
         }).eq('id', presaleId)
       } else {
         await supabase.from('presales').update({
-          approval_status: 'approved',
-          needs_review: false,
-          status: presale.status === 'altered' ? 'confirmed' : presale.status,
+          approval_status:  'approved',
+          needs_review:     false,
+          status:           presale.status === 'altered' ? 'confirmed' : presale.status,
           last_reviewed_by: currentUserId,
           last_reviewed_at: new Date().toISOString(),
+          last_approved_at: new Date().toISOString(),
+          last_approved_by: currentUserId,
         }).eq('id', presaleId)
       }
     } else {

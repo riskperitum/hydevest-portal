@@ -1182,19 +1182,21 @@ export default function TripDetailPage() {
               )}
 
               {/* ── ADMIN / SUPER ADMIN BYPASS BUTTONS ── */}
+
+              {/* Review button — shown when not yet reviewed */}
               {canSelfApprove && (
                 trip.approval_status === 'pending' ||
                 trip.approval_status === 'pending_review' ||
-                trip.approval_status === 'reviewed' ||
-                trip.approval_status === 'rejected' ||
-                trip.approval_status === 'approved'
-              ) && trip.approval_status !== 'reviewed' && (
+                trip.approval_status === 'rejected'
+              ) && (
                 <button type="button" onClick={() => void handleTripApprovalAction('review')}
                   disabled={approvingTrip}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">
                   {approvingTrip ? 'Processing…' : 'Review'}
                 </button>
               )}
+
+              {/* Approve button — shown when reviewed */}
               {canSelfApprove && trip.approval_status === 'reviewed' && (
                 <button type="button" onClick={() => void handleTripApprovalAction('approve')}
                   disabled={approvingTrip}
@@ -1203,7 +1205,16 @@ export default function TripDetailPage() {
                 </button>
               )}
 
-              {/* ── REJECT — shown to admins when pending_review or reviewed ── */}
+              {/* Re-review button — shown when already approved (for modifications) */}
+              {canSelfApprove && trip.approval_status === 'approved' && containers.some(c => c.is_modified) && (
+                <button type="button" onClick={() => void handleTripApprovalAction('review')}
+                  disabled={approvingTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50">
+                  {approvingTrip ? 'Processing…' : 'Re-review changes'}
+                </button>
+              )}
+
+              {/* Reject button — shown when pending review or reviewed */}
               {canSelfApprove && (
                 trip.approval_status === 'pending_review' ||
                 trip.approval_status === 'reviewed'

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AccountTable from '@/components/ui/AccountTable'
 import Modal from '@/components/ui/Modal'
@@ -29,6 +30,7 @@ const blank = {
 }
 
 export default function CustomersTab() {
+  const router = useRouter()
   const [data, setData] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -105,7 +107,13 @@ export default function CustomersTab() {
     },
     {
       key: 'name', label: 'Name',
-      render: (r: Customer) => <span className="font-medium text-gray-900">{r.name}</span>
+      render: (r: Customer) => (
+        <button type="button"
+          onClick={() => router.push(`/portal/accounts/customers/${r.id}`)}
+          className="text-sm font-medium text-brand-600 hover:underline text-left">
+          {r.name}
+        </button>
+      ),
     },
     { key: 'phone', label: 'Phone', render: (r: Customer) => r.phone ?? '—' },
     {

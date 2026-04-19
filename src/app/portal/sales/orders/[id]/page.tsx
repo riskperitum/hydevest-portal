@@ -735,7 +735,10 @@ export default function SalesOrderDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Customer</p>
-                <p className="text-sm font-medium text-gray-900">{order.customer?.name ?? '—'}</p>
+                <button type="button" onClick={() => router.push(`/portal/accounts/customers/${order.customer?.id}`)}
+                  className="text-sm font-semibold text-brand-600 hover:underline text-left">
+                  {order.customer?.name ?? '—'}
+                </button>
                 <p className="text-xs text-gray-400">{order.customer?.customer_id} {order.customer?.phone ? `· ${order.customer.phone}` : ''}</p>
               </div>
               {order.sale_type === 'box_sale' && (

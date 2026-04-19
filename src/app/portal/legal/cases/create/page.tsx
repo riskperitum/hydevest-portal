@@ -103,7 +103,7 @@ export default function CreateLegalCasePage() {
   }
 
   return (
-    <div className="space-y-5 max-w-3xl">
+    <div className="space-y-5 max-w-5xl">
       <div className="flex items-center gap-3">
         <button onClick={() => router.back()}
           className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
@@ -230,7 +230,7 @@ export default function CreateLegalCasePage() {
                 placeholder="Search and add customers..."
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               {showCustomerDropdown && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-56 overflow-y-auto">
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-64 overflow-y-auto">
                   {filteredCustomers.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-gray-400">
                       {customers.length === 0 ? 'Loading customers...' : 'No customers found'}
@@ -240,9 +240,9 @@ export default function CreateLegalCasePage() {
                       <button key={c.id} type="button"
                         onMouseDown={e => e.preventDefault()}
                         onClick={() => addCustomer(c)}
-                        className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0">
-                        <span className="text-sm font-medium text-gray-800">{c.name}</span>
-                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">{c.customer_id}</span>
+                        className="w-full px-5 py-3.5 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-100 last:border-0 transition-colors">
+                        <span className="text-base font-semibold text-gray-900">{c.name}</span>
+                        <span className="text-sm bg-brand-50 text-brand-700 px-3 py-1 rounded-full font-mono font-medium">{c.customer_id}</span>
                       </button>
                     ))
                   )}

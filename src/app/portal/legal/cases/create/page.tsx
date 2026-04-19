@@ -230,7 +230,7 @@ export default function CreateLegalCasePage() {
                 placeholder="Search and add customers..."
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               {showCustomerDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-56 overflow-y-auto">
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-56 overflow-y-auto">
                   {filteredCustomers.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-gray-400">
                       {customers.length === 0 ? 'Loading customers...' : 'No customers found'}

@@ -43,8 +43,8 @@ export default function CreateLegalCasePage() {
   function addCustomer(customer: Customer) {
     if (!selectedCustomers.find(c => c.id === customer.id)) {
       setSelectedCustomers(prev => [...prev, customer])
-      setCustomerSearch('')
     }
+    setCustomerSearch('')
   }
 
   function removeCustomer(id: string) {
@@ -197,37 +197,43 @@ export default function CreateLegalCasePage() {
             <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Associated customers</h3>
           </div>
           <div className="p-5 space-y-3">
+            {/* Selected customer tags */}
             {selectedCustomers.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {selectedCustomers.map(c => (
                   <div key={c.id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full border"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border"
                     style={{ background: '#f0ecfc', color: '#55249E', borderColor: '#d4c8f7' }}>
-                    {c.name}
+                    <span>{c.name}</span>
+                    <span className="opacity-50 text-xs">({c.customer_id})</span>
                     <button type="button" onClick={() => removeCustomer(c.id)}
-                      className="hover:opacity-70">
-                      <X size={10} />
+                      className="ml-1 hover:opacity-60 transition-opacity">
+                      <X size={12} />
                     </button>
                   </div>
                 ))}
               </div>
             )}
+
+            {/* Search input */}
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  list="customer-list"
-                  value={customerSearch}
-                  onChange={e => setCustomerSearch(e.target.value)}
-                  placeholder="Type to search customers..."
-                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                <datalist id="customer-list">
-                  {customers
-                    .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
-                    .map(c => (
-                      <option key={c.id} value={`${c.name} (${c.customer_id})`} />
-                    ))}
-                </datalist>
-              </div>
+              <input
+                list="customer-list"
+                value={customerSearch}
+                onChange={e => setCustomerSearch(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const match = customers.find(c =>
+                      `${c.name} (${c.customer_id})` === customerSearch ||
+                      c.name.toLowerCase() === customerSearch.toLowerCase() ||
+                      c.customer_id.toLowerCase() === customerSearch.toLowerCase()
+                    )
+                    if (match) { addCustomer(match); }
+                  }
+                }}
+                placeholder="Type to search and add customers..."
+                className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               <button type="button"
                 onClick={() => {
                   const match = customers.find(c =>
@@ -237,11 +243,21 @@ export default function CreateLegalCasePage() {
                   )
                   if (match) addCustomer(match)
                 }}
-                className="px-4 py-2.5 text-sm font-medium text-white rounded-lg hover:opacity-90 whitespace-nowrap"
+                className="px-4 py-2.5 text-sm font-semibold text-white rounded-lg hover:opacity-90 whitespace-nowrap"
                 style={{ background: '#55249E' }}>
                 Add
               </button>
             </div>
+            <datalist id="customer-list">
+              {customers
+                .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
+                .map(c => (
+                  <option key={c.id} value={`${c.name} (${c.customer_id})`} />
+                ))}
+            </datalist>
+            <p className="text-xs text-gray-400">
+              Search by name or customer ID. Press Enter or click Add to tag a customer.
+            </p>
           </div>
         </div>
 

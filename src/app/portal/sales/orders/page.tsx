@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Plus, Search, Eye, Filter, Download, Package, FileText } from 'lucide-react'
-import Link from 'next/link'
+import {
+  Plus, Search, Eye, Package, ChevronDown, ChevronUp,
+  TrendingUp, Clock, CheckCircle2,
+} from 'lucide-react'
 
 interface SalesOrder {
   id: string
@@ -20,346 +22,321 @@ interface SalesOrder {
   payment_status: string
   approval_status: string
   needs_approval: boolean
-  last_approved_at: string | null
   status: string
   created_at: string
-  container: { container_id: string; tracking_number: string | null } | null
-  presale: { presale_id: string } | null
+  container_id: string | null
+  container: { id: string; container_id: string; tracking_number: string | null; hide_type: string | null } | null
+  presale: { presale_id: string; sale_type: string } | null
   customer: { name: string; customer_id: string } | null
   created_by_profile: { full_name: string | null; email: string } | null
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active:    'bg-green-50 text-green-700',
-  cancelled: 'bg-red-50 text-red-600',
-  completed: 'bg-brand-50 text-brand-700',
+interface ContainerGroup {
+  container_id: string
+  container_db_id: string
+  tracking_number: string | null
+  hide_type: string | null
+  orders: SalesOrder[]
+  total_revenue: number
+  total_outstanding: number
+  total_collected: number
+  order_count: number
 }
+
+const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  paid:        { label: 'Fully paid',   color: 'bg-green-50 text-green-700' },
+  partial:     { label: 'Partial',      color: 'bg-amber-50 text-amber-700' },
+  outstanding: { label: 'Outstanding',  color: 'bg-red-50 text-red-600'    },
+}
+
+const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export default function SalesOrdersPage() {
   const router = useRouter()
-  const [orders, setOrders] = useState<SalesOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [showFilters, setShowFilters] = useState(false)
-  const [statusFilter, setStatusFilter] = useState('')
-  const [saleTypeFilter, setSaleTypeFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [reportOpen, setReportOpen] = useState(false)
-  const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
+  const [groups, setGroups]     = useState<ContainerGroup[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [search, setSearch]     = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     const supabase = createClient()
     const { data } = await supabase
       .from('sales_orders')
-      .select(`*,
-        container:containers(container_id, tracking_number),
-        presale:presales(presale_id),
-        customer:customers(name, customer_id),
+      .select(`
+        id, order_id, sale_type, sale_amount, discount, overages,
+        customer_payable, amount_paid, outstanding_balance,
+        payment_method, payment_status, approval_status,
+        needs_approval, status, created_at, container_id,
+        container:containers!sales_orders_container_id_fkey(
+          id, container_id, tracking_number, hide_type
+        ),
+        presale:presales!sales_orders_presale_id_fkey(presale_id, sale_type),
+        customer:customers!sales_orders_customer_id_fkey(name, customer_id),
         created_by_profile:profiles!sales_orders_created_by_fkey(full_name, email)
       `)
       .order('created_at', { ascending: false })
-    setOrders(data ?? [])
+
+    // Group by container
+    const groupMap: Record<string, ContainerGroup> = {}
+
+    for (const order of (data ?? [])) {
+      const cId  = (order.container as { container_id?: string } | null)?.container_id ?? 'unknown'
+      const cDbId = (order.container as { id?: string } | null)?.id ?? order.container_id ?? 'unknown'
+      if (!groupMap[cId]) {
+        groupMap[cId] = {
+          container_id:    cId,
+          container_db_id: String(cDbId),
+          tracking_number: (order.container as { tracking_number?: string | null } | null)?.tracking_number ?? null,
+          hide_type:       (order.container as { hide_type?: string | null } | null)?.hide_type ?? null,
+          orders:          [],
+          total_revenue:    0,
+          total_outstanding: 0,
+          total_collected:  0,
+          order_count:      0,
+        }
+      }
+      groupMap[cId].orders.push(order as SalesOrder)
+      groupMap[cId].total_revenue     += Number(order.customer_payable)
+      groupMap[cId].total_outstanding += Number(order.outstanding_balance)
+      groupMap[cId].total_collected   += Number(order.amount_paid)
+      groupMap[cId].order_count++
+    }
+
+    setGroups(Object.values(groupMap).sort((a, b) =>
+      (b.orders[0]?.created_at ?? '').localeCompare(a.orders[0]?.created_at ?? ''),
+    ))
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-  const filteredOrders = orders.filter(o => {
-    const matchSearch = search === '' ||
-      o.order_id.toLowerCase().includes(search.toLowerCase()) ||
-      (o.container?.tracking_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.customer?.name ?? '').toLowerCase().includes(search.toLowerCase())
-    const matchStatus = statusFilter === '' || o.status === statusFilter
-    const matchType = saleTypeFilter === '' || o.sale_type === saleTypeFilter
-    const matchFrom = dateFrom === '' || new Date(o.created_at) >= new Date(dateFrom)
-    const matchTo = dateTo === '' || new Date(o.created_at) <= new Date(dateTo + 'T23:59:59')
-    return matchSearch && matchStatus && matchType && matchFrom && matchTo
-  })
-
-  const activeFilters = [statusFilter, saleTypeFilter, dateFrom, dateTo].filter(Boolean).length
-  const totalRevenue = filteredOrders.reduce((s, o) => s + Number(o.customer_payable), 0)
-  const totalOutstanding = filteredOrders.reduce((s, o) => s + Number(o.outstanding_balance), 0)
-  const totalCollected = filteredOrders.reduce((s, o) => s + Number(o.amount_paid), 0)
-
-  function generateReport(type: 'filtered' | 'full') {
-    const data = type === 'filtered' ? filteredOrders : orders
-    const sym = '\u20A6'
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sales Orders Report — Hydevest</title>
-    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;color:#1a1a2e}
-    .header{background:#55249E;color:white;padding:32px 40px}.header h1{font-size:24px;font-weight:700}
-    .header p{font-size:13px;opacity:.8;margin-top:4px}.content{padding:24px 40px}
-    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 40px;background:#f8f7ff;border-bottom:1px solid #e8e0ff}
-    .card{background:white;border-radius:8px;padding:16px;border:1px solid #ede9f7}
-    .card .label{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
-    .card .value{font-size:20px;font-weight:700;color:#55249E}
-    table{width:100%;border-collapse:collapse;font-size:12px}thead tr{background:#55249E;color:white}
-    thead th{padding:10px 12px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap}
-    tbody tr{border-bottom:1px solid #f0ebff}tbody tr:nth-child(even){background:#faf8ff}
-    tbody td{padding:9px 12px;color:#374151;white-space:nowrap}
-    .footer{padding:20px 40px;border-top:1px solid #ede9f7;text-align:center;font-size:11px;color:#9ca3af;margin-top:24px}
-    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
-    <div class="header"><h1>Sales Orders Report</h1>
-    <p>Hydevest Portal — ${type === 'filtered' ? 'Filtered View' : 'Full Report'} · Generated ${new Date().toLocaleString()}</p></div>
-    <div class="summary">
-    <div class="card"><div class="label">Total orders</div><div class="value">${data.length}</div></div>
-    <div class="card"><div class="label">Total revenue</div><div class="value">${sym}${data.reduce((s,o)=>s+Number(o.customer_payable),0).toLocaleString(undefined,{minimumFractionDigits:2})}</div></div>
-    <div class="card"><div class="label">Total collected</div><div class="value">${sym}${data.reduce((s,o)=>s+Number(o.amount_paid),0).toLocaleString(undefined,{minimumFractionDigits:2})}</div></div>
-    <div class="card"><div class="label">Outstanding</div><div class="value">${sym}${data.reduce((s,o)=>s+Number(o.outstanding_balance),0).toLocaleString(undefined,{minimumFractionDigits:2})}</div></div>
-    </div>
-    <div class="content"><table><thead><tr>
-    <th>Order ID</th><th>Type</th><th>Tracking No.</th><th>Customer</th>
-    <th>Payable</th><th>Paid</th><th>Outstanding</th><th>Payment</th><th>Approval</th><th>Date</th>
-    </tr></thead><tbody>
-    ${data.map(o=>`<tr>
-    <td><strong style="color:#55249E">${o.order_id}</strong></td>
-    <td>${o.sale_type==='box_sale'?'Box sale':'Split sale'}</td>
-    <td>${o.container?.tracking_number??'—'}</td>
-    <td>${o.customer?.name??'—'}</td>
-    <td><strong>${sym}${Number(o.customer_payable).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></td>
-    <td>${sym}${Number(o.amount_paid).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-    <td style="color:${o.outstanding_balance>0?'#ef4444':'#16a34a'}">${sym}${Number(o.outstanding_balance).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-    <td>${o.payment_status}</td>
-    <td>${o.approval_status}</td>
-    <td>${new Date(o.created_at).toLocaleDateString()}</td>
-    </tr>`).join('')}
-    </tbody></table></div>
-    <div class="footer">Hydevest Portal · Confidential</div></body></html>`
-    const blob = new Blob([html],{type:'text/html'})
-    const url = URL.createObjectURL(blob)
-    const win = window.open(url,'_blank')
-    if(win) win.focus()
-    setReportOpen(false)
+  function toggleGroup(containerId: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(containerId)) next.delete(containerId)
+      else next.add(containerId)
+      return next
+    })
   }
 
+  const filteredGroups = groups.filter(g => {
+    if (search === '') return true
+    const s = search.toLowerCase()
+    return (
+      g.container_id.toLowerCase().includes(s) ||
+      (g.tracking_number ?? '').toLowerCase().includes(s) ||
+      g.orders.some(o =>
+        o.order_id.toLowerCase().includes(s) ||
+        (o.customer?.name ?? '').toLowerCase().includes(s),
+      )
+    )
+  })
+
+  const totalRevenue     = groups.reduce((s, g) => s + g.total_revenue, 0)
+  const totalOutstanding = groups.reduce((s, g) => s + g.total_outstanding, 0)
+  const totalCollected   = groups.reduce((s, g) => s + g.total_collected, 0)
+  const totalOrders      = groups.reduce((s, g) => s + g.order_count, 0)
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 max-w-7xl">
 
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Sales Orders</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{orders.length} order{orders.length !== 1 ? 's' : ''} recorded</p>
+          <h1 className="text-xl font-semibold text-gray-900">Sales orders</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {groups.length} containers · {totalOrders} orders
+          </p>
         </div>
-        <Link href="/portal/sales/orders/create"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-          <Plus size={16} /> <span className="hidden sm:inline">Record sale</span>
-        </Link>
+        <button type="button" onClick={() => router.push('/portal/sales/orders/create')}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+          <Plus size={15} /> New sales order
+        </button>
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Summary KPIs */}
+      <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Total orders', value: filteredOrders.length.toString(), color: 'text-brand-600' },
-          { label: 'Total revenue (₦)', value: totalRevenue > 0 ? fmt(totalRevenue) : '—', color: 'text-green-600' },
-          { label: 'Total collected (₦)', value: totalCollected > 0 ? fmt(totalCollected) : '—', color: 'text-blue-600' },
-          { label: 'Outstanding (₦)', value: totalOutstanding > 0 ? fmt(totalOutstanding) : '—', color: totalOutstanding > 0 ? 'text-red-500' : 'text-gray-400' },
+          { label: 'Total revenue',     value: fmt(totalRevenue),     color: 'text-green-700',  bg: 'bg-green-50',  icon: <TrendingUp size={15} className="text-green-600" /> },
+          { label: 'Total collected',   value: fmt(totalCollected),   color: 'text-brand-700',  bg: 'bg-brand-50',  icon: <CheckCircle2 size={15} className="text-brand-600" /> },
+          { label: 'Total outstanding', value: fmt(totalOutstanding), color: 'text-amber-700',  bg: 'bg-amber-50',  icon: <Clock size={15} className="text-amber-600" /> },
         ].map(m => (
-          <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-1">{m.label}</p>
-            <p className={`text-lg font-semibold truncate ${m.color}`}>{m.value}</p>
+          <div key={m.label} className={`${m.bg} rounded-xl p-4 border border-white shadow-sm`}>
+            <div className="flex items-center gap-2 mb-1">{m.icon}<p className="text-xs text-gray-500">{m.label}</p></div>
+            <p className={`text-lg font-bold ${m.color}`}>{m.value}</p>
           </div>
         ))}
       </div>
 
-      {/* Search + filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by order ID, tracking number or customer..."
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowFilters(v => !v)}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors
-                ${showFilters || activeFilters > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              <Filter size={15} /> Filters
-              {activeFilters > 0 && <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilters}</span>}
-            </button>
-            <button onClick={() => setReportOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
-              <FileText size={15} /> Report
-            </button>
-            <button onClick={() => {
-              const headers = ['Order ID', 'Type', 'Tracking No.', 'Customer', 'Payable', 'Paid', 'Outstanding', 'Payment', 'Approval', 'Method', 'Date']
-              const rows = filteredOrders.map(o => [o.order_id, o.sale_type, o.container?.tracking_number ?? '', o.customer?.name ?? '', o.customer_payable, o.amount_paid, o.outstanding_balance, o.payment_status, o.approval_status, o.payment_method, new Date(o.created_at).toLocaleDateString()])
-              const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
-              const blob = new Blob([csv], { type: 'text/csv' })
-              const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'sales-orders.csv'; a.click()
-            }} className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-              <Download size={15} /> Export
-            </button>
-          </div>
-        </div>
-        {showFilters && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-gray-100">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="">All</option>
-                <option value="active">Active</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Sale type</label>
-              <select value={saleTypeFilter} onChange={e => setSaleTypeFilter(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                <option value="">All types</option>
-                <option value="box_sale">Box sale</option>
-                <option value="split_sale">Split sale</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date from</label>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Date to</label>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-            </div>
-            {activeFilters > 0 && (
-              <div className="col-span-2 md:col-span-4 flex items-center justify-between pt-1">
-                <p className="text-xs text-gray-400">{filteredOrders.length} result{filteredOrders.length !== 1 ? 's' : ''}</p>
-                <button onClick={() => { setStatusFilter(''); setSaleTypeFilter(''); setDateFrom(''); setDateTo('') }}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium">Clear all</button>
-              </div>
-            )}
-          </div>
-        )}
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search container, tracking, customer..."
+          className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                {['Order ID', 'Type', 'Tracking No.', 'Customer', 'Payable', 'Paid', 'Outstanding', 'Payment', 'Approval', 'Method', 'Date', ''].map(h => (
-                  <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 12 }).map((_, j) => (
-                      <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
-                    ))}
-                  </tr>
-                ))
-              ) : filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="px-4 py-16 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
-                        <Package size={20} className="text-gray-300" />
-                      </div>
-                      <p className="text-sm text-gray-400">No sales orders yet. Record your first sale.</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredOrders.map(order => (
-                <tr key={order.id}
-                  onClick={() => router.push(`/portal/sales/orders/${order.id}`)}
-                  className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors cursor-pointer group">
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{order.order_id}</span>
-                      {order.needs_approval && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Needs approval" />
+      {/* Grouped containers */}
+      <div className="space-y-3">
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse">
+              <div className="h-4 bg-gray-100 rounded w-1/4 mb-2" />
+              <div className="h-3 bg-gray-100 rounded w-1/2" />
+            </div>
+          ))
+        ) : filteredGroups.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-100 p-10 flex flex-col items-center gap-2">
+            <Package size={24} className="text-gray-200" />
+            <p className="text-sm text-gray-400">No sales orders found</p>
+          </div>
+        ) : filteredGroups.map(group => {
+          const isOpen = expanded.has(group.container_id)
+          const recoveryPct = group.total_revenue > 0
+            ? (group.total_collected / group.total_revenue) * 100
+            : 0
+
+          return (
+            <div key={group.container_id}
+              className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+
+              {/* Container header row */}
+              <div
+                className="px-5 py-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-gray-50/50 transition-colors"
+                onClick={() => toggleGroup(group.container_id)}>
+
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center shrink-0">
+                    <Package size={15} className="text-brand-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm font-semibold text-brand-700">
+                        {group.container_id}
+                      </span>
+                      {group.tracking_number && (
+                        <span className="text-xs text-gray-400">{group.tracking_number}</span>
                       )}
+                      {group.hide_type && (
+                        <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded capitalize">
+                          {group.hide_type}
+                        </span>
+                      )}
+                      <span className="text-xs bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded font-medium">
+                        {group.order_count} order{group.order_count !== 1 ? 's' : ''}
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${order.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                      {order.sale_type === 'box_sale' ? 'Box' : 'Split'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{order.container?.tracking_number ?? '—'}</td>
-                  <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap group-hover:text-brand-700">{order.customer?.name ?? '—'}</td>
-                  <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(order.customer_payable)}</td>
-                  <td className="px-3 py-3 text-green-600 whitespace-nowrap">{fmt(order.amount_paid)}</td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={order.outstanding_balance > 0 ? 'text-red-500 font-semibold' : 'text-green-600 font-semibold'}>
-                      {fmt(order.outstanding_balance)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full
-                      ${order.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
-                        order.payment_status === 'partial' ? 'bg-amber-50 text-amber-700' :
-                        'bg-red-50 text-red-600'}`}>
-                      {order.payment_status === 'paid' ? 'Paid' : order.payment_status === 'partial' ? 'Partial' : 'Outstanding'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full
-                      ${order.approval_status === 'approved' ? 'bg-green-50 text-green-700' :
-                        order.approval_status === 'pending' ? 'bg-amber-50 text-amber-700' :
-                        'bg-gray-100 text-gray-600'}`}>
-                      {order.approval_status === 'approved' ? 'Approved' : order.approval_status === 'pending' ? 'Pending' : order.approval_status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-gray-500 whitespace-nowrap text-xs capitalize">{order.payment_method}</td>
-                  <td className="px-3 py-3 text-gray-400 whitespace-nowrap text-xs">{new Date(order.created_at).toLocaleDateString()}</td>
-                  <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => router.push(`/portal/sales/orders/${order.id}`)}
-                      className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors opacity-0 group-hover:opacity-100">
-                      <Eye size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {filteredOrders.length > 0 && (
-              <tfoot>
-                <tr className="bg-gray-50 border-t-2 border-brand-100">
-                  <td colSpan={4} className="px-3 py-3 text-xs font-bold text-gray-500 uppercase">Totals</td>
-                  <td className="px-3 py-3 text-xs font-bold text-gray-900 whitespace-nowrap">{fmt(totalRevenue)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-green-600 whitespace-nowrap">{fmt(totalCollected)}</td>
-                  <td className="px-3 py-3 text-xs font-bold text-red-500 whitespace-nowrap">{fmt(totalOutstanding)}</td>
-                  <td colSpan={5} />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
+                    {/* Recovery progress bar */}
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <div className="h-1.5 w-32 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${recoveryPct >= 100 ? 'bg-green-500' : recoveryPct >= 50 ? 'bg-brand-500' : 'bg-amber-400'}`}
+                          style={{ width: `${Math.min(recoveryPct, 100)}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-400">{recoveryPct.toFixed(0)}% collected</span>
+                    </div>
+                  </div>
+                </div>
 
-      {/* Report modal */}
-      {reportOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Generate report</h2>
-            <div className="space-y-2">
-              {(['filtered','full'] as const).map(t => (
-                <button key={t} type="button" onClick={() => setReportType(t)}
-                  className={`w-full px-4 py-3 rounded-xl border-2 text-left transition-all ${reportType===t?'border-brand-400 bg-brand-50':'border-gray-100 hover:border-gray-200'}`}>
-                  <p className={`text-sm font-semibold ${reportType===t?'text-brand-700':'text-gray-700'}`}>{t==='filtered'?'Filtered view':'Full report'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{t==='filtered'?`${filteredOrders.length} orders`:`${orders.length} total orders`}</p>
-                </button>
-              ))}
+                <div className="flex items-center gap-6 shrink-0">
+                  <div className="text-right hidden md:block">
+                    <p className="text-xs text-gray-400">Revenue</p>
+                    <p className="text-sm font-bold text-green-700">{fmt(group.total_revenue)}</p>
+                  </div>
+                  <div className="text-right hidden md:block">
+                    <p className="text-xs text-gray-400">Outstanding</p>
+                    <p className={`text-sm font-bold ${group.total_outstanding > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+                      {fmt(group.total_outstanding)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation()
+                        router.push(`/portal/sales/orders/create?container_id=${group.container_db_id}`)
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                      <Plus size={12} /> Add order
+                    </button>
+                    {isOpen
+                      ? <ChevronUp size={16} className="text-gray-400" />
+                      : <ChevronDown size={16} className="text-gray-400" />}
+                  </div>
+                </div>
+              </div>
+
+              {/* Orders within this container */}
+              {isOpen && (
+                <div className="border-t border-gray-100">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-50 bg-gray-50/50">
+                        <th className="px-5 py-2.5 text-left text-xs font-medium text-gray-400">Order ID</th>
+                        <th className="px-5 py-2.5 text-left text-xs font-medium text-gray-400">Customer</th>
+                        <th className="px-5 py-2.5 text-left text-xs font-medium text-gray-400">Sale type</th>
+                        <th className="px-5 py-2.5 text-right text-xs font-medium text-gray-400">Payable</th>
+                        <th className="px-5 py-2.5 text-right text-xs font-medium text-gray-400">Paid</th>
+                        <th className="px-5 py-2.5 text-right text-xs font-medium text-gray-400">Outstanding</th>
+                        <th className="px-5 py-2.5 text-left text-xs font-medium text-gray-400">Status</th>
+                        <th className="px-5 py-2.5 text-left text-xs font-medium text-gray-400">Date</th>
+                        <th className="w-12" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {group.orders.map(order => {
+                        const paymentCfg = PAYMENT_STATUS_CONFIG[order.payment_status] ?? PAYMENT_STATUS_CONFIG.outstanding
+                        return (
+                          <tr key={order.id}
+                            className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                            onClick={() => router.push(`/portal/sales/orders/${order.id}`)}>
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">
+                                {order.order_id}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              <p className="text-xs font-medium text-gray-800">{order.customer?.name ?? '—'}</p>
+                              <p className="text-xs text-gray-400">{order.customer?.customer_id ?? ''}</p>
+                            </td>
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              <span className="text-xs text-gray-500 capitalize">
+                                {order.sale_type?.replace('_', ' ') ?? '—'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-right whitespace-nowrap">
+                              <span className="text-xs font-semibold text-gray-800">{fmt(order.customer_payable)}</span>
+                            </td>
+                            <td className="px-5 py-3 text-right whitespace-nowrap">
+                              <span className="text-xs font-medium text-green-700">{fmt(order.amount_paid)}</span>
+                            </td>
+                            <td className="px-5 py-3 text-right whitespace-nowrap">
+                              <span className={`text-xs font-bold ${order.outstanding_balance > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+                                {fmt(order.outstanding_balance)}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${paymentCfg.color}`}>
+                                {paymentCfg.label}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
+                              {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </td>
+                            <td className="px-5 py-3">
+                              <Eye size={14} className="text-gray-300 hover:text-brand-600 transition-colors" />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setReportOpen(false)}
-                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button type="button" onClick={() => generateReport(reportType)}
-                className="flex-1 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700">Generate</button>
-            </div>
-          </div>
-        </div>
-      )}
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Search, Loader2, X, CheckCircle2, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
@@ -56,6 +56,9 @@ type Step = 'container' | 'customer' | 'details'
 
 export default function CreateSalesOrderPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const preselectedContainerId = searchParams.get('container_id')
+
   const [currentStep, setCurrentStep] = useState<Step>('container')
   const [saving, setSaving] = useState(false)
 
@@ -102,7 +105,17 @@ export default function CreateSalesOrderPage() {
         .in('id', ids)
         .then(({ data: c }) => {
           // Only show containers from completed trips
-          setContainers((c ?? []).filter(con => (con.trip as any)?.status === 'completed'))
+          const filtered = (c ?? []).filter(con => (con.trip as any)?.status === 'completed')
+          setContainers(filtered)
+
+          // Auto-select container if coming from grouped sales orders page
+          if (preselectedContainerId && filtered.length > 0) {
+            const preselected = filtered.find(ct => ct.id === preselectedContainerId)
+            if (preselected) {
+              void selectContainer(preselected)
+              setCurrentStep('customer')
+            }
+          }
         })
     })
     supabase.from('customers')

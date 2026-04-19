@@ -12,11 +12,21 @@ interface Customer {
   name: string
   phone: string | null
   address: string | null
+  notes: string | null
+  referrer: string | null
+  guarantor: string | null
   is_active: boolean
   created_at: string
 }
 
-const blank = { name: '', phone: '', address: '' }
+const blank = {
+  name: '',
+  phone: '',
+  address: '',
+  notes: '',
+  referrer: '',
+  guarantor: '',
+}
 
 export default function CustomersTab() {
   const [data, setData] = useState<Customer[]>([])
@@ -46,7 +56,14 @@ export default function CustomersTab() {
 
   function openEdit(row: Customer) {
     setEditRow(row)
-    setForm({ name: row.name, phone: row.phone ?? '', address: row.address ?? '' })
+    setForm({
+      name: row.name,
+      phone: row.phone ?? '',
+      address: row.address ?? '',
+      notes: row.notes ?? '',
+      referrer: row.referrer ?? '',
+      guarantor: row.guarantor ?? '',
+    })
     setOpen(true)
   }
 
@@ -54,10 +71,18 @@ export default function CustomersTab() {
     e.preventDefault()
     setSaving(true)
     const supabase = createClient()
+    const payload = {
+      name: form.name.trim(),
+      phone: form.phone.trim() || null,
+      address: form.address.trim() || null,
+      notes: form.notes.trim() || null,
+      referrer: form.referrer.trim() || null,
+      guarantor: form.guarantor.trim() || null,
+    }
     if (editRow) {
-      await supabase.from('customers').update({ ...form, updated_at: new Date().toISOString() }).eq('id', editRow.id)
+      await supabase.from('customers').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editRow.id)
     } else {
-      await supabase.from('customers').insert({ ...form })
+      await supabase.from('customers').insert(payload)
     }
     setOpen(false)
     setSaving(false)
@@ -86,6 +111,18 @@ export default function CustomersTab() {
     {
       key: 'address', label: 'Address',
       render: (r: Customer) => <span className="text-gray-500 truncate max-w-xs block">{r.address ?? '—'}</span>
+    },
+    {
+      key: 'referrer', label: 'Referrer',
+      render: (r: Customer) => (
+        <span className="text-xs text-gray-500">{r.referrer ?? '—'}</span>
+      ),
+    },
+    {
+      key: 'guarantor', label: 'Guarantor',
+      render: (r: Customer) => (
+        <span className="text-xs text-gray-500">{r.guarantor ?? '—'}</span>
+      ),
     },
     {
       key: 'is_active', label: 'Status',
@@ -152,6 +189,32 @@ export default function CustomersTab() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="City, street"
               />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              rows={2}
+              value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              placeholder="Optional notes"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Referrer</label>
+              <input value={form.referrer}
+                onChange={e => setForm(f => ({ ...f, referrer: e.target.value }))}
+                placeholder="Who referred this customer?"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Guarantor</label>
+              <input value={form.guarantor}
+                onChange={e => setForm(f => ({ ...f, guarantor: e.target.value }))}
+                placeholder="Guarantor name"
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
           </div>
           <div className="flex gap-3 pt-2">

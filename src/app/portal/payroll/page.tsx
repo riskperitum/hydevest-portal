@@ -238,7 +238,7 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
         const { data: payrollEmps } = await supabase
           .from('payroll_employees')
           .select(`
-            id, employee_id, is_salary_earning, is_active,
+            id, employee_id, is_salary_earning, is_active, is_pension_enrolled,
             basic_salary, housing_allowance, transport_allowance,
             meal_allowance, other_allowances,
             bank:payroll_bank_accounts(bank_name, account_name, account_number)
@@ -296,7 +296,7 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Salary earning','Employee','Basic salary','Housing','Transport','Meal','Total CTC','Bank','Action'].map(h => (
+                {['Salary earning','Pension','Employee','Basic salary','Housing','Transport','Meal','Total CTC','Bank','Action'].map(h => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -317,6 +317,13 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
                         className={`w-9 h-5 rounded-full transition-colors relative ${pe?.is_salary_earning ? 'bg-brand-600' : 'bg-gray-200'}`}>
                         <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${pe?.is_salary_earning ? 'left-4' : 'left-0.5'}`} />
                       </button>
+                    </td>
+                    <td className="px-3 py-3">
+                      {pe?.is_pension_enrolled ? (
+                        <span className="text-xs font-medium bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Enrolled</span>
+                      ) : (
+                        <span className="text-xs font-medium bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">Not enrolled</span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <p className="text-sm font-medium text-gray-900">{emp.full_name ?? emp.email}</p>

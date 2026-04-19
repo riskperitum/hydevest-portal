@@ -68,7 +68,20 @@ const NAV: NavItem[] = [
     label: 'Legal',
     icon: Scale,
   },
-  { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
+  {
+    label: 'Reports',
+    icon: BarChart2,
+    children: [
+      { label: 'Overview', href: '/portal/reports', icon: BarChart2 },
+      { label: 'Container sales', href: '/portal/reports/container-sales', icon: BarChart2 },
+      { label: 'Customer debt', href: '/portal/reports/customer-debt', icon: Users },
+      { label: 'Bad debts', href: '/portal/reports/bad-debts', icon: BarChart2 },
+      { label: 'Supplier payables', href: '/portal/reports/supplier-payables', icon: BarChart2 },
+      { label: 'Container profit', href: '/portal/reports/container-profit', icon: TrendingUp },
+      { label: 'Supplier receivables', href: '/portal/reports/supplier-receivables', icon: BarChart2 },
+      { label: 'Customer profiles', href: '/portal/accounts/customers', icon: Users },
+    ],
+  },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
 ]
@@ -80,7 +93,7 @@ const PARTNER_NAV: NavItem[] = [
 
 export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
-  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
+  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales', 'Reports'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 

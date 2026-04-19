@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Shield, Users, Key } from 'lucide-react'
+import PermissionGate from '@/components/ui/PermissionGate'
 
 const SECTIONS = [
   {
@@ -29,6 +30,7 @@ const SECTIONS = [
 
 export default function AdminPage() {
   return (
+    <PermissionGate permKey="admin.*">
     <div className="space-y-6 max-w-3xl">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Admin</h1>
@@ -45,5 +47,6 @@ export default function AdminPage() {
         ))}
       </div>
     </div>
+    </PermissionGate>
   )
 }

@@ -16,6 +16,7 @@ import TaxesTab       from './components/TaxesTab'
 import ReportsTab     from './components/ReportsTab'
 import DirectorsTab   from './components/DirectorsTab'
 import SettingsTab    from './components/SettingsTab'
+import PermissionGate from '@/components/ui/PermissionGate'
 
 interface FinancePeriod {
   id: string
@@ -193,6 +194,7 @@ export default function FinancePage() {
   const currentPeriodName = periods.find(p => p.id === selectedPeriod)?.name ?? ''
 
   return (
+    <PermissionGate permKey="finance.view">
     <div className="space-y-5 max-w-7xl">
 
       {/* Page header */}
@@ -412,6 +414,7 @@ export default function FinancePage() {
         {activeTab === 'settings'  && <SettingsTab />}
       </div>
     </div>
+    </PermissionGate>
   )
 }
 

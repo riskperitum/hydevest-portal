@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import PermissionGate from '@/components/ui/PermissionGate'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 
@@ -83,6 +84,7 @@ export default function ContainerDetailPage() {
   const containerId = params.containerId as string
 
   const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = isSuperAdmin || can(permissions, isSuperAdmin, 'view_costs')
   const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
@@ -549,6 +551,7 @@ export default function ContainerDetailPage() {
   )
 
   return (
+    <PermissionGate permKey="containers.view">
     <div className="space-y-5 max-w-6xl">
 
       {/* Header */}
@@ -732,22 +735,40 @@ export default function ContainerDetailPage() {
         </div>
         <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField fieldKey="pieces_purchased" label="Pieces purchased" value={container.pieces_purchased?.toString() ?? ''} type="number" placeholder="0" />
-          <EditableField fieldKey="unit_price_usd" label="Unit price (USD)" value={container.unit_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
-          <EditableField fieldKey="shipping_amount_usd" label="Shipping amount (USD)" value={container.shipping_amount_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+          {canViewCosts && (
+            <div>
+              <EditableField fieldKey="unit_price_usd" label="Unit price (USD)" value={container.unit_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+            </div>
+          )}
+          {canViewCosts && (
+            <div>
+              <EditableField fieldKey="shipping_amount_usd" label="Shipping amount (USD)" value={container.shipping_amount_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+            </div>
+          )}
           {isPartner && (
             <>
-              <EditableField fieldKey="quoted_price_usd" label="Quoted price (USD)" value={container.quoted_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+              {canViewCosts && (
+                <div>
+                  <EditableField fieldKey="quoted_price_usd" label="Quoted price (USD)" value={container.quoted_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+                </div>
+              )}
               <EditableField fieldKey="surcharge_ngn" label="Surcharge (₦)" value={container.surcharge_ngn?.toString() ?? ''} type="number" placeholder="0.00" />
-              <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
+              {canViewCosts && (
+                <div>
+                  <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
+                </div>
+              )}
             </>
           )}
-          {!isPartner && (
-            <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
+          {!isPartner && canViewCosts && (
+            <div>
+              <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
+            </div>
           )}
         </div>
 
         {/* Summary row */}
-        {(container.pieces_purchased || container.unit_price_usd) && (
+        {canViewCosts && (container.pieces_purchased || container.unit_price_usd) && (
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center gap-6 flex-wrap">
             {container.pieces_purchased && container.unit_price_usd && (
               <span className="text-xs text-gray-500">
@@ -1094,5 +1115,6 @@ export default function ContainerDetailPage() {
         </form>
       </Modal>
     </div>
+    </PermissionGate>
   )
 }

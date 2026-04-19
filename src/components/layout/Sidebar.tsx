@@ -3,78 +3,119 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { usePermissions } from '@/lib/permissions/hooks'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart3, Inbox, Users,
   Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, DollarSign, Scale
 } from 'lucide-react'
-import Image from 'next/image'
 
 interface NavItem {
   label: string
   href?: string
   icon: any
-  children?: { label: string; href: string; icon?: any; exactMatch?: boolean }[]
+  children?: { label: string; href: string; icon?: any; exactMatch?: boolean; permKey?: string }[]
   adminOnly?: boolean
   partnerOnly?: boolean
+  permKey?: string        // required permission key to show this item
+  superAdminOnly?: boolean
 }
 
 const NAV: NavItem[] = [
-  { label: 'Overview',    href: '/portal/overview',  icon: LayoutDashboard },
-  { label: 'Tasks',       href: '/portal/tasks',      icon: ClipboardList },
   {
-    label: 'Purchase', icon: ShoppingCart,
-    children: [
-      { label: 'Trips',      href: '/portal/purchase/trips' },
-      { label: 'Containers', href: '/portal/purchase/containers' },
-    ]
-  },
-  {
-    label: 'Sales', icon: TrendingUp,
-    children: [
-      { label: 'Pre-sales',    href: '/portal/sales/presales' },
-      { label: 'Sales orders', href: '/portal/sales/orders' },
-    ]
-  },
-  { label: 'Recoveries',  href: '/portal/recoveries', icon: RefreshCcw },
-  { label: 'Expensify',   href: '/portal/expensify',  icon: Receipt },
-  { label: 'Inventory',   href: '/portal/inventory',  icon: Package },
-  {
-    href: '/portal/partnership',
-    label: 'Partnership',
-    icon: Users,
-    adminOnly: false,
-  },
-  {
-    href: '/portal/requestbox',
-    label: 'Request Box',
-    icon: Inbox,
-  },
-  {
-    href: '/portal/partner-dashboard',
-    label: 'My Dashboard',
+    label: 'Overview',
+    href: '/portal/overview',
     icon: LayoutDashboard,
-    partnerOnly: true,
-  },
-  { label: 'Finance',     href: '/portal/finance',    icon: BarChart3 },
-  {
-    href: '/portal/payroll',
-    label: 'Payroll',
-    icon: DollarSign,
+    // Everyone can see overview
   },
   {
-    href: '/portal/legal',
-    label: 'Legal',
-    icon: Scale,
+    label: 'Tasks',
+    href: '/portal/tasks',
+    icon: ClipboardList,
+    permKey: 'tasks.view',
   },
   {
-    href: '/portal/reports',
-    label: 'Reports',
+    label: 'Purchase',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Trips',      href: '/portal/purchase/trips',      permKey: 'trips.view'      },
+      { label: 'Containers', href: '/portal/purchase/containers',  permKey: 'containers.view' },
+    ]
+  },
+  {
+    label: 'Sales',
+    icon: TrendingUp,
+    children: [
+      { label: 'Pre-sales',    href: '/portal/sales/presales', permKey: 'presales.view'      },
+      { label: 'Sales orders', href: '/portal/sales/orders',   permKey: 'sales_orders.view'  },
+    ]
+  },
+  {
+    label: 'Recoveries',
+    href: '/portal/recoveries',
+    icon: RefreshCcw,
+    permKey: 'recoveries.view',
+  },
+  {
+    label: 'Expensify',
+    href: '/portal/expensify',
+    icon: Receipt,
+    permKey: 'expenses.view',
+  },
+  {
+    label: 'Inventory',
+    href: '/portal/inventory',
+    icon: Package,
+    permKey: 'inventory.view',
+  },
+  {
+    label: 'Partnership',
+    href: '/portal/partnership',
+    icon: Users,
+    permKey: 'partnership.view',
+  },
+  {
+    label: 'Request Box',
+    href: '/portal/requestbox',
+    icon: Inbox,
+    permKey: 'requestbox.view',
+  },
+  {
+    label: 'Finance',
+    href: '/portal/finance',
     icon: BarChart3,
+    permKey: 'finance.view',
   },
-  { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
-  { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
+  {
+    label: 'Payroll',
+    href: '/portal/payroll',
+    icon: DollarSign,
+    permKey: 'payroll.view',
+  },
+  {
+    label: 'Legal',
+    href: '/portal/legal',
+    icon: Scale,
+    permKey: 'legal.view',
+  },
+  {
+    label: 'Reports',
+    href: '/portal/reports',
+    icon: BarChart3,
+    permKey: 'reports.view',
+  },
+  {
+    label: 'System Accounts',
+    href: '/portal/accounts',
+    icon: Users,
+    permKey: 'accounts.view_customers',
+  },
+  {
+    label: 'Admin',
+    href: '/portal/admin',
+    icon: Settings,
+    adminOnly: true,
+  },
 ]
 
 const PARTNER_NAV: NavItem[] = [
@@ -88,12 +129,10 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
-  const { isSuperAdmin } = usePermissions()
+  const { isSuperAdmin, permissions, loading } = usePermissions()
 
-  // Close mobile sidebar on route change
   useEffect(() => { setMobileOpen(false) }, [pathname])
 
-  // Auto-expand group if current path is inside it
   useEffect(() => {
     NAV.forEach(item => {
       if (item.children?.some(c => pathname.startsWith(c.href))) {
@@ -113,10 +152,23 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   }
 
   function isChildActive(href: string, exactMatch?: boolean) {
-    if (exactMatch) {
-      return pathname === href || pathname === `${href}/`
-    }
+    if (exactMatch) return pathname === href || pathname === `${href}/`
     return isActive(href)
+  }
+
+  // Check if user can see a nav item
+  function canSee(item: NavItem): boolean {
+    if (isSuperAdmin) return true
+    if (item.superAdminOnly) return false
+    if (item.adminOnly) return isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+    if (item.permKey) return can(permissions, isSuperAdmin, item.permKey)
+    return true // no permKey = visible to all
+  }
+
+  function canSeeChild(child: { permKey?: string }): boolean {
+    if (isSuperAdmin) return true
+    if (child.permKey) return can(permissions, isSuperAdmin, child.permKey)
+    return true
   }
 
   const SidebarContent = () => (
@@ -129,13 +181,11 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
           </div>
           {!collapsed && <span className="font-bold text-gray-900 text-base">Hydevest</span>}
         </Link>
-        {/* Desktop collapse toggle */}
         <button
           onClick={() => setCollapsed(v => !v)}
           className="hidden lg:flex p-1 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
           {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} className="rotate-90" />}
         </button>
-        {/* Mobile close button */}
         <button
           onClick={() => setMobileOpen(false)}
           className="lg:hidden p-1 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
@@ -145,17 +195,20 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-        {(isPartner
-          ? PARTNER_NAV
-          : NAV.filter(item => {
-              if (item.adminOnly && !isSuperAdmin) return false
-              if (item.partnerOnly && !isPartner) return false
-              return true
-            })
-        ).map(item => {
+        {loading ? (
+          <div className="space-y-2 px-3 py-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-8 bg-gray-100 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : (isPartner ? PARTNER_NAV : NAV.filter(canSee)).map(item => {
           if (item.children) {
+            // Filter children by permission
+            const visibleChildren = item.children.filter(canSeeChild)
+            if (visibleChildren.length === 0) return null
+
             const isOpen = openGroups.includes(item.label)
-            const hasActive = item.children.some(c => isChildActive(c.href, c.exactMatch))
+            const hasActive = visibleChildren.some(c => isChildActive(c.href, c.exactMatch))
             const Icon = item.icon
             return (
               <div key={item.label}>
@@ -173,7 +226,7 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
                 </button>
                 {isOpen && !collapsed && (
                   <div className="ml-9 mt-0.5 space-y-0.5">
-                    {item.children.map(child => {
+                    {visibleChildren.map(child => {
                       const ChildIcon = child.icon
                       const active = isChildActive(child.href, child.exactMatch)
                       return (
@@ -196,6 +249,7 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
               </div>
             )
           }
+
           const Icon = item.icon
           return (
             <Link key={item.href} href={item.href!}
@@ -214,14 +268,12 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
 
   return (
     <>
-      {/* Mobile hamburger button — shown in header area */}
       <button
         onClick={() => setMobileOpen(true)}
         className="lg:hidden fixed top-3.5 left-4 z-40 p-2 rounded-lg bg-white border border-gray-200 shadow-sm text-gray-600 hover:bg-gray-50 transition-colors">
         <Menu size={18} />
       </button>
 
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div
           className="lg:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
@@ -229,13 +281,11 @@ export default function Sidebar({ isPartner }: { isPartner: boolean }) {
         />
       )}
 
-      {/* Mobile sidebar */}
       <aside className={`lg:hidden fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 shadow-xl transform transition-transform duration-200
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <SidebarContent />
       </aside>
 
-      {/* Desktop sidebar */}
       <aside className={`hidden lg:flex flex-col bg-white border-r border-gray-100 h-screen sticky top-0 transition-all duration-200
         ${collapsed ? 'w-16' : 'w-56'}`}>
         <SidebarContent />

@@ -6,6 +6,7 @@ import { Plus, Search, Download, Eye, ClipboardCheck, CheckCircle2, Trash2, Load
 import { useRouter } from 'next/navigation'
 import { ModifiedIndicator } from '@/components/trips/ModifiedIndicator'
 import Modal from '@/components/ui/Modal'
+import PermissionGate from '@/components/ui/PermissionGate'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 
@@ -356,6 +357,7 @@ export default function TripsPage() {
   const statusInfo = (s: string) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[0]
 
   return (
+    <PermissionGate permKey="trips.view">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
@@ -860,5 +862,6 @@ export default function TripsPage() {
         </div>
       )}
     </div>
+    </PermissionGate>
   )
 }

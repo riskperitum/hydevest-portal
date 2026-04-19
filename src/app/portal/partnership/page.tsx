@@ -8,6 +8,7 @@ import {
   Users, AlertTriangle, AlertCircle, ChevronRight, Filter
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
+import PermissionGate from '@/components/ui/PermissionGate'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ContainerPartnerRow {
@@ -266,6 +267,7 @@ export default function PartnershipPage() {
   const totalTopup = containers.reduce((s, c) => s + c.total_topup_needed, 0)
 
   return (
+    <PermissionGate permKey="partnership.view">
     <div className="space-y-5 max-w-6xl">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
@@ -626,5 +628,6 @@ export default function PartnershipPage() {
         </div>
       </Modal>
     </div>
+    </PermissionGate>
   )
 }

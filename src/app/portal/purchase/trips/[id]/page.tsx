@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Modal from '@/components/ui/Modal'
+import PermissionGate from '@/components/ui/PermissionGate'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { getTripStatusBadge } from '@/lib/utils/containerStatus'
@@ -949,6 +950,7 @@ export default function TripDetailPage() {
   )
 
   return (
+    <PermissionGate permKey="trips.view">
     <div className="space-y-5 max-w-6xl">
 
       {/* Review banner */}
@@ -2169,5 +2171,6 @@ export default function TripDetailPage() {
         </div>
       </Modal>
     </div>
+    </PermissionGate>
   )
 }

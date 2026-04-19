@@ -9,6 +9,7 @@ import {
   TrendingUp, Wallet, FileText,
 } from 'lucide-react'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import PermissionGate from '@/components/ui/PermissionGate'
 
 interface PayrollRun {
   id: string
@@ -84,6 +85,7 @@ export default function PayrollPage() {
   ]
 
   return (
+    <PermissionGate permKey="payroll.view">
     <div className="space-y-5 max-w-7xl">
 
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -207,6 +209,7 @@ export default function PayrollPage() {
         )}
       </div>
     </div>
+    </PermissionGate>
   )
 }
 

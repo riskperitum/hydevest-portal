@@ -124,6 +124,7 @@ export default function ExpensifyPage() {
 
   const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
   const canViewTripExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canViewLegalExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'legal.*')
 
   const autoCategory = description.length > 2 ? detectCategory(description) : ''
   const editAutoCategory = editForm.description.length > 2 ? detectCategory(editForm.description) : ''
@@ -143,11 +144,14 @@ export default function ExpensifyPage() {
       .select('*')
       .order('expense_date', { ascending: false })
 
-    if (!canViewTripExpenses) {
-      // Non-admins only see manual expenses
+    if (!canViewTripExpenses && !canViewLegalExpenses) {
       expenseQuery = expenseQuery.eq('source', 'manual')
+    } else if (!canViewTripExpenses && canViewLegalExpenses) {
+      expenseQuery = expenseQuery.in('source', ['manual', 'legal'])
+    } else if (canViewTripExpenses && !canViewLegalExpenses) {
+      expenseQuery = expenseQuery.in('source', ['manual', 'trip', 'payroll'])
     }
-    // Admins see all: manual, trip, and payroll
+    // If both — show all sources
 
     const { data: expenseData } = await expenseQuery
 
@@ -172,7 +176,7 @@ export default function ExpensifyPage() {
       trip: e.trip_id ? tripMap[e.trip_id] ?? null : null,
     })))
     setLoading(false)
-  }, [canViewTripExpenses])
+  }, [canViewTripExpenses, canViewLegalExpenses])
 
   useEffect(() => {
     if (!permLoading) load()
@@ -182,8 +186,9 @@ export default function ExpensifyPage() {
   }, [load, permLoading])
 
   useEffect(() => {
-    if (!canViewTripExpenses && sourceFilter === 'trip') setSourceFilter('')
-  }, [canViewTripExpenses, sourceFilter])
+    if (!canViewTripExpenses && (sourceFilter === 'trip' || sourceFilter === 'payroll')) setSourceFilter('')
+    if (!canViewLegalExpenses && sourceFilter === 'legal') setSourceFilter('')
+  }, [canViewTripExpenses, canViewLegalExpenses, sourceFilter])
 
   function resetForm() {
     setDescription('')
@@ -400,7 +405,7 @@ export default function ExpensifyPage() {
       </div>
 
       {/* Metrics */}
-      <div className={`grid grid-cols-2 gap-3 ${canViewTripExpenses ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
+      <div className={`grid grid-cols-2 gap-3 ${canViewTripExpenses && canViewLegalExpenses ? 'sm:grid-cols-6' : canViewTripExpenses || canViewLegalExpenses ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
         {[
           { label: 'Total expenses', value: filtered.length.toString(), icon: <Receipt size={15} className="text-brand-600" />, color: 'text-brand-700' },
           { label: 'Total (NGN)', value: `₦${totalNgn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <TrendingDown size={15} className="text-red-500" />, color: 'text-red-600' },
@@ -420,6 +425,17 @@ export default function ExpensifyPage() {
             <p className={`text-lg font-semibold truncate ${m.color}`}>{m.value}</p>
           </div>
         ))}
+
+        {canViewLegalExpenses && (
+          <div className="bg-red-50 rounded-xl border border-white shadow-sm p-4 cursor-pointer"
+            onClick={() => setSourceFilter(sourceFilter === 'legal' ? '' : 'legal')}>
+            <p className="text-xs text-gray-500 mb-1">Legal expenses</p>
+            <p className="text-xl font-bold text-red-700">
+              {filtered.filter(e => e.source === 'legal').length}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Cases + payments</p>
+          </div>
+        )}
       </div>
 
       {/* Search + filters */}
@@ -468,6 +484,9 @@ export default function ExpensifyPage() {
                 )}
                 {canViewTripExpenses && (
                   <option value="payroll">Payroll expenses</option>
+                )}
+                {canViewLegalExpenses && (
+                  <option value="legal">Legal expenses</option>
                 )}
               </select>
             </div>

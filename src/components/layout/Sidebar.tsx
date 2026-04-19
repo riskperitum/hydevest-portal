@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
-  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, DollarSign
+  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, DollarSign, Scale
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -62,6 +62,11 @@ const NAV: NavItem[] = [
     href: '/portal/payroll',
     label: 'Payroll',
     icon: DollarSign,
+  },
+  {
+    href: '/portal/legal',
+    label: 'Legal',
+    icon: Scale,
   },
   { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },

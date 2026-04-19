@@ -72,6 +72,7 @@ function detectCategory(description: string): string {
 const SOURCE_COLORS: Record<string, string> = {
   manual: 'bg-brand-50 text-brand-700',
   trip:   'bg-blue-50 text-blue-700',
+  payroll:'bg-purple-50 text-purple-700',
 }
 
 export default function ExpensifyPage() {
@@ -142,10 +143,11 @@ export default function ExpensifyPage() {
       .select('*')
       .order('expense_date', { ascending: false })
 
-    // Non-admin users only see manual expenses, not trip expenses
     if (!canViewTripExpenses) {
+      // Non-admins only see manual expenses
       expenseQuery = expenseQuery.eq('source', 'manual')
     }
+    // Admins see all: manual, trip, and payroll
 
     const { data: expenseData } = await expenseQuery
 
@@ -326,8 +328,9 @@ export default function ExpensifyPage() {
 
   const activeFilters = [sourceFilter, categoryFilter, currencyFilter, dateFrom, dateTo].filter(Boolean).length
   const totalNgn = filtered.reduce((s, e) => s + Number(e.amount_ngn), 0)
-  const totalManual = filtered.filter(e => e.source === 'manual').length
-  const totalTrip = filtered.filter(e => e.source === 'trip').length
+  const totalManual   = filtered.filter(e => e.source === 'manual').length
+  const totalTrip     = filtered.filter(e => e.source === 'trip').length
+  const totalPayroll  = filtered.filter(e => e.source === 'payroll').length
   const uniqueCategories = [...new Set(expenses.map(e => e.category))]
 
   function generateReport(type: 'filtered' | 'full') {
@@ -397,13 +400,16 @@ export default function ExpensifyPage() {
       </div>
 
       {/* Metrics */}
-      <div className={`grid grid-cols-2 gap-3 ${canViewTripExpenses ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+      <div className={`grid grid-cols-2 gap-3 ${canViewTripExpenses ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
         {[
           { label: 'Total expenses', value: filtered.length.toString(), icon: <Receipt size={15} className="text-brand-600" />, color: 'text-brand-700' },
           { label: 'Total (NGN)', value: `₦${totalNgn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <TrendingDown size={15} className="text-red-500" />, color: 'text-red-600' },
           { label: 'Manual entries', value: totalManual.toString(), icon: <DollarSign size={15} className="text-green-600" />, color: 'text-green-700' },
           ...(canViewTripExpenses
-            ? [{ label: 'Trip expenses', value: totalTrip.toString(), icon: <Globe size={15} className="text-blue-600" />, color: 'text-blue-700' }]
+            ? [
+                { label: 'Trip expenses', value: totalTrip.toString(), icon: <Globe size={15} className="text-blue-600" />, color: 'text-blue-700' },
+                { label: 'Payroll expenses', value: totalPayroll.toString(), icon: <DollarSign size={15} className="text-purple-600" />, color: 'text-purple-700' },
+              ]
             : []),
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
@@ -458,7 +464,10 @@ export default function ExpensifyPage() {
                 <option value="">All sources</option>
                 <option value="manual">Manual</option>
                 {canViewTripExpenses && (
-                  <option value="trip">Trip expense</option>
+                  <option value="trip">Trip expenses</option>
+                )}
+                {canViewTripExpenses && (
+                  <option value="payroll">Payroll expenses</option>
                 )}
               </select>
             </div>
@@ -543,8 +552,12 @@ export default function ExpensifyPage() {
                     </div>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_COLORS[expense.source] ?? 'bg-gray-100 text-gray-600'}`}>
-                      {expense.source === 'manual' ? 'Manual' : 'Trip'}
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      expense.source === 'trip'    ? 'bg-blue-50 text-blue-700'   :
+                      expense.source === 'payroll' ? 'bg-purple-50 text-purple-700' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>
+                      {expense.source === 'manual' ? 'Manual' : expense.source === 'trip' ? 'Trip' : 'Payroll'}
                     </span>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">

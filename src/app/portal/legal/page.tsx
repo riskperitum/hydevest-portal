@@ -29,7 +29,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string 
   open:          { label: 'Open',          color: 'bg-blue-50 text-blue-700',    dot: 'bg-blue-500'   },
   in_progress:   { label: 'In progress',   color: 'bg-amber-50 text-amber-700',  dot: 'bg-amber-500'  },
   pending_court: { label: 'Pending court', color: 'bg-purple-50 text-purple-700',dot: 'bg-purple-500' },
-  policy_arrest: { label: 'Policy arrest', color: 'bg-red-50 text-red-700',    dot: 'bg-red-600'    },
+  police_arrest: { label: 'Police arrest', color: 'bg-red-50 text-red-700',    dot: 'bg-red-600'    },
   settled:       { label: 'Settled',       color: 'bg-green-50 text-green-700',  dot: 'bg-green-500'  },
   closed:        { label: 'Closed',        color: 'bg-gray-100 text-gray-500',   dot: 'bg-gray-400'   },
   won:           { label: 'Won',           color: 'bg-green-50 text-green-700',  dot: 'bg-green-600'  },

@@ -74,6 +74,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   open:          { label: 'Open',          color: 'bg-blue-50 text-blue-700'    },
   in_progress:   { label: 'In progress',   color: 'bg-amber-50 text-amber-700'  },
   pending_court: { label: 'Pending court', color: 'bg-purple-50 text-purple-700'},
+  police_arrest: { label: 'Police arrest', color: 'bg-red-50 text-red-700'      },
   settled:       { label: 'Settled',       color: 'bg-green-50 text-green-700'  },
   closed:        { label: 'Closed',        color: 'bg-gray-100 text-gray-500'   },
   won:           { label: 'Won',           color: 'bg-green-50 text-green-700'  },

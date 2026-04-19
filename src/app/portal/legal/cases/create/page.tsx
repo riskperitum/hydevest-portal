@@ -35,7 +35,9 @@ export default function CreateLegalCasePage() {
     const supabase = createClient()
     supabase.from('customers').select('id, name, customer_id')
       .eq('is_active', true).order('name')
-      .then(({ data }) => setCustomers(data ?? []))
+      .then(({ data }) => {
+        setCustomers(data ?? [])
+      })
     getAdminProfiles().then(setEmployees)
   }, [])
 
@@ -170,7 +172,7 @@ export default function CreateLegalCasePage() {
                   <option value="open">Open</option>
                   <option value="in_progress">In progress</option>
                   <option value="pending_court">Pending court</option>
-                  <option value="policy_arrest">Policy arrest</option>
+                  <option value="police_arrest">Police arrest</option>
                   <option value="settled">Settled</option>
                   <option value="closed">Closed</option>
                   <option value="won">Won</option>
@@ -227,22 +229,23 @@ export default function CreateLegalCasePage() {
                 onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
                 placeholder="Search and add customers..."
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              {showCustomerDropdown && filteredCustomers.length > 0 && (
-                <div className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-56 overflow-y-auto"
-                  style={{
-                    width: 420,
-                    top: 'auto',
-                    left: 'auto',
-                  }}>
-                  {filteredCustomers.slice(0, 8).map(c => (
-                    <button key={c.id} type="button"
-                      onMouseDown={e => e.preventDefault()}
-                      onClick={() => addCustomer(c)}
-                      className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0">
-                      <span className="text-sm font-medium text-gray-800">{c.name}</span>
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">{c.customer_id}</span>
-                    </button>
-                  ))}
+              {showCustomerDropdown && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-56 overflow-y-auto">
+                  {filteredCustomers.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-gray-400">
+                      {customers.length === 0 ? 'Loading customers...' : 'No customers found'}
+                    </div>
+                  ) : (
+                    filteredCustomers.slice(0, 8).map(c => (
+                      <button key={c.id} type="button"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => addCustomer(c)}
+                        className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0">
+                        <span className="text-sm font-medium text-gray-800">{c.name}</span>
+                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">{c.customer_id}</span>
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </div>

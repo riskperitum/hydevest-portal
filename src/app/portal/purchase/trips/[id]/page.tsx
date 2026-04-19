@@ -268,6 +268,7 @@ export default function TripDetailPage() {
   const [reviewBannerOpen, setReviewBannerOpen] = useState(true)
   const [submittingReview, setSubmittingReview] = useState(false)
   const { permissions, isSuperAdmin } = usePermissions()
+  const canViewCosts = isSuperAdmin || can(permissions, isSuperAdmin, 'view_costs')
   const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'trips.approve')
   const [approvingTrip, setApprovingTrip] = useState(false)
@@ -1642,8 +1643,10 @@ export default function TripDetailPage() {
                       'Container ID', 'Title', 'Tracking No.', 'Status',
                       'Pieces', 'Avg Weight', 'Unit Price ($)', 'Landing Cost (₦)',
                       'Max Weight', 'Shipping ($)',
-                      'Purchase Amt ($)', 'Purchase Subtotal ($)',
-                      'Quoted Price ($)', 'Quoted Amt ($)', 'Quoted Subtotal ($)',
+                      ...(canViewCosts ? [
+                        'Purchase Amt ($)', 'Purchase Subtotal ($)',
+                        'Quoted Price ($)', 'Quoted Amt ($)', 'Quoted Subtotal ($)',
+                      ] : []),
                       'Surcharge (₦)',
                       'Created', 'Created by', 'Actions'
                     ].map(h => (
@@ -1654,7 +1657,7 @@ export default function TripDetailPage() {
                 <tbody>
                   {containers.length === 0 ? (
                     <tr>
-                      <td colSpan={19} className="px-4 py-12 text-center text-sm text-gray-400">
+                      <td colSpan={canViewCosts ? 19 : 14} className="px-4 py-12 text-center text-sm text-gray-400">
                         No containers added yet.
                       </td>
                     </tr>
@@ -1700,23 +1703,27 @@ export default function TripDetailPage() {
                         <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{con.estimated_landing_cost ? fmt(con.estimated_landing_cost) : '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.max_weight ? `${con.max_weight} kg` : '—'}</td>
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.shipping_amount_usd ? `$${Number(con.shipping_amount_usd).toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{purchaseAmt ? `$${purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
-                        <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
-                          {purchaseAmt != null
-                            ? `$${(purchaseAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.quoted_price_usd ? `$${Number(con.quoted_price_usd).toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">
-                          {quotedAmt != null && quotedAmt > 0
-                            ? `$${quotedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
-                          {quotedAmt != null && quotedAmt > 0
-                            ? `$${(quotedAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : '—'}
-                        </td>
+                        {canViewCosts && (
+                          <>
+                            <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{purchaseAmt ? `$${purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                            <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
+                              {purchaseAmt != null
+                                ? `$${(purchaseAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.quoted_price_usd ? `$${Number(con.quoted_price_usd).toLocaleString()}` : '—'}</td>
+                            <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">
+                              {quotedAmt != null && quotedAmt > 0
+                                ? `$${quotedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-brand-700 whitespace-nowrap">
+                              {quotedAmt != null && quotedAmt > 0
+                                ? `$${(quotedAmt + Number(con.shipping_amount_usd ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '—'}
+                            </td>
+                          </>
+                        )}
                         <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{con.surcharge_ngn ? fmt(con.surcharge_ngn) : '—'}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(con.created_at).toLocaleDateString()}</td>
                         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{con.created_by_profile?.full_name ?? con.created_by_profile?.email ?? '—'}</td>
@@ -1756,46 +1763,50 @@ export default function TripDetailPage() {
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
                       ${containers.reduce((s, c) => s + Number(c.shipping_amount_usd ?? 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
-                      ${containers.reduce((s, c) => {
-                        const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
-                        return s + pa
-                      }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
-                      ${containers.reduce((s, c) => {
-                        const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
-                        return s + pa + Number(c.shipping_amount_usd ?? 0)
-                      }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
-                      {(() => {
-                        const total = containers.reduce((s, c) => s + (Number(c.quoted_price_usd ?? 0) > 0 ? Number(c.quoted_price_usd) : 0), 0)
-                        return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
-                      })()}
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
-                      {(() => {
-                        const total = containers.reduce((s, c) => {
-                          const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
-                            ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
-                          return s + qa
-                        }, 0)
-                        return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
-                      })()}
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
-                      {(() => {
-                        const hasQuoted = containers.some(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
-                        if (!hasQuoted) return '—'
-                        const total = containers.reduce((s, c) => {
-                          const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
-                            ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
-                          return s + qa + (qa > 0 ? Number(c.shipping_amount_usd ?? 0) : 0)
-                        }, 0)
-                        return `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      })()}
-                    </td>
+                    {canViewCosts && (
+                      <>
+                        <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                          ${containers.reduce((s, c) => {
+                            const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+                            return s + pa
+                          }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
+                          ${containers.reduce((s, c) => {
+                            const pa = (c.unit_price_usd && c.pieces_purchased) ? Number(c.unit_price_usd) * Number(c.pieces_purchased) : 0
+                            return s + pa + Number(c.shipping_amount_usd ?? 0)
+                          }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                          {(() => {
+                            const total = containers.reduce((s, c) => s + (Number(c.quoted_price_usd ?? 0) > 0 ? Number(c.quoted_price_usd) : 0), 0)
+                            return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+                          })()}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
+                          {(() => {
+                            const total = containers.reduce((s, c) => {
+                              const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
+                                ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
+                              return s + qa
+                            }, 0)
+                            return total > 0 ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+                          })()}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-semibold text-brand-700 whitespace-nowrap">
+                          {(() => {
+                            const hasQuoted = containers.some(c => c.quoted_price_usd && Number(c.quoted_price_usd) > 0)
+                            if (!hasQuoted) return '—'
+                            const total = containers.reduce((s, c) => {
+                              const qa = (c.quoted_price_usd && Number(c.quoted_price_usd) > 0 && c.pieces_purchased)
+                                ? Number(c.quoted_price_usd) * Number(c.pieces_purchased) : 0
+                              return s + qa + (qa > 0 ? Number(c.shipping_amount_usd ?? 0) : 0)
+                            }, 0)
+                            return `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          })()}
+                        </td>
+                      </>
+                    )}
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
                       {(() => {
                         const total = containers.reduce((s, c) => s + Number(c.surcharge_ngn ?? 0), 0)

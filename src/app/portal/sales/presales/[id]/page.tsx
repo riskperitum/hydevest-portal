@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Check, X, Pencil, Plus,
   Trash2, CheckCircle2, Eye, AlertTriangle, Activity, Lock
@@ -77,10 +77,15 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 export default function PresaleDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const presaleId = params.id as string
+
+  const isApproverMode = searchParams.get('approver') === 'true'
+  const approverTaskType = searchParams.get('task_type') ?? ''
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canApprove = canOverride
 
   const [presale, setPresale] = useState<Presale | null>(null)
   const [pallets, setPallets] = useState<PalletDistribution[]>([])
@@ -315,7 +320,17 @@ export default function PresaleDetailPage() {
       }
 
       await supabase.from('presales').update(updateData).eq('id', presaleId)
-      await logActivity('Updated pricing fields', 'pricing', '', '')
+      const oldKilo = presale?.price_per_kilo?.toString() ?? '—'
+      const oldPiece = presale?.price_per_piece?.toString() ?? '—'
+      if (kNum !== Number(presale?.price_per_kilo ?? 0)) {
+        await logActivity('Updated price per kilo', 'price_per_kilo', oldKilo, (kNum ?? 0).toFixed(4))
+      }
+      if (pNum !== Number(presale?.price_per_piece ?? 0)) {
+        await logActivity('Updated price per piece', 'price_per_piece', oldPiece, (pNum ?? 0).toFixed(4))
+      }
+      if (kNum !== Number(presale?.price_per_kilo ?? 0) || pNum !== Number(presale?.price_per_piece ?? 0)) {
+        await logActivity('Price auto-recalculated', 'pricing', `₦${oldKilo}/kg → ₦${(kNum ?? 0).toFixed(4)}/kg`, `₦${oldPiece}/pc → ₦${(pNum ?? 0).toFixed(4)}/pc`)
+      }
       load()
       setOverrideConfirmed(false)
     } finally {
@@ -332,12 +347,27 @@ export default function PresaleDetailPage() {
     const typeKeys = { delete: 'delete_approval', review: 'review_request', approval: 'approval_request' }
     const typeLabels = { delete: 'Delete approval', review: 'Review request', approval: 'Approval request' }
 
-    // Build changes summary from recent activity logs
-    let changesSummary: string | null = null
-    if (workflowType === 'review' && activityLogs.length > 0) {
-      changesSummary = activityLogs.slice(0, 5)
-        .map(l => `${l.action}${l.field_name ? ` (${l.field_name})` : ''}`)
-        .join(' · ')
+    // Build detailed changes summary from activity logs since last approval
+    const relevantLogs = activityLogs.filter(log => {
+      // Only include field update logs since last approval
+      return log.action && (
+        log.action.includes('Updated') ||
+        log.action.includes('auto-recalculated') ||
+        log.action.includes('added') ||
+        log.action.includes('deleted')
+      )
+    })
+
+    let changesSummary: string | null
+    if (relevantLogs.length > 0) {
+      changesSummary = relevantLogs.slice(0, 10).map(log => {
+        if (log.field_name && log.old_value !== null && log.new_value !== null) {
+          return `• ${log.field_name}: ${log.old_value || '(empty)'} → ${log.new_value || '(empty)'}`
+        }
+        return `• ${log.action}`
+      }).join('\n')
+    } else {
+      changesSummary = 'No specific field changes recorded.'
     }
 
     const { data: task } = await supabase.from('tasks').insert({
@@ -372,6 +402,60 @@ export default function PresaleDetailPage() {
     setWorkflowNote('')
     setAssignee('')
     load()
+  }
+
+  async function handleApproveFromTask(decision: 'approved' | 'rejected') {
+    if (!presale) return
+    const supabase = createClient()
+    const taskId = searchParams.get('task_id')
+
+    if (decision === 'approved') {
+      if (approverTaskType === 'review_request') {
+        await supabase.from('presales').update({
+          approval_status: 'reviewed',
+          needs_review: false,
+          last_reviewed_by: currentUserId,
+          last_reviewed_at: new Date().toISOString(),
+        }).eq('id', presaleId)
+      } else {
+        await supabase.from('presales').update({
+          approval_status: 'approved',
+          needs_review: false,
+          status: presale.status === 'altered' ? 'confirmed' : presale.status,
+          last_reviewed_by: currentUserId,
+          last_reviewed_at: new Date().toISOString(),
+        }).eq('id', presaleId)
+      }
+    } else {
+      await supabase.from('presales').update({
+        approval_status: 'not_approved',
+        needs_review: false,
+      }).eq('id', presaleId)
+    }
+
+    if (taskId) {
+      await supabase.from('tasks').update({
+        status: decision,
+        reviewed_by: currentUserId,
+        reviewed_at: new Date().toISOString(),
+      }).eq('id', taskId)
+    }
+
+    if (presale.created_by) {
+      await supabase.from('notifications').insert({
+        user_id: presale.created_by,
+        type: decision === 'approved' ? 'task_approved' : 'task_rejected',
+        title: `Presale ${decision} — ${presale.presale_id}`,
+        message: `Your presale has been ${decision}.`,
+        record_id: presaleId,
+        record_ref: presale.presale_id,
+        module: 'presales',
+        ...(taskId ? { task_id: taskId } : {}),
+      })
+    }
+
+    await logActivity(`Presale ${decision} by approver`, 'approval', '', decision)
+    router.back()
   }
 
   async function addPalletRow(e: React.FormEvent) {
@@ -603,14 +687,30 @@ export default function PresaleDetailPage() {
               <Pencil size={14} /> Edit presale
             </button>
           )}
-          <button onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">
-            <Eye size={13} /> Request review
-          </button>
-          <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
-            <CheckCircle2 size={13} /> Request approval
-          </button>
+          {!isApproverMode && (
+            <>
+              <button onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">
+                <Eye size={13} /> Request review
+              </button>
+              <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
+                <CheckCircle2 size={13} /> Request approval
+              </button>
+            </>
+          )}
+          {isApproverMode && canApprove && (
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => void handleApproveFromTask('approved')}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700">
+                <Check size={14} /> Approve
+              </button>
+              <button type="button" onClick={() => void handleApproveFromTask('rejected')}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                <X size={14} /> Reject
+              </button>
+            </div>
+          )}
           <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
             <Trash2 size={13} /> Delete

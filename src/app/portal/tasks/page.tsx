@@ -295,16 +295,19 @@ export default function TasksPage() {
 
   function navigateToRecord(task: Task) {
     const map: Record<string, string> = {
-      trips:                 `/portal/purchase/trips/${task.record_id}`,
-      containers:            `/portal/purchase/containers/${task.record_id}`,
-      presales:              `/portal/sales/presales/${task.record_id}`,
-      sales_orders:          `/portal/sales/orders/${task.record_id}`,
-      recoveries:            `/portal/recoveries/${task.record_id}`,
-      expenses:              `/portal/expensify/${task.record_id}`,
-      supplier_receivables:  `/portal/reports/supplier-receivables/${task.record_id}`,
+      trips:                `/portal/purchase/trips/${task.record_id}`,
+      containers:           `/portal/purchase/containers/${task.record_id}`,
+      presales:             `/portal/sales/presales/${task.record_id}`,
+      sales_orders:         `/portal/sales/orders/${task.record_id}`,
+      recoveries:           `/portal/recoveries/${task.record_id}`,
+      expenses:             `/portal/expensify/${task.record_id}`,
+      supplier_receivables: `/portal/reports/supplier-receivables/${task.record_id}`,
     }
     const path = map[task.module]
-    if (path && task.record_id) router.push(path)
+    if (path && task.record_id) {
+      // Pass task context so the record page knows approver is viewing
+      router.push(`${path}?approver=true&task_id=${task.id}&task_type=${task.type}`)
+    }
   }
 
   function openActionModal(task: Task) {

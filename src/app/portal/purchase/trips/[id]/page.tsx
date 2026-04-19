@@ -690,12 +690,24 @@ export default function TripDetailPage() {
 
     // Build changes summary for review requests
     let changesSummary: string | null = null
-    if (workflowType === 'review') {
-      const recentLogs = activityLogs.slice(0, 5)
-      if (recentLogs.length > 0) {
-        changesSummary = recentLogs
-          .map(l => `${l.action}${l.field_name ? ` (${l.field_name})` : ''}`)
-          .join(' · ')
+    if (workflowType === 'review' || workflowType === 'approve') {
+      const relevantLogs = activityLogs.filter(log =>
+        log.action?.includes('Updated') ||
+        log.action?.includes('added') ||
+        log.action?.includes('deleted') ||
+        log.action?.includes('modified') ||
+        log.action?.includes('override')
+      )
+      const logsToUse = relevantLogs.length > 0 ? relevantLogs : activityLogs
+      if (logsToUse.length > 0) {
+        changesSummary = logsToUse.slice(0, 10).map(l => {
+          if (l.field_name && l.old_value !== null && l.new_value !== null) {
+            return `• ${l.field_name}: ${l.old_value || '(empty)'} → ${l.new_value || '(empty)'}`
+          }
+          return `• ${l.action}${l.field_name ? ` (${l.field_name})` : ''}`
+        }).join('\n')
+      } else {
+        changesSummary = 'No specific field changes recorded since last review.'
       }
     }
 

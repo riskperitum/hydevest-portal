@@ -72,9 +72,11 @@ export default function TripsPage() {
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
+  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -105,9 +107,14 @@ export default function TripsPage() {
     setSuppliers(sup ?? [])
     setClearingAgents(clr ?? [])
     setEmployees(emp ?? [])
-    const supabase2 = createClient()
-    const { data: { user } } = await supabase2.auth.getUser()
-    setCurrentUserId(user?.id ?? null)
+  }, [])
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUser(user ? { id: user.id } : null)
+      setCurrentUserId(user?.id ?? null)
+    })
   }, [])
 
   useEffect(() => { load(); loadDropdowns() }, [load, loadDropdowns])
@@ -602,6 +609,41 @@ export default function TripsPage() {
                             ? <Loader2 size={15} className="animate-spin" />
                             : <Trash2 size={15} />}
                         </button>
+
+                        {/* Approval action for admin/super admin */}
+                        {canSelfApprove && (trip.approval_status === 'pending' || trip.approval_status === 'pending_review') && (
+                          <button
+                            type="button"
+                            onClick={async e => {
+                              e.stopPropagation()
+                              const supabase = createClient()
+                              await supabase.from('trips').update({
+                                approval_status: 'reviewed',
+                                needs_review: false,
+                                last_reviewed_at: new Date().toISOString(),
+                                last_reviewed_by: currentUser?.id,
+                              }).eq('id', trip.id)
+                              load()
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100">
+                            Review
+                          </button>
+                        )}
+                        {canSelfApprove && trip.approval_status === 'reviewed' && (
+                          <button
+                            type="button"
+                            onClick={async e => {
+                              e.stopPropagation()
+                              const supabase = createClient()
+                              await supabase.from('trips').update({
+                                approval_status: 'approved',
+                              }).eq('id', trip.id)
+                              load()
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-600 text-white rounded hover:bg-green-700">
+                            Approve
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

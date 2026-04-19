@@ -9,6 +9,7 @@ import {
   Receipt, TrendingDown, DollarSign, Globe
 } from 'lucide-react'
 import AmountInput from '@/components/ui/AmountInput'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface ExpenseRow {
   id: string
@@ -119,6 +120,9 @@ export default function ExpensifyPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [workflowOpen, setWorkflowOpen] = useState(false)
 
+  const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
+  const canViewTripExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+
   const autoCategory = description.length > 2 ? detectCategory(description) : ''
   const editAutoCategory = editForm.description.length > 2 ? detectCategory(editForm.description) : ''
   const editEffectiveCategory = editForm.category || editAutoCategory
@@ -132,16 +136,23 @@ export default function ExpensifyPage() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const { data } = await supabase
+    let expenseQuery = supabase
       .from('expensify_unified')
       .select('*')
       .order('expense_date', { ascending: false })
 
-    if (!data) { setLoading(false); return }
+    // Non-admin users only see manual expenses, not trip expenses
+    if (!canViewTripExpenses) {
+      expenseQuery = expenseQuery.eq('source', 'manual')
+    }
+
+    const { data: expenseData } = await expenseQuery
+
+    if (!expenseData) { setLoading(false); return }
 
     // Enrich with creator profiles and trip info
-    const creatorIds = [...new Set(data.filter(e => e.created_by).map(e => e.created_by))]
-    const tripIds = [...new Set(data.filter(e => e.trip_id).map(e => e.trip_id))]
+    const creatorIds = [...new Set(expenseData.filter(e => e.created_by).map(e => e.created_by))]
+    const tripIds = [...new Set(expenseData.filter(e => e.trip_id).map(e => e.trip_id))]
 
     const [{ data: profiles }, { data: trips }] = await Promise.all([
       creatorIds.length ? supabase.from('profiles').select('id, full_name, email').in('id', creatorIds) : { data: [] },
@@ -151,22 +162,26 @@ export default function ExpensifyPage() {
     const profileMap = Object.fromEntries((profiles ?? []).map(p => [p.id, p]))
     const tripMap = Object.fromEntries((trips ?? []).map(t => [t.id, t]))
 
-    setExpenses(data.map(e => ({
+    setExpenses(expenseData.map(e => ({
       ...e,
       file_urls: e.file_urls ?? [],
       creator: profileMap[e.created_by] ?? null,
       trip: e.trip_id ? tripMap[e.trip_id] ?? null : null,
     })))
     setLoading(false)
-  }, [])
+  }, [canViewTripExpenses])
 
   useEffect(() => {
-    load()
+    if (!permLoading) load()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
     supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
       .then(({ data }) => setEmployees(data ?? []))
-  }, [load])
+  }, [load, permLoading])
+
+  useEffect(() => {
+    if (!canViewTripExpenses && sourceFilter === 'trip') setSourceFilter('')
+  }, [canViewTripExpenses, sourceFilter])
 
   function resetForm() {
     setDescription('')
@@ -322,7 +337,7 @@ export default function ExpensifyPage() {
     <title>Expenses Report — Hydevest</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;color:#1a1a2e}
     .header{background:#55249E;color:white;padding:32px 40px}.header h1{font-size:24px;font-weight:700}
-    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 40px;background:#f8f7ff}
+    .summary{display:grid;grid-template-columns:repeat(${canViewTripExpenses ? 4 : 3},1fr);gap:16px;padding:24px 40px;background:#f8f7ff}
     .card{background:white;border-radius:8px;padding:16px;border:1px solid #ede9f7}
     .card .label{font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:6px}
     .card .value{font-size:18px;font-weight:700;color:#55249E}
@@ -340,7 +355,7 @@ export default function ExpensifyPage() {
     <div class="card"><div class="label">Total expenses</div><div class="value">${data.length}</div></div>
     <div class="card"><div class="label">Total (NGN)</div><div class="value">₦${total.toLocaleString(undefined,{minimumFractionDigits:2})}</div></div>
     <div class="card"><div class="label">Manual entries</div><div class="value">${data.filter(e=>e.source==='manual').length}</div></div>
-    <div class="card"><div class="label">Trip expenses</div><div class="value">${data.filter(e=>e.source==='trip').length}</div></div>
+    ${canViewTripExpenses ? `<div class="card"><div class="label">Trip expenses</div><div class="value">${data.filter(e=>e.source==='trip').length}</div></div>` : ''}
     </div>
     <div class="content"><table><thead><tr>
     <th>Expense ID</th><th>Source</th><th>Category</th><th>Description</th>
@@ -382,12 +397,14 @@ export default function ExpensifyPage() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 gap-3 ${canViewTripExpenses ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
         {[
           { label: 'Total expenses', value: filtered.length.toString(), icon: <Receipt size={15} className="text-brand-600" />, color: 'text-brand-700' },
           { label: 'Total (NGN)', value: `₦${totalNgn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: <TrendingDown size={15} className="text-red-500" />, color: 'text-red-600' },
           { label: 'Manual entries', value: totalManual.toString(), icon: <DollarSign size={15} className="text-green-600" />, color: 'text-green-700' },
-          { label: 'Trip expenses', value: totalTrip.toString(), icon: <Globe size={15} className="text-blue-600" />, color: 'text-blue-700' },
+          ...(canViewTripExpenses
+            ? [{ label: 'Trip expenses', value: totalTrip.toString(), icon: <Globe size={15} className="text-blue-600" />, color: 'text-blue-700' }]
+            : []),
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -440,7 +457,9 @@ export default function ExpensifyPage() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                 <option value="">All sources</option>
                 <option value="manual">Manual</option>
-                <option value="trip">Trip expense</option>
+                {canViewTripExpenses && (
+                  <option value="trip">Trip expense</option>
+                )}
               </select>
             </div>
             <div>

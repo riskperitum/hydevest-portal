@@ -271,6 +271,23 @@ export default function TripDetailPage() {
   const [tripActionNote, setTripActionNote] = useState('')
   const [showTripApproval, setShowTripApproval] = useState(false)
 
+  const [tripDocuments, setTripDocuments] = useState<{
+    id: string
+    name: string
+    file_url: string
+    file_type: string | null
+    file_size: number | null
+    container_id: string | null
+    container_ref: string | null
+    created_at: string
+    uploaded_by_name: string | null
+  }[]>([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const [uploadDocOpen, setUploadDocOpen] = useState(false)
+  const [uploadDocFile, setUploadDocFile] = useState<File | null>(null)
+  const [uploadDocName, setUploadDocName] = useState('')
+  const [uploadingDoc, setUploadingDoc] = useState(false)
+
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
     currentExpenses: TripExpense[]
@@ -493,6 +510,37 @@ export default function TripDetailPage() {
     setActivityLogs(data ?? [])
   }, [tripId])
 
+  const loadDocuments = useCallback(async () => {
+    if (!tripId) return
+    setDocsLoading(true)
+    const supabase = createClient()
+
+    const { data } = await supabase
+      .from('trip_documents')
+      .select(`
+        id, name, file_url, file_type, file_size, container_id, created_at,
+        uploader:profiles!trip_documents_uploaded_by_fkey(full_name, email),
+        container:containers!trip_documents_container_id_fkey(container_id)
+      `)
+      .eq('trip_id', tripId)
+      .order('created_at', { ascending: false })
+
+    setTripDocuments((data ?? []).map((d: Record<string, unknown>) => ({
+      id:               d.id as string,
+      name:             d.name as string,
+      file_url:         d.file_url as string,
+      file_type:        d.file_type as string | null,
+      file_size:        d.file_size as number | null,
+      container_id:     d.container_id as string | null,
+      container_ref:    (d.container as { container_id?: string } | null)?.container_id ?? null,
+      created_at:       d.created_at as string,
+      uploaded_by_name: (d.uploader as { full_name?: string; email?: string } | null)?.full_name
+        ?? (d.uploader as { full_name?: string; email?: string } | null)?.email
+        ?? null,
+    })))
+    setDocsLoading(false)
+  }, [tripId])
+
   const loadReviewTask = useCallback(async () => {
     if (!taskId) return
     const supabase = createClient()
@@ -530,6 +578,57 @@ export default function TripDetailPage() {
     loadActivity()
   }
 
+  async function uploadTripDocument(e: React.FormEvent) {
+    e.preventDefault()
+    if (!uploadDocFile || !currentUser) return
+    setUploadingDoc(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const ext = uploadDocFile.name.split('.').pop()
+    const path = `trips/${tripId}/${Date.now()}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(path, uploadDocFile, { upsert: true })
+
+    if (uploadError) {
+      alert(`Upload failed: ${uploadError.message}`)
+      setUploadingDoc(false)
+      return
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('documents')
+      .getPublicUrl(path)
+
+    await supabase.from('trip_documents').insert({
+      trip_id:       tripId,
+      container_id:  null,
+      name:          uploadDocName || uploadDocFile.name,
+      file_url:      urlData.publicUrl,
+      file_type:     uploadDocFile.type,
+      file_size:     uploadDocFile.size,
+      uploaded_by:   user?.id,
+    })
+
+    await logTripActivity('Document uploaded', 'documents', '', uploadDocName || uploadDocFile.name)
+
+    setUploadingDoc(false)
+    setUploadDocOpen(false)
+    setUploadDocFile(null)
+    setUploadDocName('')
+    loadDocuments()
+  }
+
+  async function deleteTripDocument(id: string, name: string) {
+    if (!confirm(`Delete document "${name}"?`)) return
+    const supabase = createClient()
+    await supabase.from('trip_documents').delete().eq('id', id)
+    await logTripActivity('Document deleted', 'documents', name, '')
+    loadDocuments()
+  }
+
   useEffect(() => {
     load()
     loadDropdowns()
@@ -538,6 +637,10 @@ export default function TripDetailPage() {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user))
   }, [load, loadDropdowns, loadActivity, loadReviewTask])
+
+  useEffect(() => {
+    if (activeTab === 'documents') void loadDocuments()
+  }, [activeTab, loadDocuments])
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
@@ -1417,7 +1520,7 @@ export default function TripDetailPage() {
             {[
               { key: 'expenses', label: 'Trip Expense', count: expenses.length },
               { key: 'containers', label: 'Containers', count: containers.length },
-              { key: 'documents', label: 'Trip Document', count: 0 },
+              { key: 'documents', label: 'Trip Document', count: tripDocuments.length },
               { key: 'activity', label: 'Activity log', count: activityLogs.length },
             ].map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -1678,12 +1781,151 @@ export default function TripDetailPage() {
           )}
 
           {activeTab === 'documents' && (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
-                <Package size={20} className="text-gray-400" />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">Trip documents</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    All documents uploaded to this trip and its containers
+                  </p>
+                </div>
+                <button type="button" onClick={() => setUploadDocOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                  <Plus size={14} /> Upload document
+                </button>
               </div>
-              <p className="text-sm text-gray-500 font-medium">No documents yet</p>
-              <p className="text-xs text-gray-400">Document upload will be available soon</p>
+
+              {/* Upload modal */}
+              {uploadDocOpen && (
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
+                  <form onSubmit={uploadTripDocument} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5">Document name (optional)</label>
+                        <input value={uploadDocName}
+                          onChange={e => setUploadDocName(e.target.value)}
+                          placeholder="e.g. Bill of lading"
+                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5">File <span className="text-red-400">*</span></label>
+                        <input type="file" required
+                          onChange={e => setUploadDocFile(e.target.files?.[0] ?? null)}
+                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => { setUploadDocOpen(false); setUploadDocFile(null); setUploadDocName('') }}
+                        className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={uploadingDoc || !uploadDocFile}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+                        {uploadingDoc ? <><Loader2 size={12} className="animate-spin" /> Uploading…</> : 'Upload'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Documents table */}
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                {docsLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="p-4 border-b animate-pulse flex gap-4">
+                      <div className="h-4 bg-gray-100 rounded w-1/3" />
+                      <div className="h-4 bg-gray-100 rounded w-1/4" />
+                    </div>
+                  ))
+                ) : tripDocuments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-2">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-200">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <p className="text-sm text-gray-400">No documents yet</p>
+                    <button type="button" onClick={() => setUploadDocOpen(true)}
+                      className="text-xs font-medium text-brand-600 hover:underline">
+                      Upload first document
+                    </button>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Document name</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Source</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Type</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Size</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Uploaded by</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400">Date</th>
+                        <th className="px-4 py-2.5 text-xs font-medium text-gray-400 w-20">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {tripDocuments.map(doc => (
+                        <tr key={doc.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-600 shrink-0">
+                                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                              <span className="text-sm font-medium text-gray-800 truncate max-w-[180px]">{doc.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {doc.container_ref ? (
+                              <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                                {doc.container_ref}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-medium bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full">
+                                Trip direct
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                            {doc.file_type?.split('/')[1]?.toUpperCase() ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                            {doc.file_size ? `${(doc.file_size / 1024).toFixed(0)} KB` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                            {doc.uploaded_by_name ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                            {new Date(doc.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              <a href={doc.file_url} target="_blank" rel="noopener noreferrer"
+                                className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors"
+                                title="View document">
+                                <Eye size={14} />
+                              </a>
+                              {!doc.container_id && (
+                                <button type="button" onClick={() => deleteTripDocument(doc.id, doc.name)}
+                                  className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                                  title="Delete document">
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Count update for tab badge */}
+              {tripDocuments.length > 0 && (
+                <p className="text-xs text-gray-400 text-right">
+                  {tripDocuments.filter(d => !d.container_id).length} trip documents ·{' '}
+                  {tripDocuments.filter(d => d.container_id).length} container documents ·{' '}
+                  {tripDocuments.length} total
+                </p>
+              )}
             </div>
           )}
 

@@ -10,6 +10,7 @@ interface PayrollEmployee {
   profile_id: string
   full_name: string | null
   email: string
+  is_pension_enrolled: boolean
   basic_salary: number
   housing_allowance: number
   transport_allowance: number
@@ -19,6 +20,10 @@ interface PayrollEmployee {
   pending_advance: number
   bank_name: string | null
   account_number: string | null
+  custom_pension_ee_pct: number | null
+  custom_pension_er_pct: number | null
+  custom_paye_override:  number | null
+  use_custom_paye:       boolean
 }
 
 interface ComputedLine {
@@ -68,12 +73,15 @@ function computePAYE(taxableIncome: number, gross: number): number {
 function computeEmployee(emp: PayrollEmployee, bonus: number): ComputedLine {
   const gross       = emp.basic_salary + emp.housing_allowance + emp.transport_allowance + emp.meal_allowance + emp.other_allowances + bonus
   const pensionable = emp.basic_salary + emp.housing_allowance + emp.transport_allowance
-  const pension_ee  = pensionable * 0.08
-  const pension_er  = pensionable * 0.10
+  const pensionEERate = emp.custom_pension_ee_pct ? emp.custom_pension_ee_pct / 100 : 0.08
+  const pensionERRate = emp.custom_pension_er_pct ? emp.custom_pension_er_pct / 100 : 0.10
+  const pension_ee    = emp.is_pension_enrolled ? pensionable * pensionEERate : 0
+  const pension_er    = emp.is_pension_enrolled ? pensionable * pensionERRate : 0
   const cra         = 200000 + (gross * 0.20)
   const taxable     = Math.max(0, gross - cra - pension_ee)
-  const paye        = computePAYE(taxable, gross)
-  const net_pay     = gross - pension_ee - paye - emp.pending_advance + 0
+  const computedPAYE = computePAYE(taxable, gross)
+  const paye         = emp.use_custom_paye && emp.custom_paye_override ? emp.custom_paye_override : computedPAYE
+  const net_pay      = gross - pension_ee - paye - 0
 
   return {
     employee_id:       emp.id,
@@ -131,8 +139,11 @@ export default function NewPayrollRunPage() {
     const { data: payrollEmps } = await supabase
       .from('payroll_employees')
       .select(`
-        id, basic_salary, housing_allowance, transport_allowance,
+        id, is_pension_enrolled,
+        basic_salary, housing_allowance, transport_allowance,
         meal_allowance, other_allowances, other_allowances_note,
+        custom_pension_ee_pct, custom_pension_er_pct,
+        custom_paye_override, use_custom_paye,
         profile:profiles!payroll_employees_employee_id_fkey(id, full_name, email),
         bank:payroll_bank_accounts(bank_name, account_number)
       `)
@@ -158,6 +169,7 @@ export default function NewPayrollRunPage() {
       profile_id:            (e.profile as any)?.id,
       full_name:             (e.profile as any)?.full_name,
       email:                 (e.profile as any)?.email,
+      is_pension_enrolled:   e.is_pension_enrolled ?? false,
       basic_salary:          Number(e.basic_salary),
       housing_allowance:     Number(e.housing_allowance),
       transport_allowance:   Number(e.transport_allowance),
@@ -167,6 +179,10 @@ export default function NewPayrollRunPage() {
       pending_advance:       advMap[e.id] ?? 0,
       bank_name:             (e.bank as any)?.[0]?.bank_name ?? null,
       account_number:        (e.bank as any)?.[0]?.account_number ?? null,
+      custom_pension_ee_pct: e.custom_pension_ee_pct ?? null,
+      custom_pension_er_pct: e.custom_pension_er_pct ?? null,
+      custom_paye_override:  e.custom_paye_override  ?? null,
+      use_custom_paye:       e.use_custom_paye        ?? false,
     }))
 
     setEmployees(emps)

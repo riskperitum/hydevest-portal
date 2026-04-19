@@ -14,12 +14,17 @@ interface EmployeeProfile {
 interface PayrollEmployee {
   id: string
   is_salary_earning: boolean
+  is_pension_enrolled: boolean
   basic_salary: number
   housing_allowance: number
   transport_allowance: number
   meal_allowance: number
   other_allowances: number
   other_allowances_note: string | null
+  custom_pension_ee_pct: number | null
+  custom_pension_er_pct: number | null
+  custom_paye_override: number | null
+  use_custom_paye: boolean
 }
 
 interface BankAccount {
@@ -45,13 +50,18 @@ export default function PayrollEmployeePage() {
   const [saved, setSaved]         = useState(false)
 
   const [form, setForm] = useState({
-    is_salary_earning:     false,
-    basic_salary:          '',
-    housing_allowance:     '',
-    transport_allowance:   '',
-    meal_allowance:        '',
-    other_allowances:      '',
-    other_allowances_note: '',
+    is_salary_earning:        false,
+    is_pension_enrolled:      false,
+    basic_salary:             '',
+    housing_allowance:        '',
+    transport_allowance:      '',
+    meal_allowance:           '',
+    other_allowances:         '',
+    other_allowances_note:    '',
+    custom_pension_ee_pct:    '',
+    custom_pension_er_pct:    '',
+    custom_paye_override:     '',
+    use_custom_paye:          false,
   })
 
   const [bankForm, setBankForm] = useState({
@@ -73,13 +83,18 @@ export default function PayrollEmployeePage() {
     if (payrollData) {
       setPayroll(payrollData)
       setForm({
-        is_salary_earning:     payrollData.is_salary_earning,
-        basic_salary:          payrollData.basic_salary?.toString() ?? '',
-        housing_allowance:     payrollData.housing_allowance?.toString() ?? '',
-        transport_allowance:   payrollData.transport_allowance?.toString() ?? '',
-        meal_allowance:        payrollData.meal_allowance?.toString() ?? '',
-        other_allowances:      payrollData.other_allowances?.toString() ?? '',
-        other_allowances_note: payrollData.other_allowances_note ?? '',
+        is_salary_earning:        payrollData.is_salary_earning,
+        is_pension_enrolled:      payrollData.is_pension_enrolled,
+        basic_salary:             payrollData.basic_salary?.toString() ?? '',
+        housing_allowance:        payrollData.housing_allowance?.toString() ?? '',
+        transport_allowance:      payrollData.transport_allowance?.toString() ?? '',
+        meal_allowance:           payrollData.meal_allowance?.toString() ?? '',
+        other_allowances:         payrollData.other_allowances?.toString() ?? '',
+        other_allowances_note:    payrollData.other_allowances_note ?? '',
+        custom_pension_ee_pct: payrollData.custom_pension_ee_pct?.toString() ?? '',
+        custom_pension_er_pct: payrollData.custom_pension_er_pct?.toString() ?? '',
+        custom_paye_override:  payrollData.custom_paye_override?.toString() ?? '',
+        use_custom_paye:       payrollData.use_custom_paye ?? false,
       })
 
       const { data: bankData } = await supabase
@@ -113,12 +128,17 @@ export default function PayrollEmployeePage() {
     const payload = {
       employee_id:           profileId,
       is_salary_earning:     form.is_salary_earning,
+      is_pension_enrolled:   form.is_pension_enrolled,
       basic_salary:          parseFloat(form.basic_salary)          || 0,
       housing_allowance:     parseFloat(form.housing_allowance)     || 0,
       transport_allowance:   parseFloat(form.transport_allowance)   || 0,
       meal_allowance:        parseFloat(form.meal_allowance)        || 0,
       other_allowances:      parseFloat(form.other_allowances)      || 0,
       other_allowances_note: form.other_allowances_note || null,
+      custom_pension_ee_pct: form.custom_pension_ee_pct ? parseFloat(form.custom_pension_ee_pct) : null,
+      custom_pension_er_pct: form.custom_pension_er_pct ? parseFloat(form.custom_pension_er_pct) : null,
+      custom_paye_override:  form.custom_paye_override  ? parseFloat(form.custom_paye_override)  : null,
+      use_custom_paye:       form.use_custom_paye,
       updated_at:            new Date().toISOString(),
     }
 
@@ -165,10 +185,14 @@ export default function PayrollEmployeePage() {
   const other    = parseFloat(form.other_allowances)      || 0
   const gross    = basic + housing + transport + meal + other
   const pensionable = basic + housing + transport
-  const pensionEE   = pensionable * 0.08
-  const pensionER   = pensionable * 0.10
-  const cra         = 200000 + (gross * 0.20)
-  const taxable     = Math.max(0, gross - cra - pensionEE)
+  const pensionEERate = form.custom_pension_ee_pct ? parseFloat(form.custom_pension_ee_pct) / 100 : 0.08
+  const pensionERRate = form.custom_pension_er_pct ? parseFloat(form.custom_pension_er_pct) / 100 : 0.10
+  const pensionEE     = form.is_pension_enrolled ? pensionable * pensionEERate : 0
+  const pensionER     = form.is_pension_enrolled ? pensionable * pensionERRate : 0
+  const cra           = 200000 + (gross * 0.20)
+  const taxable       = Math.max(0, gross - cra - pensionEE)
+  const computedPAYE  = computePAYE(taxable)
+  const finalPAYE     = form.use_custom_paye && form.custom_paye_override ? parseFloat(form.custom_paye_override) : computedPAYE
 
   function computePAYE(taxableIncome: number): number {
     if (taxableIncome <= 0) return 0
@@ -192,8 +216,8 @@ export default function PayrollEmployeePage() {
     return Math.max(tax, minimumTax)
   }
 
-  const paye   = computePAYE(taxable)
-  const netPay = gross - pensionEE - paye
+  const paye   = computedPAYE
+  const netPay = gross - pensionEE - finalPAYE
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -232,6 +256,45 @@ export default function PayrollEmployeePage() {
               <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.is_salary_earning ? 'left-6' : 'left-1'}`} />
             </button>
           </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Pension enrolled</p>
+              <p className="text-xs text-gray-400 mt-0.5">Toggle to include employee pension deductions in payroll</p>
+            </div>
+            <button type="button"
+              onClick={() => setForm(f => ({ ...f, is_pension_enrolled: !f.is_pension_enrolled }))}
+              className={`w-11 h-6 rounded-full transition-colors relative ${form.is_pension_enrolled ? 'bg-brand-600' : 'bg-gray-200'}`}>
+              <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.is_pension_enrolled ? 'left-6' : 'left-1'}`} />
+            </button>
+          </div>
+
+          {form.is_pension_enrolled && (
+            <div className="pt-3 border-t border-gray-100 grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Employee pension rate (%)
+                  <span className="ml-2 text-xs text-gray-400 font-normal">Default: 8%</span>
+                </label>
+                <input type="number" step="0.1" min="0" max="100"
+                  value={form.custom_pension_ee_pct}
+                  onChange={e => setForm(f => ({ ...f, custom_pension_ee_pct: e.target.value }))}
+                  placeholder="8"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Employer pension rate (%)
+                  <span className="ml-2 text-xs text-gray-400 font-normal">Default: 10%</span>
+                </label>
+                <input type="number" step="0.1" min="0" max="100"
+                  value={form.custom_pension_er_pct}
+                  onChange={e => setForm(f => ({ ...f, custom_pension_er_pct: e.target.value }))}
+                  placeholder="10"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Salary components */}
@@ -271,6 +334,40 @@ export default function PayrollEmployeePage() {
                 onChange={e => setForm(f => ({ ...f, other_allowances_note: e.target.value }))}
                 placeholder="e.g. Car maintenance"
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+
+            <div className="col-span-2 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Override PAYE tax</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    By default PAYE is computed using Nigerian tax bands. Toggle to set a fixed monthly amount instead.
+                  </p>
+                </div>
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, use_custom_paye: !f.use_custom_paye }))}
+                  className={`w-11 h-6 rounded-full transition-colors relative ${form.use_custom_paye ? 'bg-brand-600' : 'bg-gray-200'}`}>
+                  <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.use_custom_paye ? 'left-6' : 'left-1'}`} />
+                </button>
+              </div>
+              {form.use_custom_paye && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Fixed PAYE amount (NGN/month)
+                    <span className="ml-2 text-xs text-gray-400 font-normal">
+                      Computed: {fmt(computePAYE(taxable))}
+                    </span>
+                  </label>
+                  <input type="number" step="0.01" min="0"
+                    value={form.custom_paye_override}
+                    onChange={e => setForm(f => ({ ...f, custom_paye_override: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full max-w-sm px-3 py-2.5 text-sm border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-amber-50" />
+                  <p className="text-xs text-amber-600 mt-1">
+                    This fixed amount will override the computed PAYE for this employee in all payroll runs.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -314,7 +411,7 @@ export default function PayrollEmployeePage() {
               {[
                 { label: 'Gross income',     value: fmt(gross),      color: 'text-gray-900' },
                 { label: 'Pension (EE 8%)',  value: fmt(pensionEE),  color: 'text-red-600'  },
-                { label: 'PAYE tax',         value: fmt(paye),       color: 'text-red-600'  },
+                { label: form.use_custom_paye ? 'PAYE tax (fixed)' : 'PAYE tax', value: fmt(finalPAYE), color: 'text-red-600' },
                 { label: 'Net pay',          value: fmt(netPay),     color: 'text-green-700'},
               ].map(m => (
                 <div key={m.label} className="bg-white/60 rounded-xl p-3">

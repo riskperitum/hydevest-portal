@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Save, Loader2, Plus, X } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, X } from 'lucide-react'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 
 interface Customer {
@@ -18,8 +18,6 @@ export default function CreateLegalCasePage() {
   const [customers, setCustomers]   = useState<Customer[]>([])
   const [employees, setEmployees]   = useState<any[]>([])
   const [selectedCustomers, setSelectedCustomers] = useState<Customer[]>([])
-  const [customerSearch, setCustomerSearch] = useState('')
-  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
 
   const [form, setForm] = useState({
     title:       '',
@@ -45,21 +43,11 @@ export default function CreateLegalCasePage() {
     if (!selectedCustomers.find(c => c.id === customer.id)) {
       setSelectedCustomers(prev => [...prev, customer])
     }
-    setCustomerSearch('')
-    setShowCustomerDropdown(false)
   }
 
   function removeCustomer(id: string) {
     setSelectedCustomers(prev => prev.filter(c => c.id !== id))
   }
-
-  const filteredCustomers = customers.filter(c =>
-    !selectedCustomers.find(sc => sc.id === c.id) && (
-      customerSearch === '' ||
-      c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      c.customer_id.toLowerCase().includes(customerSearch.toLowerCase())
-    )
-  )
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -222,33 +210,22 @@ export default function CreateLegalCasePage() {
                 ))}
               </div>
             )}
-            <div className="relative">
-              <input value={customerSearch}
-                onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true) }}
-                onFocus={() => setShowCustomerDropdown(true)}
-                onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
-                placeholder="Search and add customers..."
-                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              {showCustomerDropdown && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-[9999] max-h-64 overflow-y-auto">
-                  {filteredCustomers.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-gray-400">
-                      {customers.length === 0 ? 'Loading customers...' : 'No customers found'}
-                    </div>
-                  ) : (
-                    filteredCustomers.slice(0, 8).map(c => (
-                      <button key={c.id} type="button"
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => addCustomer(c)}
-                        className="w-full px-5 py-3.5 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-100 last:border-0 transition-colors">
-                        <span className="text-base font-semibold text-gray-900">{c.name}</span>
-                        <span className="text-sm bg-brand-50 text-brand-700 px-3 py-1 rounded-full font-mono font-medium">{c.customer_id}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
+            <select
+              onChange={e => {
+                const selected = customers.find(c => c.id === e.target.value)
+                if (selected) addCustomer(selected)
+                e.target.value = ''
+              }}
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+              <option value="">Select a customer to add...</option>
+              {customers
+                .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
+                .map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.customer_id})
+                  </option>
+                ))}
+            </select>
           </div>
         </div>
 

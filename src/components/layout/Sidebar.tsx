@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
-  Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
+  Package, Receipt, Wallet, BarChart3, Inbox, Users,
   Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, DollarSign, Scale
 } from 'lucide-react'
 import Image from 'next/image'
@@ -69,17 +69,9 @@ const NAV: NavItem[] = [
     icon: Scale,
   },
   {
+    href: '/portal/reports',
     label: 'Reports',
-    icon: BarChart2,
-    children: [
-      { label: 'Overview', href: '/portal/reports', icon: BarChart2 },
-      { label: 'Container sales', href: '/portal/reports/container-sales', icon: BarChart2 },
-      { label: 'Customer debt', href: '/portal/reports/customer-debt', icon: Users },
-      { label: 'Bad debts', href: '/portal/reports/bad-debts', icon: BarChart2 },
-      { label: 'Supplier payables', href: '/portal/reports/supplier-payables', icon: BarChart2 },
-      { label: 'Container profit', href: '/portal/reports/container-profit', icon: TrendingUp },
-      { label: 'Supplier receivables', href: '/portal/reports/supplier-receivables', icon: BarChart2 },
-    ],
+    icon: BarChart3,
   },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },
@@ -92,7 +84,7 @@ const PARTNER_NAV: NavItem[] = [
 
 export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
-  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales', 'Reports'])
+  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 

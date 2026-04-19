@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, Search, Eye, Package, ChevronDown, ChevronUp,
   TrendingUp, Clock, CheckCircle2,
+  Download,
 } from 'lucide-react'
 
 interface SalesOrder {
@@ -58,6 +59,47 @@ export default function SalesOrdersPage() {
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  function exportToCSV() {
+    const headers = [
+      'Order ID', 'Container', 'Tracking Number', 'Customer', 'Customer ID',
+      'Sale Type', 'Sale Amount', 'Discount', 'Overages', 'Customer Payable',
+      'Amount Paid', 'Outstanding Balance', 'Payment Status', 'Approval Status',
+      'Date'
+    ]
+
+    const rows = groups.flatMap(group =>
+      group.orders.map(o => [
+        o.order_id,
+        group.container_id,
+        group.tracking_number ?? '',
+        o.customer?.name ?? '',
+        o.customer?.customer_id ?? '',
+        o.sale_type?.replace('_', ' ') ?? '',
+        Number(o.sale_amount).toFixed(2),
+        Number(o.discount ?? 0).toFixed(2),
+        Number(o.overages ?? 0).toFixed(2),
+        Number(o.customer_payable).toFixed(2),
+        Number(o.amount_paid).toFixed(2),
+        Number(o.outstanding_balance).toFixed(2),
+        o.payment_status,
+        o.approval_status,
+        new Date(o.created_at).toLocaleDateString('en-GB'),
+      ])
+    )
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href     = url
+    link.download = `sales-orders-${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -171,12 +213,19 @@ export default function SalesOrdersPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search container, tracking, customer..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      {/* Search + Export */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search container, tracking, customer..."
+            className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        </div>
+        <button onClick={exportToCSV} disabled={groups.length === 0}
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 disabled:opacity-40 whitespace-nowrap ml-auto"
+          style={{ background: '#55249E' }}>
+          <Download size={14} /> Export CSV
+        </button>
       </div>
 
       {/* Grouped containers */}

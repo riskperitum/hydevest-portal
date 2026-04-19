@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Loader2, Check, X, Pencil,
@@ -139,8 +140,7 @@ export default function ExpenseDetailPage() {
     load()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
-    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
-      .then(({ data }) => setEmployees(data ?? []))
+    getAdminProfiles().then(data => setEmployees(data))
   }, [load])
 
   const fmt = (n: number, curr = 'NGN') => {

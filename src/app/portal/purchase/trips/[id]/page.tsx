@@ -13,6 +13,7 @@ import Modal from '@/components/ui/Modal'
 import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { getTripStatusBadge } from '@/lib/utils/containerStatus'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 
 interface Trip {
   id: string
@@ -554,10 +555,10 @@ export default function TripDetailPage() {
 
   const loadDropdowns = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: sup }, { data: clr }, { data: emp }] = await Promise.all([
+    const [{ data: sup }, { data: clr }, emp] = await Promise.all([
       supabase.from('suppliers').select('id, name').eq('is_active', true),
       supabase.from('clearing_agents').select('id, name').eq('is_active', true),
-      supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
+      getAdminProfiles(),
     ])
     setSuppliers(sup ?? [])
     setClearingAgents(clr ?? [])

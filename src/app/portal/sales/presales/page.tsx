@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Search, Eye, Trash2, Loader2, Package, Download, Filter, FileText, ClipboardCheck, CheckCircle2 } from 'lucide-react'
@@ -67,8 +68,7 @@ export default function PresalesPage() {
     load()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
-    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
-      .then(({ data }) => setEmployees(data ?? []))
+    getAdminProfiles().then(data => setEmployees(data))
   }, [load])
 
   async function handleDelete(id: string) {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -223,7 +224,7 @@ function SupplierReceivablesDrilldownInner() {
     // Load all allocations for receivables in this trip
     const receivableIds = (containerRecs ?? []).map(r => r.id)
 
-    const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, { data: allProfiles }, { data: allTrips }] = await Promise.all([
+    const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, allProfiles, { data: allTrips }] = await Promise.all([
       receivableIds.length > 0
         ? supabase.from('supplier_receivable_allocations').select(`
             id, amount_usd, percentage, status, notes, created_at, target_container_id,
@@ -247,7 +248,7 @@ function SupplierReceivablesDrilldownInner() {
       supabase.from('supplier_receivable_notes').select(`
         *, creator:profiles!supplier_receivable_notes_created_by_fkey(id, full_name, email)
       `).eq('trip_id', tripId).order('created_at', { ascending: true }),
-      supabase.from('profiles').select('id, full_name, email').eq('is_active', true),
+      getAdminProfiles(),
       supabase.from('trips').select('id, trip_id, title').neq('id', tripId).order('created_at', { ascending: false }),
     ])
 

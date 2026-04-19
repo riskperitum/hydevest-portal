@@ -17,6 +17,7 @@ import {
   type ContainerStatusInput,
   normalizeSaleTypeForStatus,
 } from '@/lib/utils/containerStatus'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 
 interface Presale {
   id: string
@@ -217,8 +218,7 @@ export default function PresaleDetailPage() {
     load()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUserId(user?.id ?? null))
-    supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
-      .then(({ data }) => setEmployees(data ?? []))
+    getAdminProfiles().then(data => setEmployees(data))
   }, [load])
 
   useEffect(() => {

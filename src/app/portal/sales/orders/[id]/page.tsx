@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, FileText, CheckCircle2, Trash2,
@@ -158,8 +159,7 @@ export default function SalesOrderDetailPage() {
       const { data } = await supabase.from('profiles').select('id, full_name').eq('id', user.id).single()
       setCurrentUser(data)
     })
-    void supabase.from('profiles').select('id, full_name, email').eq('is_active', true)
-      .then(({ data }) => setEmployees(data ?? []))
+    void getAdminProfiles().then(data => setEmployees(data))
   }, [load])
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`

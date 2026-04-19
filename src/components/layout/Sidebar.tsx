@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/permissions/hooks'
 import {
   LayoutDashboard, MessageSquare, ClipboardList, ShoppingCart, TrendingUp,
   Package, Receipt, Wallet, BarChart2, BarChart3, Inbox, Users,
-  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw
+  Settings, ChevronDown, ChevronRight, Menu, X, RefreshCcw, DollarSign
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -58,6 +58,11 @@ const NAV: NavItem[] = [
     partnerOnly: true,
   },
   { label: 'Finance',     href: '/portal/finance',    icon: BarChart3 },
+  {
+    href: '/portal/payroll',
+    label: 'Payroll',
+    icon: DollarSign,
+  },
   { label: 'Reports',     href: '/portal/reports',    icon: BarChart2 },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },
   { label: 'Admin',       href: '/portal/admin',      icon: Settings, adminOnly: true },

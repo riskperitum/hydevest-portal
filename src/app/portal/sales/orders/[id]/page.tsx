@@ -110,6 +110,7 @@ export default function SalesOrderDetailPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const { permissions, isSuperAdmin } = usePermissions()
+  const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
 
   const [writeOffOpen, setWriteOffOpen] = useState(false)
@@ -118,6 +119,9 @@ export default function SalesOrderDetailPage() {
   const [writeOffSaving, setWriteOffSaving] = useState(false)
   const [writeOffError, setWriteOffError] = useState('')
   const [currentUser, setCurrentUser] = useState<{ id: string; full_name: string | null } | null>(null)
+
+  const displayedTab: 'details' | 'activity' =
+    !canViewActivity && activeTab === 'activity' ? 'details' : activeTab
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -713,16 +717,16 @@ export default function SalesOrderDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100">
           {[
-            { key: 'details', label: 'Sale details' },
-            { key: 'activity', label: 'Activity log', count: activityLogs.length },
+            { key: 'details' as const, label: 'Sale details' },
+            ...(canViewActivity ? [{ key: 'activity' as const, label: 'Activity log', count: activityLogs.length }] : []),
           ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key as 'details' | 'activity')}
+            <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
-                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                ${displayedTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {tab.label}
-              {tab.count != null && tab.count > 0 && (
+              {'count' in tab && tab.count != null && tab.count > 0 && (
                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  ${displayedTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
                   {tab.count}
                 </span>
               )}
@@ -730,7 +734,7 @@ export default function SalesOrderDetailPage() {
           ))}
         </div>
 
-        {activeTab === 'details' && (
+        {displayedTab === 'details' && (
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
               <div>
@@ -860,7 +864,7 @@ export default function SalesOrderDetailPage() {
           </div>
         )}
 
-        {activeTab === 'activity' && (
+        {canViewActivity && activeTab === 'activity' && (
           <div className="p-5">
             {activityLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 gap-2">

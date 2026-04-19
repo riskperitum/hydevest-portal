@@ -235,16 +235,6 @@ export default function PresalesPage() {
             })(),
             color: 'text-brand-600',
           },
-          {
-            label: 'Avg expected revenue',
-            value: (() => {
-              const w = filteredPresales.filter(p => p.expected_sale_revenue && Number(p.expected_sale_revenue) > 0)
-              if (!w.length) return '—'
-              const avg = w.reduce((s, p) => s + Number(p.expected_sale_revenue), 0) / w.length
-              return fmt(avg)
-            })(),
-            color: 'text-green-600',
-          },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <p className="text-xs text-gray-400 mb-1 leading-tight">{m.label}</p>

@@ -37,6 +37,7 @@ interface Container {
   estimated_landing_cost: number | null
   status: string
   approval_status: string
+  trip_approval_status: string | null
   created_at: string
 }
 
@@ -84,8 +85,10 @@ export default function ContainerDetailPage() {
   const containerId = params.containerId as string
 
   const { permissions, isSuperAdmin } = usePermissions()
-  const canViewCosts = isSuperAdmin || can(permissions, isSuperAdmin, 'view_costs')
-  const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canOverride   = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canEdit       = isSuperAdmin || can(permissions, isSuperAdmin, 'containers.edit') || can(permissions, isSuperAdmin, 'trips.edit')
+  const canViewCosts  = isSuperAdmin || can(permissions, isSuperAdmin, 'view_costs')
+  const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
 
@@ -101,7 +104,7 @@ export default function ContainerDetailPage() {
 
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
-  const [editOpen, setEditOpen] = useState(true)
+  const [editOpen, setEditOpen] = useState(false)
   const [funderOpen, setFunderOpen] = useState(false)
   const [funderForm, setFunderForm] = useState({ funder_type: 'entity', funder_id: '', percentage: '' })
   const [savingFunder, setSavingFunder] = useState(false)
@@ -127,24 +130,31 @@ export default function ContainerDetailPage() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: con }, { data: fund }, { data: docs }] = await Promise.all([
-      supabase.from('containers').select('*').eq('id', containerId).single(),
+    const [{ data: rawCon }, { data: fund }, { data: docs }] = await Promise.all([
+      supabase.from('containers').select('*, trip:trips!containers_trip_id_fkey(status, approval_status)').eq('id', containerId).single(),
       supabase.from('container_funders').select('*').eq('container_id', containerId),
       supabase.from('trip_documents').select('*').eq('container_id', containerId).order('created_at', { ascending: false }),
     ])
-    setContainer(con)
-    setEditOpen(true)
+    if (rawCon) {
+      const { trip, ...rest } = rawCon as Record<string, unknown> & { trip?: { approval_status?: string } }
+      setContainer({
+        ...rest,
+        trip_approval_status: trip?.approval_status ?? null,
+      } as Container)
+    } else {
+      setContainer(null)
+    }
     setOverrideConfirmed(false)
     setFunders(fund ?? [])
     setDocuments(docs ?? [])
 
     // Only lock if container has an active sales order
     // Containers with no presale and no sales order are always freely editable
-    if (con?.id) {
+    if (rawCon?.id) {
       const { data: activeSO } = await supabase
         .from('sales_orders')
         .select('id, order_id, payment_status')
-        .eq('container_id', con.id)
+        .eq('container_id', rawCon.id)
         .neq('payment_status', 'paid')
         .limit(1)
         .single()
@@ -159,11 +169,11 @@ export default function ContainerDetailPage() {
       }
     }
 
-    if (con?.trip_id) {
+    if (rawCon?.trip_id) {
       const { data: trip } = await supabase
         .from('trips')
         .select('source_port, destination_port, status, trip_id, title')
-        .eq('id', con.trip_id)
+        .eq('id', rawCon.trip_id)
         .single()
       setTripData(trip)
     } else {
@@ -255,6 +265,7 @@ export default function ContainerDetailPage() {
   }, [load, loadComments, loadActivity, loadDropdowns])
 
   const totalPct = funders.reduce((s, f) => s + Number(f.percentage), 0)
+  const displayedTab = !canViewActivity && activeTab === 'activity' ? 'comments' : activeTab
 
   async function logActivity(action: string, fieldName?: string, oldValue?: string, newValue?: string) {
     const supabase = createClient()
@@ -270,11 +281,12 @@ export default function ContainerDetailPage() {
   }
 
   async function updateField(field: string, value: string) {
+    if (!canEdit) return
     if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     const oldValue = String((container as unknown as Record<string, unknown>)[field] ?? '')
     const updatePayload268: any = { [field]: value || null }
-    if (overrideConfirmed) {
+    if (container?.trip_approval_status === 'reviewed' || container?.trip_approval_status === 'approved' || overrideConfirmed) {
       updatePayload268.is_modified = true
       updatePayload268.modified_after_approval_at = new Date().toISOString()
       updatePayload268.modified_after_approval_by = currentUser?.id ?? null
@@ -298,6 +310,7 @@ export default function ContainerDetailPage() {
 
   async function saveFunder(e: React.FormEvent) {
     e.preventDefault()
+    if (!canEdit) return
     if (hasActiveSalesOrder && !overrideConfirmed) return
     const newPct = parseFloat(funderForm.percentage)
 
@@ -359,6 +372,7 @@ export default function ContainerDetailPage() {
 
   async function deleteFunder(id: string, name: string) {
     if (!confirm(`Remove ${name} as funder?`)) return
+    if (!canEdit) return
     if (hasActiveSalesOrder && !overrideConfirmed) return
     const supabase = createClient()
     await supabase.from('container_funders').delete().eq('id', id)
@@ -388,6 +402,7 @@ export default function ContainerDetailPage() {
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
+    if (!canEdit) return
     if (!uploadFile) return
     setUploading(true)
     const supabase = createClient()
@@ -437,6 +452,7 @@ export default function ContainerDetailPage() {
 
   async function deleteDocument(id: string, name: string) {
     if (!confirm(`Delete document "${name}"?`)) return
+    if (!canEdit) return
     const supabase = createClient()
     await supabase.from('trip_documents').delete().eq('id', id)
     await logActivity('Document deleted', 'documents', name, '')
@@ -456,6 +472,9 @@ export default function ContainerDetailPage() {
   )
 
   if (!container) return <div className="text-center py-16 text-gray-400">Container not found.</div>
+
+  const fieldDisabled =
+    !editOpen || !canEdit || container.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed)
 
   const EditableField = ({
     fieldKey, label, value, type = 'text', placeholder = ''
@@ -478,18 +497,21 @@ export default function ContainerDetailPage() {
                   updateField(fieldKey, fieldValue)
                 }
               }}
+              disabled={fieldDisabled}
               className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
               placeholder={placeholder}
               autoFocus
             />
             {!useAutosave && (
               <>
-                <button onClick={() => updateField(fieldKey, fieldValue)}
-                  className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+                <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
+                  disabled={fieldDisabled}
+                  className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0 disabled:opacity-50">
                   <Check size={13} />
                 </button>
-                <button onClick={() => setEditField(null)}
-                  className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
+                <button type="button" onClick={() => setEditField(null)}
+                  disabled={fieldDisabled}
+                  className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0 disabled:opacity-50">
                   <X size={13} />
                 </button>
               </>
@@ -500,8 +522,9 @@ export default function ContainerDetailPage() {
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
-            disabled={!editOpen || container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed)}
+            disabled={fieldDisabled}
             className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
             <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
               {value || (useAutosave ? 'Click to set' : 'Not set')}
@@ -525,12 +548,13 @@ export default function ContainerDetailPage() {
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <select
         value={value}
-        disabled={container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed)}
+        disabled={fieldDisabled}
         onChange={async e => {
+          if (!canEdit) return
           if (hasActiveSalesOrder && !overrideConfirmed) return
           const supabase = createClient()
           const updatePayload518: any = { [fieldKey]: e.target.value }
-          if (overrideConfirmed) {
+          if (container?.trip_approval_status === 'reviewed' || container?.trip_approval_status === 'approved' || overrideConfirmed) {
             updatePayload518.is_modified = true
             updatePayload518.modified_after_approval_at = new Date().toISOString()
             updatePayload518.modified_after_approval_by = currentUser?.id ?? null
@@ -542,7 +566,7 @@ export default function ContainerDetailPage() {
           loadActivity()
         }}
         className={`w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white
-          ${container?.approval_status === 'approved' || (hasActiveSalesOrder && !overrideConfirmed) ? 'opacity-60 cursor-not-allowed' : ''}`}
+          ${fieldDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <option value="">Select...</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -588,12 +612,17 @@ export default function ContainerDetailPage() {
                 Locked — active sales order
               </div>
               {canOverride && (
-                <button onClick={() => setOverrideOpen(true)}
+                <button type="button" onClick={() => setOverrideOpen(true)}
                   className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
                   <AlertTriangle size={14} /> Override & edit
                 </button>
               )}
             </div>
+          ) : canEdit ? (
+            <button type="button" onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Pencil size={14} /> Edit container
+            </button>
           ) : null}
         </div>
       </div>
@@ -665,10 +694,11 @@ export default function ContainerDetailPage() {
               <select
                 value={container.funding_type}
                 onChange={async e => {
+                  if (!canEdit) return
                   if (hasActiveSalesOrder && !overrideConfirmed) return
                   const supabase = createClient()
                   const updatePayload654: any = { funding_type: e.target.value }
-                  if (overrideConfirmed) {
+                  if (container?.trip_approval_status === 'reviewed' || container?.trip_approval_status === 'approved' || overrideConfirmed) {
                     updatePayload654.is_modified = true
                     updatePayload654.modified_after_approval_at = new Date().toISOString()
                     updatePayload654.modified_after_approval_by = currentUser?.id ?? null
@@ -679,18 +709,18 @@ export default function ContainerDetailPage() {
                   setOverrideConfirmed(false)
                   loadActivity()
                 }}
-                className={`px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium ${hasActiveSalesOrder && !overrideConfirmed ? 'opacity-60 cursor-not-allowed' : ''}`}
-                disabled={hasActiveSalesOrder && !overrideConfirmed}
+                className={`px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white font-medium ${fieldDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                disabled={fieldDisabled}
               >
                 <option value="entity">Entity</option>
                 <option value="partner">Partner</option>
               </select>
             </div>
-            <button
+            <button type="button"
               onClick={() => setFunderOpen(true)}
-              disabled={hasActiveSalesOrder && !overrideConfirmed}
+              disabled={fieldDisabled}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                hasActiveSalesOrder && !overrideConfirmed
+                fieldDisabled
                   ? 'bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed'
                   : 'bg-brand-600 text-white hover:bg-brand-700'
               }`}>
@@ -715,8 +745,9 @@ export default function ContainerDetailPage() {
                   </div>
                   <span className="text-sm font-semibold text-gray-900 w-12 text-right">{f.percentage}%</span>
                 </div>
-                <button onClick={() => deleteFunder(f.id, f.funder_name)}
-                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                <button type="button" onClick={() => deleteFunder(f.id, f.funder_name)}
+                  disabled={fieldDisabled}
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:pointer-events-none">
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -809,8 +840,9 @@ export default function ContainerDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">Attachments</h2>
-          <button onClick={() => setUploadOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors">
+          <button type="button" onClick={() => setUploadOpen(true)}
+            disabled={!canEdit}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:pointer-events-none">
             <Upload size={13} /> Upload file
           </button>
         </div>
@@ -833,8 +865,9 @@ export default function ContainerDetailPage() {
                     className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
                     <Eye size={14} />
                   </a>
-                  <button onClick={() => deleteDocument(doc.id, doc.name)}
-                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                  <button type="button" onClick={() => deleteDocument(doc.id, doc.name)}
+                    disabled={!canEdit}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 disabled:pointer-events-none">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -849,15 +882,15 @@ export default function ContainerDetailPage() {
         <div className="flex border-b border-gray-100 overflow-x-auto">
           {[
             { key: 'comments', label: 'Comments', icon: <MessageSquare size={14} />, count: comments.length },
-            { key: 'activity', label: 'Activity log', icon: <Activity size={14} />, count: activityLogs.length },
+            ...(canViewActivity ? [{ key: 'activity', label: 'Activity log', icon: <Activity size={14} />, count: activityLogs.length }] : []),
           ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
-                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                ${displayedTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {tab.icon} {tab.label}
               {tab.count > 0 && (
                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  ${displayedTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
                   {tab.count}
                 </span>
               )}
@@ -868,7 +901,7 @@ export default function ContainerDetailPage() {
         <div className="p-5">
 
           {/* COMMENTS */}
-          {activeTab === 'comments' && (
+          {displayedTab === 'comments' && (
             <div className="space-y-5">
               {comments.length === 0 && (
                 <p className="text-center text-sm text-gray-400 py-6">No comments yet. Be the first to comment.</p>
@@ -953,7 +986,7 @@ export default function ContainerDetailPage() {
           )}
 
           {/* ACTIVITY LOG */}
-          {activeTab === 'activity' && (
+          {canViewActivity && displayedTab === 'activity' && (
             <div className="space-y-1">
               {activityLogs.length === 0 ? (
                 <p className="text-center text-sm text-gray-400 py-6">No activity recorded yet.</p>
@@ -1075,7 +1108,7 @@ export default function ContainerDetailPage() {
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
-            <button type="submit" disabled={uploading || !uploadFile}
+            <button type="submit" disabled={uploading || !uploadFile || !canEdit}
               className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : 'Upload'}
             </button>

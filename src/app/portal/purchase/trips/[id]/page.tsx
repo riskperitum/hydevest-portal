@@ -268,6 +268,7 @@ export default function TripDetailPage() {
   const [reviewBannerOpen, setReviewBannerOpen] = useState(true)
   const [submittingReview, setSubmittingReview] = useState(false)
   const { permissions, isSuperAdmin } = usePermissions()
+  const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'trips.approve')
   const [approvingTrip, setApprovingTrip] = useState(false)
   const [tripActionNote, setTripActionNote] = useState('')
@@ -289,6 +290,8 @@ export default function TripDetailPage() {
   const [uploadDocFile, setUploadDocFile] = useState<File | null>(null)
   const [uploadDocName, setUploadDocName] = useState('')
   const [uploadingDoc, setUploadingDoc] = useState(false)
+
+  const displayedTab = !canViewActivity && activeTab === 'activity' ? 'containers' : activeTab
 
   const recalculateLandingCosts = useCallback(async (
     currentContainers: Container[],
@@ -1547,15 +1550,15 @@ export default function TripDetailPage() {
               { key: 'expenses', label: 'Trip Expense', count: expenses.length },
               { key: 'containers', label: 'Containers', count: containers.length },
               { key: 'documents', label: 'Trip Document', count: tripDocuments.length },
-              { key: 'activity', label: 'Activity log', count: activityLogs.length },
+              ...(canViewActivity ? [{ key: 'activity' as const, label: 'Activity log', count: activityLogs.length }] : []),
             ].map(tab => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
                 className={`px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px flex items-center gap-2
-                  ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+                  ${displayedTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
                 {tab.label}
                 {tab.count > 0 && (
                   <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                    ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                    ${displayedTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
                     {tab.count}
                   </span>
                 )}
@@ -1563,14 +1566,14 @@ export default function TripDetailPage() {
             ))}
           </div>
           <div className="px-4 pb-1">
-            {activeTab === 'expenses' && (
-              <button onClick={() => setExpenseOpen(true)}
+            {displayedTab === 'expenses' && (
+              <button type="button" onClick={() => setExpenseOpen(true)}
                 className="inline-flex items-center gap-2 px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
                 <Plus size={14} /> Record expense
               </button>
             )}
-            {activeTab === 'containers' && (
-              <button onClick={() => setContainerOpen(true)}
+            {displayedTab === 'containers' && (
+              <button type="button" onClick={() => setContainerOpen(true)}
                 className="inline-flex items-center gap-2 px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
                 <Plus size={14} /> Add container
               </button>
@@ -1579,7 +1582,7 @@ export default function TripDetailPage() {
         </div>
 
         <div className="p-5">
-          {activeTab === 'expenses' && (
+          {displayedTab === 'expenses' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
@@ -1630,7 +1633,7 @@ export default function TripDetailPage() {
             </div>
           )}
 
-          {activeTab === 'containers' && (
+          {displayedTab === 'containers' && (
             <div className="overflow-x-auto rounded-lg border border-gray-100">
               <table className="w-full text-sm">
                 <thead>
@@ -1806,7 +1809,7 @@ export default function TripDetailPage() {
             </div>
           )}
 
-          {activeTab === 'documents' && (
+          {displayedTab === 'documents' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
@@ -1955,7 +1958,7 @@ export default function TripDetailPage() {
             </div>
           )}
 
-          {activeTab === 'activity' && (
+          {canViewActivity && activeTab === 'activity' && (
             <div className="space-y-1">
               {activityLogs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-2">

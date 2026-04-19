@@ -86,6 +86,7 @@ export default function PresaleDetailPage() {
   const approverTaskType = searchParams.get('task_type') ?? ''
 
   const { permissions, isSuperAdmin } = usePermissions()
+  const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canApprove = canOverride
 
@@ -94,6 +95,8 @@ export default function PresaleDetailPage() {
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details')
+  const displayedTab: 'details' | 'activity' =
+    !canViewActivity && activeTab === 'activity' ? 'details' : activeTab
   const [editField, setEditField] = useState<string | null>(null)
   const [fieldValue, setFieldValue] = useState('')
 
@@ -624,11 +627,6 @@ export default function PresaleDetailPage() {
   if (!presale) return <div className="text-center py-16 text-gray-400">Presale not found.</div>
 
   const pricingLocked = !editOpen || (hasActiveSalesOrder && !overrideConfirmed)
-  const ppLive = parseFloat(editForm.price_per_piece)
-  const pricingRevenueLive =
-    editForm.price_per_piece.trim() !== '' && !isNaN(ppLive) && presale.warehouse_confirmed_pieces != null
-      ? ppLive * Number(presale.warehouse_confirmed_pieces)
-      : null
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -851,16 +849,16 @@ export default function PresaleDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100">
           {[
-            { key: 'details', label: 'Presale details' },
-            { key: 'activity', label: 'Activity log', count: activityLogs.length },
+            { key: 'details' as const, label: 'Presale details' },
+            ...(canViewActivity ? [{ key: 'activity' as const, label: 'Activity log', count: activityLogs.length }] : []),
           ].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key as 'details' | 'activity')}
+            <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px
-                ${activeTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                ${displayedTab === tab.key ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {tab.label}
-              {tab.count != null && tab.count > 0 && (
+              {'count' in tab && tab.count != null && tab.count > 0 && (
                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                  ${activeTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  ${displayedTab === tab.key ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
                   {tab.count}
                 </span>
               )}
@@ -868,7 +866,7 @@ export default function PresaleDetailPage() {
           ))}
         </div>
 
-        {activeTab === 'details' && (
+        {displayedTab === 'details' && (
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
               <div>
@@ -940,14 +938,6 @@ export default function PresaleDetailPage() {
                   placeholder="0.0000"
                 />
               </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Expected sale revenue (₦)</p>
-                <div className={`px-2 py-1.5 rounded-lg text-sm border ${(pricingRevenueLive ?? presale.expected_sale_revenue) != null ? 'bg-green-50 border-green-200 text-green-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                  {(pricingRevenueLive ?? presale.expected_sale_revenue) != null
-                    ? fmt((pricingRevenueLive ?? presale.expected_sale_revenue)!)
-                    : '—'}
-                </div>
-              </div>
               <div className="col-span-2 md:col-span-3 flex justify-end">
                 <button type="button"
                   disabled={pricingLocked || savingPricing}
@@ -964,7 +954,7 @@ export default function PresaleDetailPage() {
           </div>
         )}
 
-        {activeTab === 'activity' && (
+        {canViewActivity && activeTab === 'activity' && (
           <div className="p-5">
             {activityLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 gap-2">

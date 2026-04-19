@@ -113,6 +113,13 @@ export default function PresaleDetailPage() {
   const [containerStatus, setContainerStatus] = useState<ContainerStatusInput | null>(null)
   const [editOpen, setEditOpen] = useState(false)
 
+  const [editForm, setEditForm] = useState({
+    warehouse_confirmed_avg_weight: '',
+    price_per_kilo: '',
+    price_per_piece: '',
+  })
+  const [savingPricing, setSavingPricing] = useState(false)
+
   const load = useCallback(async () => {
     const supabase = createClient()
     const [{ data: ps }, { data: pd }, { data: al }] = await Promise.all([
@@ -214,6 +221,15 @@ export default function PresaleDetailPage() {
       .then(({ data }) => setEmployees(data ?? []))
   }, [load])
 
+  useEffect(() => {
+    if (!presale) return
+    setEditForm({
+      warehouse_confirmed_avg_weight: presale.warehouse_confirmed_avg_weight?.toString() ?? '',
+      price_per_kilo: presale.price_per_kilo?.toString() ?? '',
+      price_per_piece: presale.price_per_piece?.toString() ?? '',
+    })
+  }, [presale])
+
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   async function logActivity(action: string, fieldName?: string, oldValue?: string, newValue?: string) {
@@ -236,17 +252,14 @@ export default function PresaleDetailPage() {
     const wasApproved = presale?.approval_status === 'approved'
     const wasReviewed = presale?.approval_status === 'reviewed'
 
-    // Recalculate derived fields
-    const avgWeight = field === 'warehouse_confirmed_avg_weight' ? parseFloat(value) : Number(presale?.warehouse_confirmed_avg_weight ?? 0)
-    const pPerKilo = field === 'price_per_kilo' ? parseFloat(value) : Number(presale?.price_per_kilo ?? 0)
-    const wPieces = field === 'warehouse_confirmed_pieces' ? parseInt(value) : Number(presale?.warehouse_confirmed_pieces ?? 0)
-
     let updateData: Record<string, unknown> = { [field]: value || null }
 
-    if (['warehouse_confirmed_avg_weight', 'price_per_kilo', 'warehouse_confirmed_pieces'].includes(field)) {
-      const newPricePerPiece = avgWeight && pPerKilo ? avgWeight * pPerKilo : null
-      const newRevenue = newPricePerPiece && wPieces ? newPricePerPiece * wPieces : null
-      updateData = { ...updateData, price_per_piece: newPricePerPiece, expected_sale_revenue: newRevenue }
+    // Revenue from pieces × price/piece (price/piece is edited via pricing form, not derived from weight×kilo here)
+    if (field === 'warehouse_confirmed_pieces') {
+      const pieces = parseInt(value, 10)
+      const pPerPiece = Number(presale?.price_per_piece ?? 0)
+      const newRevenue = !isNaN(pieces) && pPerPiece ? pPerPiece * pieces : null
+      updateData = { ...updateData, expected_sale_revenue: newRevenue }
     }
 
     // If approved → set status to 'altered' and needs_review = true
@@ -264,6 +277,50 @@ export default function PresaleDetailPage() {
     setEditField(null)
     load()
     setOverrideConfirmed(false)
+  }
+
+  async function savePricingEdit() {
+    if (hasActiveSalesOrder && !overrideConfirmed) return
+    if (!presale) return
+    setSavingPricing(true)
+    try {
+      const supabase = createClient()
+      const wasApproved = presale.approval_status === 'approved'
+      const wasReviewed = presale.approval_status === 'reviewed'
+
+      const w = editForm.warehouse_confirmed_avg_weight.trim()
+      const k = editForm.price_per_kilo.trim()
+      const p = editForm.price_per_piece.trim()
+
+      const wNum = w === '' ? null : parseFloat(w)
+      const kNum = k === '' ? null : parseFloat(k)
+      const pNum = p === '' ? null : parseFloat(p)
+
+      const pieces = Number(presale.warehouse_confirmed_pieces ?? 0)
+      const newRevenue = pNum != null && pieces > 0 ? pNum * pieces : null
+
+      let updateData: Record<string, unknown> = {
+        warehouse_confirmed_avg_weight: wNum,
+        price_per_kilo: kNum,
+        price_per_piece: pNum,
+        expected_sale_revenue: newRevenue,
+      }
+
+      if (wasApproved) {
+        updateData.status = 'altered'
+        updateData.needs_review = true
+        updateData.approval_status = 'not_approved'
+      } else if (wasReviewed) {
+        updateData.needs_review = true
+      }
+
+      await supabase.from('presales').update(updateData).eq('id', presaleId)
+      await logActivity('Updated pricing fields', 'pricing', '', '')
+      load()
+      setOverrideConfirmed(false)
+    } finally {
+      setSavingPricing(false)
+    }
   }
 
   async function submitWorkflow() {
@@ -464,6 +521,13 @@ export default function PresaleDetailPage() {
   )
 
   if (!presale) return <div className="text-center py-16 text-gray-400">Presale not found.</div>
+
+  const pricingLocked = !editOpen || (hasActiveSalesOrder && !overrideConfirmed)
+  const ppLive = parseFloat(editForm.price_per_piece)
+  const pricingRevenueLive =
+    editForm.price_per_piece.trim() !== '' && !isNaN(ppLive) && presale.warehouse_confirmed_pieces != null
+      ? ppLive * Number(presale.warehouse_confirmed_pieces)
+      : null
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -690,25 +754,90 @@ export default function PresaleDetailPage() {
         {activeTab === 'details' && (
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
-              <EditableField fieldKey="warehouse_confirmed_avg_weight" label="W/H avg weight (kg)"
-                value={presale.warehouse_confirmed_avg_weight?.toString() ?? ''} type="number" />
+              <div>
+                <label className="block text-xs text-gray-400 uppercase tracking-wide mb-1">W/H avg weight (kg)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editForm.warehouse_confirmed_avg_weight}
+                  onChange={e => {
+                    const weight = e.target.value
+                    setEditForm(f => {
+                      const piece = f.price_per_kilo && weight
+                        ? (parseFloat(f.price_per_kilo) * parseFloat(weight)).toFixed(4)
+                        : f.price_per_piece
+                      return { ...f, warehouse_confirmed_avg_weight: weight, price_per_piece: piece }
+                    })
+                  }}
+                  disabled={pricingLocked}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  placeholder="0.00"
+                />
+              </div>
               <EditableField fieldKey="warehouse_confirmed_pieces" label="W/H confirmed pieces"
                 value={presale.warehouse_confirmed_pieces?.toString() ?? ''} type="number" />
               <EditableField fieldKey="supplier_loaded_pieces" label="Supplier loaded pieces"
                 value={presale.supplier_loaded_pieces?.toString() ?? ''} type="number" />
-              <EditableField fieldKey="price_per_kilo" label="Price per kilo (₦)"
-                value={presale.price_per_kilo?.toString() ?? ''} type="number" />
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Price per piece (₦)</p>
-                <div className={`px-2 py-1.5 rounded-lg text-sm border ${presale.price_per_piece ? 'bg-brand-50 border-brand-200 text-brand-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                  {presale.price_per_piece ? fmt(presale.price_per_piece) : '—'}
-                </div>
+                <label className="block text-xs text-gray-400 uppercase tracking-wide mb-1">Price per kilo (₦)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editForm.price_per_kilo}
+                  onChange={e => {
+                    const kilo = e.target.value
+                    setEditForm(f => {
+                      const weight = f.warehouse_confirmed_avg_weight
+                      const piece = kilo && weight
+                        ? (parseFloat(kilo) * parseFloat(weight)).toFixed(4)
+                        : f.price_per_piece
+                      return { ...f, price_per_kilo: kilo, price_per_piece: piece }
+                    })
+                  }}
+                  disabled={pricingLocked}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 uppercase tracking-wide mb-1">Price per piece (₦)</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  value={editForm.price_per_piece}
+                  onChange={e => {
+                    const piece = e.target.value
+                    setEditForm(f => {
+                      const weight = f.warehouse_confirmed_avg_weight
+                      const kilo = piece && weight && parseFloat(weight) > 0
+                        ? (parseFloat(piece) / parseFloat(weight)).toFixed(4)
+                        : f.price_per_kilo
+                      return { ...f, price_per_piece: piece, price_per_kilo: kilo }
+                    })
+                  }}
+                  disabled={pricingLocked}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  placeholder="0.0000"
+                />
               </div>
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Expected sale revenue (₦)</p>
-                <div className={`px-2 py-1.5 rounded-lg text-sm border ${presale.expected_sale_revenue ? 'bg-green-50 border-green-200 text-green-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                  {presale.expected_sale_revenue ? fmt(presale.expected_sale_revenue) : '—'}
+                <div className={`px-2 py-1.5 rounded-lg text-sm border ${(pricingRevenueLive ?? presale.expected_sale_revenue) != null ? 'bg-green-50 border-green-200 text-green-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                  {(pricingRevenueLive ?? presale.expected_sale_revenue) != null
+                    ? fmt((pricingRevenueLive ?? presale.expected_sale_revenue)!)
+                    : '—'}
                 </div>
+              </div>
+              <div className="col-span-2 md:col-span-3 flex justify-end">
+                <button type="button"
+                  disabled={pricingLocked || savingPricing}
+                  onClick={() => void savePricingEdit()}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                  {savingPricing ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save pricing'}
+                </button>
               </div>
               {presale.sale_type === 'split_sale' && (
                 <EditableField fieldKey="total_number_of_pallets" label="Total number of pallets"

@@ -39,14 +39,12 @@ export default function CreatePresalePage() {
   const [warehousePieces, setWarehousePieces] = useState('')
   const [supplierLoadedPieces, setSupplierLoadedPieces] = useState('')
   const [pricePerKilo, setPricePerKilo] = useState('')
+  const [pricePerPiece, setPricePerPiece] = useState('')
   const [totalPallets, setTotalPallets] = useState('')
   const [palletRows, setPalletRows] = useState<PalletRow[]>([{ pallet_pieces: '', number_of_pallets: '' }])
 
-  const pricePerPiece = warehouseAvgWeight && pricePerKilo
-    ? parseFloat(warehouseAvgWeight) * parseFloat(pricePerKilo)
-    : null
   const expectedRevenue = pricePerPiece && warehousePieces
-    ? pricePerPiece * parseFloat(warehousePieces)
+    ? parseFloat(pricePerPiece) * parseFloat(warehousePieces)
     : null
 
   // Pallet validation
@@ -119,7 +117,7 @@ export default function CreatePresalePage() {
       warehouse_confirmed_pieces: warehousePieces ? parseInt(warehousePieces) : null,
       supplier_loaded_pieces: supplierLoadedPieces ? parseInt(supplierLoadedPieces) : null,
       price_per_kilo: pricePerKilo ? parseFloat(pricePerKilo) : null,
-      price_per_piece: pricePerPiece,
+      price_per_piece: pricePerPiece ? parseFloat(pricePerPiece) : null,
       expected_sale_revenue: expectedRevenue,
       total_number_of_pallets: saleType === 'split_sale' && totalPallets ? parseInt(totalPallets) : null,
       created_by: user?.id,
@@ -258,7 +256,14 @@ export default function CreatePresalePage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">W/H avg weight (kg)</label>
                 <input type="number" step="0.01" value={warehouseAvgWeight}
-                  onChange={e => setWarehouseAvgWeight(e.target.value)}
+                  onChange={e => {
+                    const weight = e.target.value
+                    setWarehouseAvgWeight(weight)
+                    if (weight && pricePerKilo) {
+                      const piece = parseFloat(weight) * parseFloat(pricePerKilo)
+                      if (!isNaN(piece)) setPricePerPiece(piece.toFixed(4))
+                    }
+                  }}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                   placeholder="0.00" />
               </div>
@@ -278,18 +283,33 @@ export default function CreatePresalePage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Price per kilo (₦)</label>
-                <input type="number" step="0.01" value={pricePerKilo}
-                  onChange={e => setPricePerKilo(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  placeholder="₦0.00" />
+                <input value={pricePerKilo}
+                  onChange={e => {
+                    const kilo = e.target.value
+                    setPricePerKilo(kilo)
+                    if (kilo && warehouseAvgWeight) {
+                      const piece = parseFloat(kilo) * parseFloat(warehouseAvgWeight)
+                      if (!isNaN(piece)) setPricePerPiece(piece.toFixed(4))
+                    }
+                  }}
+                  type="number" step="0.01" min="0"
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Price per piece (₦)</label>
-                <div className={`px-3 py-2 text-sm rounded-lg border ${pricePerPiece ? 'bg-brand-50 border-brand-200 text-brand-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                  {pricePerPiece
-                    ? `₦${pricePerPiece.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : '—'}
-                </div>
+                <input value={pricePerPiece}
+                  onChange={e => {
+                    const piece = e.target.value
+                    setPricePerPiece(piece)
+                    if (piece && warehouseAvgWeight && parseFloat(warehouseAvgWeight) > 0) {
+                      const kilo = parseFloat(piece) / parseFloat(warehouseAvgWeight)
+                      if (!isNaN(kilo)) setPricePerKilo(kilo.toFixed(4))
+                    }
+                  }}
+                  type="number" step="0.0001" min="0"
+                  placeholder="0.0000"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Expected sale revenue (₦)</label>

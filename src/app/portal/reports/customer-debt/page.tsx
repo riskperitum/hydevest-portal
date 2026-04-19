@@ -57,7 +57,11 @@ export default function CustomerDebtReportPage() {
     const supabase = createClient()
 
     const [{ data: orders }, { data: recoveries }, { data: customers }] = await Promise.all([
-      supabase.from('sales_orders').select('id, customer_id, customer_payable, outstanding_balance, payment_status, created_at'),
+      supabase.from('sales_orders')
+        .select('id, customer_id, customer_payable, outstanding_balance, payment_status, created_at')
+        .gt('outstanding_balance', 0)
+        .neq('payment_status', 'paid')
+        .or('write_off_status.is.null,write_off_status.neq.approved'),
       supabase.from('recoveries').select('sales_order_id, amount_paid, payment_date, payment_type'),
       supabase.from('customers').select('id, customer_id, name, phone, is_active').eq('is_active', true),
     ])

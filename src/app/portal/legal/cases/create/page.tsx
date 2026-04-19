@@ -199,7 +199,7 @@ export default function CreateLegalCasePage() {
           <div className="p-5 space-y-3">
             {/* Selected customer tags */}
             {selectedCustomers.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
+              <div className="flex flex-wrap gap-2">
                 {selectedCustomers.map(c => (
                   <div key={c.id}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border"
@@ -207,7 +207,7 @@ export default function CreateLegalCasePage() {
                     <span>{c.name}</span>
                     <span className="opacity-50 text-xs">({c.customer_id})</span>
                     <button type="button" onClick={() => removeCustomer(c.id)}
-                      className="ml-1 hover:opacity-60 transition-opacity">
+                      className="ml-1 hover:opacity-60">
                       <X size={12} />
                     </button>
                   </div>
@@ -215,49 +215,59 @@ export default function CreateLegalCasePage() {
               </div>
             )}
 
-            {/* Search input */}
-            <div className="flex gap-2">
+            {/* Searchable select */}
+            <div className="space-y-2">
               <input
-                list="customer-list"
                 value={customerSearch}
                 onChange={e => setCustomerSearch(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    const match = customers.find(c =>
-                      `${c.name} (${c.customer_id})` === customerSearch ||
-                      c.name.toLowerCase() === customerSearch.toLowerCase() ||
-                      c.customer_id.toLowerCase() === customerSearch.toLowerCase()
+                placeholder="Type to filter customers..."
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+
+              {customerSearch.length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                  {customers
+                    .filter(c =>
+                      !selectedCustomers.find(sc => sc.id === c.id) &&
+                      (c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                       c.customer_id.toLowerCase().includes(customerSearch.toLowerCase()))
                     )
-                    if (match) { addCustomer(match); }
+                    .slice(0, 8)
+                    .map(c => (
+                      <button key={c.id} type="button"
+                        onClick={() => addCustomer(c)}
+                        className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0 transition-colors">
+                        <span className="text-sm font-semibold text-gray-900">{c.name}</span>
+                        <span className="text-xs font-mono bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{c.customer_id}</span>
+                      </button>
+                    ))
                   }
-                }}
-                placeholder="Type to search and add customers..."
-                className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <button type="button"
-                onClick={() => {
-                  const match = customers.find(c =>
-                    `${c.name} (${c.customer_id})` === customerSearch ||
-                    c.name.toLowerCase() === customerSearch.toLowerCase() ||
-                    c.customer_id.toLowerCase() === customerSearch.toLowerCase()
-                  )
-                  if (match) addCustomer(match)
-                }}
-                className="px-4 py-2.5 text-sm font-semibold text-white rounded-lg hover:opacity-90 whitespace-nowrap"
-                style={{ background: '#55249E' }}>
-                Add
-              </button>
+                  {customers.filter(c =>
+                    !selectedCustomers.find(sc => sc.id === c.id) &&
+                    (c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                     c.customer_id.toLowerCase().includes(customerSearch.toLowerCase()))
+                  ).length === 0 && (
+                    <div className="px-4 py-3 text-sm text-gray-400">No customers found</div>
+                  )}
+                </div>
+              )}
+
+              {customerSearch.length === 0 && customers.filter(c => !selectedCustomers.find(sc => sc.id === c.id)).length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm max-h-48 overflow-y-auto">
+                  {customers
+                    .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
+                    .map(c => (
+                      <button key={c.id} type="button"
+                        onClick={() => addCustomer(c)}
+                        className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0 transition-colors">
+                        <span className="text-sm font-semibold text-gray-900">{c.name}</span>
+                        <span className="text-xs font-mono bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{c.customer_id}</span>
+                      </button>
+                    ))
+                  }
+                </div>
+              )}
             </div>
-            <datalist id="customer-list">
-              {customers
-                .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
-                .map(c => (
-                  <option key={c.id} value={`${c.name} (${c.customer_id})`} />
-                ))}
-            </datalist>
-            <p className="text-xs text-gray-400">
-              Search by name or customer ID. Press Enter or click Add to tag a customer.
-            </p>
+            <p className="text-xs text-gray-400">Click a customer to tag them. Multiple customers can be added.</p>
           </div>
         </div>
 

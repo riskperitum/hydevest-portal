@@ -18,6 +18,7 @@ export default function CreateLegalCasePage() {
   const [customers, setCustomers]   = useState<Customer[]>([])
   const [employees, setEmployees]   = useState<any[]>([])
   const [selectedCustomers, setSelectedCustomers] = useState<Customer[]>([])
+  const [customerSearch, setCustomerSearch] = useState('')
 
   const [form, setForm] = useState({
     title:       '',
@@ -42,6 +43,7 @@ export default function CreateLegalCasePage() {
   function addCustomer(customer: Customer) {
     if (!selectedCustomers.find(c => c.id === customer.id)) {
       setSelectedCustomers(prev => [...prev, customer])
+      setCustomerSearch('')
     }
   }
 
@@ -210,22 +212,36 @@ export default function CreateLegalCasePage() {
                 ))}
               </div>
             )}
-            <select
-              onChange={e => {
-                const selected = customers.find(c => c.id === e.target.value)
-                if (selected) addCustomer(selected)
-                e.target.value = ''
-              }}
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-              <option value="">Select a customer to add...</option>
-              {customers
-                .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
-                .map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.customer_id})
-                  </option>
-                ))}
-            </select>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  list="customer-list"
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Type to search customers..."
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                <datalist id="customer-list">
+                  {customers
+                    .filter(c => !selectedCustomers.find(sc => sc.id === c.id))
+                    .map(c => (
+                      <option key={c.id} value={`${c.name} (${c.customer_id})`} />
+                    ))}
+                </datalist>
+              </div>
+              <button type="button"
+                onClick={() => {
+                  const match = customers.find(c =>
+                    `${c.name} (${c.customer_id})` === customerSearch ||
+                    c.name.toLowerCase() === customerSearch.toLowerCase() ||
+                    c.customer_id.toLowerCase() === customerSearch.toLowerCase()
+                  )
+                  if (match) addCustomer(match)
+                }}
+                className="px-4 py-2.5 text-sm font-medium text-white rounded-lg hover:opacity-90 whitespace-nowrap"
+                style={{ background: '#55249E' }}>
+                Add
+              </button>
+            </div>
           </div>
         </div>
 

@@ -36,6 +36,7 @@ interface ContainerGroup {
   container_db_id: string
   tracking_number: string | null
   hide_type: string | null
+  sale_type: string | null
   orders: SalesOrder[]
   total_revenue: number
   total_outstanding: number
@@ -88,6 +89,7 @@ export default function SalesOrdersPage() {
           container_db_id: String(cDbId),
           tracking_number: (order.container as { tracking_number?: string | null } | null)?.tracking_number ?? null,
           hide_type:       (order.container as { hide_type?: string | null } | null)?.hide_type ?? null,
+          sale_type:       (order.presale as { sale_type?: string } | null)?.sale_type ?? null,
           orders:          [],
           total_revenue:    0,
           total_outstanding: 0,
@@ -155,11 +157,12 @@ export default function SalesOrdersPage() {
       </div>
 
       {/* Summary KPIs */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total revenue',     value: fmt(totalRevenue),     color: 'text-green-700',  bg: 'bg-green-50',  icon: <TrendingUp size={15} className="text-green-600" /> },
-          { label: 'Total collected',   value: fmt(totalCollected),   color: 'text-brand-700',  bg: 'bg-brand-50',  icon: <CheckCircle2 size={15} className="text-brand-600" /> },
-          { label: 'Total outstanding', value: fmt(totalOutstanding), color: 'text-amber-700',  bg: 'bg-amber-50',  icon: <Clock size={15} className="text-amber-600" /> },
+          { label: 'Total sales orders', value: totalOrders.toString(), color: 'text-blue-700',   bg: 'bg-blue-50',   icon: <Package size={15} className="text-blue-600" /> },
+          { label: 'Total revenue',      value: fmt(totalRevenue),       color: 'text-green-700',  bg: 'bg-green-50',  icon: <TrendingUp size={15} className="text-green-600" /> },
+          { label: 'Total collected',    value: fmt(totalCollected),     color: 'text-brand-700',  bg: 'bg-brand-50',  icon: <CheckCircle2 size={15} className="text-brand-600" /> },
+          { label: 'Total outstanding',  value: fmt(totalOutstanding),   color: 'text-amber-700',  bg: 'bg-amber-50',  icon: <Clock size={15} className="text-amber-600" /> },
         ].map(m => (
           <div key={m.label} className={`${m.bg} rounded-xl p-4 border border-white shadow-sm`}>
             <div className="flex items-center gap-2 mb-1">{m.icon}<p className="text-xs text-gray-500">{m.label}</p></div>
@@ -211,15 +214,21 @@ export default function SalesOrdersPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-sm font-semibold text-brand-700">
-                        {group.container_id}
+                      <span className="font-mono text-sm font-semibold text-gray-900">
+                        {group.tracking_number ?? group.container_id}
                       </span>
-                      {group.tracking_number && (
-                        <span className="text-xs text-gray-400">{group.tracking_number}</span>
-                      )}
+                      <span className="text-xs text-gray-400 font-mono">
+                        {group.tracking_number ? group.container_id : ''}
+                      </span>
                       {group.hide_type && (
                         <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded capitalize">
                           {group.hide_type}
+                        </span>
+                      )}
+                      {group.sale_type && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium capitalize
+                          ${group.sale_type === 'box_sale' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+                          {group.sale_type.replace('_', ' ')}
                         </span>
                       )}
                       <span className="text-xs bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded font-medium">
@@ -250,6 +259,16 @@ export default function SalesOrdersPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation()
+                        router.push(`/portal/sales/orders/container/${group.container_db_id}`)
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-brand-600 transition-colors"
+                      title="View all orders for this container">
+                      <Eye size={15} />
+                    </button>
                     <button
                       type="button"
                       onClick={e => {

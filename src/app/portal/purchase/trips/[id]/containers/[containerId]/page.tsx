@@ -767,34 +767,31 @@ export default function ContainerDetailPage() {
         <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
           <EditableField fieldKey="pieces_purchased" label="Pieces purchased" value={container.pieces_purchased?.toString() ?? ''} type="number" placeholder="0" />
           {canViewCosts && (
-            <div>
-              <EditableField fieldKey="unit_price_usd" label="Unit price (USD)" value={container.unit_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
-            </div>
-          )}
-          {canViewCosts && (
-            <div>
-              <EditableField fieldKey="shipping_amount_usd" label="Shipping amount (USD)" value={container.shipping_amount_usd?.toString() ?? ''} type="number" placeholder="0.00" />
-            </div>
-          )}
-          {isPartner && (
             <>
-              {canViewCosts && (
-                <div>
-                  <EditableField fieldKey="quoted_price_usd" label="Quoted price (USD)" value={container.quoted_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
-                </div>
-              )}
-              <EditableField fieldKey="surcharge_ngn" label="Surcharge (₦)" value={container.surcharge_ngn?.toString() ?? ''} type="number" placeholder="0.00" />
-              {canViewCosts && (
+              <div>
+                <EditableField fieldKey="unit_price_usd" label="Unit price (USD)" value={container.unit_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+              </div>
+              <div>
+                <EditableField fieldKey="shipping_amount_usd" label="Shipping amount (USD)" value={container.shipping_amount_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+              </div>
+              {isPartner ? (
+                <>
+                  <div>
+                    <EditableField fieldKey="quoted_price_usd" label="Quoted price (USD)" value={container.quoted_price_usd?.toString() ?? ''} type="number" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <EditableField fieldKey="surcharge_ngn" label="Surcharge (₦)" value={container.surcharge_ngn?.toString() ?? ''} type="number" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
+                  </div>
+                </>
+              ) : (
                 <div>
                   <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
                 </div>
               )}
             </>
-          )}
-          {!isPartner && canViewCosts && (
-            <div>
-              <EditableField fieldKey="estimated_landing_cost" label="Estimated landing cost" value={container.estimated_landing_cost?.toString() ?? ''} type="number" placeholder="0.00" />
-            </div>
           )}
         </div>
 
@@ -836,7 +833,8 @@ export default function ContainerDetailPage() {
         )}
       </div>
 
-      {/* ── SECTION 4: Attachments ── */}
+      {/* ── SECTION 4: Attachments (editors & override only — no separate Documents tab) ── */}
+      {(canEdit || canOverride) && (
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">Attachments</h2>
@@ -876,6 +874,7 @@ export default function ContainerDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* ── SECTION 5: Comments & Activity ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">

@@ -79,7 +79,6 @@ const NAV: NavItem[] = [
       { label: 'Supplier payables', href: '/portal/reports/supplier-payables', icon: BarChart2 },
       { label: 'Container profit', href: '/portal/reports/container-profit', icon: TrendingUp },
       { label: 'Supplier receivables', href: '/portal/reports/supplier-receivables', icon: BarChart2 },
-      { label: 'Customer profiles', href: '/portal/accounts/customers', icon: Users },
     ],
   },
   { label: 'Accounts',    href: '/portal/accounts',   icon: Users },

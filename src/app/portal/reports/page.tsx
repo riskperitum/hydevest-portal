@@ -66,6 +66,16 @@ const REPORTS = [
     tag: 'Purchase',
     tagColor: 'bg-purple-50 text-purple-700',
   },
+  {
+    href: '/portal/accounts/customers',
+    icon: <Users size={24} className="text-brand-600" />,
+    title: 'Customer profiles',
+    description: 'Full 360° view of each customer — orders, payments, bad debts and legal cases',
+    color: 'bg-brand-50 border-brand-100 text-brand-600',
+    iconBg: 'bg-brand-100',
+    tag: 'Accounts',
+    tagColor: 'bg-brand-50 text-brand-700',
+  },
 ]
 
 export default function ReportsPage() {

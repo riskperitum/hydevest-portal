@@ -170,6 +170,7 @@ export default function CreateLegalCasePage() {
                   <option value="open">Open</option>
                   <option value="in_progress">In progress</option>
                   <option value="pending_court">Pending court</option>
+                  <option value="policy_arrest">Policy arrest</option>
                   <option value="settled">Settled</option>
                   <option value="closed">Closed</option>
                   <option value="won">Won</option>
@@ -223,16 +224,23 @@ export default function CreateLegalCasePage() {
               <input value={customerSearch}
                 onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true) }}
                 onFocus={() => setShowCustomerDropdown(true)}
+                onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
                 placeholder="Search and add customers..."
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               {showCustomerDropdown && filteredCustomers.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 max-h-48 overflow-y-auto">
+                <div className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-56 overflow-y-auto"
+                  style={{
+                    width: 420,
+                    top: 'auto',
+                    left: 'auto',
+                  }}>
                   {filteredCustomers.slice(0, 8).map(c => (
                     <button key={c.id} type="button"
+                      onMouseDown={e => e.preventDefault()}
                       onClick={() => addCustomer(c)}
-                      className="w-full px-3 py-2.5 text-left hover:bg-gray-50 flex items-center justify-between">
+                      className="w-full px-4 py-3 text-left hover:bg-brand-50 flex items-center justify-between border-b border-gray-50 last:border-0">
                       <span className="text-sm font-medium text-gray-800">{c.name}</span>
-                      <span className="text-xs text-gray-400">{c.customer_id}</span>
+                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">{c.customer_id}</span>
                     </button>
                   ))}
                 </div>

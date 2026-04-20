@@ -78,6 +78,8 @@ export default function TripsPage() {
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
   const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canCreateTrip = isSuperAdmin || can(permissions, isSuperAdmin, 'trips.create')
+  const canDeleteTrip = isSuperAdmin || can(permissions, isSuperAdmin, 'trips.delete')
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -122,6 +124,7 @@ export default function TripsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
+    if (!canCreateTrip) return
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -141,6 +144,7 @@ export default function TripsPage() {
 
   async function submitWorkflow() {
     if (!assignee || !workflowType || !workflowTrip) return
+    if (workflowType === 'delete' && !canDeleteTrip) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -365,10 +369,12 @@ export default function TripsPage() {
           <h1 className="text-xl font-semibold text-gray-900">Trips</h1>
           <p className="text-sm text-gray-400 mt-0.5">{trips.length} total trip{trips.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-          <Plus size={16} /> <span className="hidden sm:inline">Create trip</span>
-        </button>
+        {canCreateTrip && (
+          <button onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+            <Plus size={16} /> <span className="hidden sm:inline">Create trip</span>
+          </button>
+        )}
       </div>
 
       {/* Search + Filters */}
@@ -602,15 +608,17 @@ export default function TripsPage() {
                         </button>
 
                         {/* Request delete */}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setWorkflowTrip(trip); setWorkflowType('delete') }}
-                          disabled={deletingId === trip.id}
-                          title="Request deletion"
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
-                          {deletingId === trip.id
-                            ? <Loader2 size={15} className="animate-spin" />
-                            : <Trash2 size={15} />}
-                        </button>
+                        {canDeleteTrip && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setWorkflowTrip(trip); setWorkflowType('delete') }}
+                            disabled={deletingId === trip.id}
+                            title="Request deletion"
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                            {deletingId === trip.id
+                              ? <Loader2 size={15} className="animate-spin" />
+                              : <Trash2 size={15} />}
+                          </button>
+                        )}
 
                         {/* Approval action for admin/super admin */}
                         {canSelfApprove && (trip.approval_status === 'pending' || trip.approval_status === 'pending_review') && (
@@ -784,7 +792,8 @@ export default function TripsPage() {
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
-            <button type="button" onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+            <button type="button" onClick={submitWorkflow}
+              disabled={submittingWorkflow || !assignee || (workflowType === 'delete' && !canDeleteTrip)}
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete'
                   ? 'bg-red-600 text-white hover:bg-red-700'

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import {
   BarChart3, Wallet, Building2, FileText,
   Settings, TrendingUp, TrendingDown, Scale,
-  BookOpen, Plus, Loader2, PieChart,
+  BookOpen, PieChart,
   ArrowUpRight, ArrowDownRight, Users
 } from 'lucide-react'
 import JournalsTab    from './components/JournalsTab'
@@ -17,6 +17,7 @@ import ReportsTab     from './components/ReportsTab'
 import DirectorsTab   from './components/DirectorsTab'
 import SettingsTab    from './components/SettingsTab'
 import PermissionGate from '@/components/ui/PermissionGate'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface FinancePeriod {
   id: string
@@ -65,6 +66,12 @@ export default function FinancePage() {
   const [usdRate, setUsdRate] = useState(1470.46)
   const [showUSD, setShowUSD] = useState(false)
   const [companyName, setCompanyName] = useState('Hydevest Solutions Limited')
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canManageJournals  = isSuperAdmin || can(permissions, isSuperAdmin, 'finance.manage_journals')
+  const canManageBanks     = isSuperAdmin || can(permissions, isSuperAdmin, 'finance.manage_banks')
+  const canManageAssets    = isSuperAdmin || can(permissions, isSuperAdmin, 'finance.manage_assets')
+  const canManageSettings  = isSuperAdmin || can(permissions, isSuperAdmin, 'finance.manage_settings')
 
   const display = (n: number) => showUSD
     ? `$${(n / usdRate).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -387,13 +394,13 @@ export default function FinancePage() {
               <h3 className="text-sm font-semibold text-gray-600 mb-3">Quick actions</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'New journal entry',    icon: <BookOpen size={15} />,   tab: 'journals',  color: 'bg-brand-50 text-brand-700 hover:bg-brand-100 border-brand-100' },
-                  { label: 'Bank reconciliation',  icon: <Building2 size={15} />,  tab: 'banks',     color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100' },
-                  { label: 'Calculate taxes',      icon: <PieChart size={15} />,   tab: 'taxes',     color: 'bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-100' },
-                  { label: 'Financial reports',    icon: <BarChart3 size={15} />,  tab: 'reports',   color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-100' },
-                ].map(action => (
+                  { label: 'New journal entry',    icon: <BookOpen size={15} />,   tab: 'journals' as const,  color: 'bg-brand-50 text-brand-700 hover:bg-brand-100 border-brand-100',  allowed: canManageJournals },
+                  { label: 'Bank reconciliation',  icon: <Building2 size={15} />,  tab: 'banks' as const,     color: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100',     allowed: canManageBanks },
+                  { label: 'Calculate taxes',      icon: <PieChart size={15} />,   tab: 'taxes' as const,     color: 'bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-100',   allowed: canManageJournals },
+                  { label: 'Financial reports',    icon: <BarChart3 size={15} />,  tab: 'reports' as const,   color: 'bg-green-50 text-green-700 hover:bg-green-100 border-green-100', allowed: true },
+                ].filter(a => a.allowed).map(action => (
                   <button key={action.label}
-                    onClick={() => setActiveTab(action.tab as typeof activeTab)}
+                    onClick={() => setActiveTab(action.tab)}
                     className={`flex items-center gap-3 p-4 rounded-xl border font-medium text-sm transition-colors ${action.color}`}>
                     {action.icon} {action.label}
                   </button>
@@ -404,14 +411,14 @@ export default function FinancePage() {
         )}
 
         {/* SUB-MODULE TABS */}
-        {activeTab === 'journals'  && <JournalsTab  selectedPeriod={selectedPeriod} />}
-        {activeTab === 'accounts'  && <AccountsTab />}
-        {activeTab === 'banks'     && <BanksTab     selectedPeriod={selectedPeriod} />}
-        {activeTab === 'assets'    && <AssetsTab    selectedPeriod={selectedPeriod} />}
-        {activeTab === 'taxes'     && <TaxesTab     selectedPeriod={selectedPeriod} />}
+        {activeTab === 'journals'  && <JournalsTab  selectedPeriod={selectedPeriod} canManageJournals={canManageJournals} />}
+        {activeTab === 'accounts'  && <AccountsTab canManageSettings={canManageSettings} />}
+        {activeTab === 'banks'     && <BanksTab     selectedPeriod={selectedPeriod} canManageBanks={canManageBanks} />}
+        {activeTab === 'assets'    && <AssetsTab    selectedPeriod={selectedPeriod} canManageAssets={canManageAssets} />}
+        {activeTab === 'taxes'     && <TaxesTab     selectedPeriod={selectedPeriod} canManageJournals={canManageJournals} />}
         {activeTab === 'reports'   && <ReportsTab   selectedPeriod={selectedPeriod} usdRate={usdRate} showUSD={showUSD} />}
-        {activeTab === 'directors' && <DirectorsTab />}
-        {activeTab === 'settings'  && <SettingsTab />}
+        {activeTab === 'directors' && <DirectorsTab canManageSettings={canManageSettings} />}
+        {activeTab === 'settings'  && <SettingsTab canManageSettings={canManageSettings} />}
       </div>
     </div>
     </PermissionGate>

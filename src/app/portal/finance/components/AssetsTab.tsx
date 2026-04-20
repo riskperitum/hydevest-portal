@@ -58,7 +58,13 @@ const CATEGORY_LIFE: Record<string, number> = {
   other:            5,
 }
 
-export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }) {
+export default function AssetsTab({
+  selectedPeriod,
+  canManageAssets,
+}: {
+  selectedPeriod: string
+  canManageAssets: boolean
+}) {
   const [assets, setAssets] = useState<Asset[]>([])
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState<'all' | 'tangible' | 'intangible'>('all')
@@ -165,6 +171,7 @@ export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (!canManageAssets) return
     setSaving(true)
     const supabase = createClient()
 
@@ -194,6 +201,7 @@ export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }
   }
 
   async function runDepreciation() {
+    if (!canManageAssets) return
     if (!selectedPeriod) {
       setDepResult('Please select a period first.')
       return
@@ -267,15 +275,19 @@ export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }
           <p className="text-xs text-gray-400 mt-0.5">{filtered.filter(a => !a.is_disposed).length} active assets</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={runDepreciation} disabled={runningDepreciation}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-amber-200 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 disabled:opacity-50">
-            {runningDepreciation ? <Loader2 size={14} className="animate-spin" /> : <TrendingDown size={14} />}
-            Run depreciation
-          </button>
-          <button onClick={openAdd}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-            <Plus size={14} /> Add asset
-          </button>
+          {canManageAssets && (
+            <button onClick={runDepreciation} disabled={runningDepreciation}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-amber-200 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 disabled:opacity-50">
+              {runningDepreciation ? <Loader2 size={14} className="animate-spin" /> : <TrendingDown size={14} />}
+              Run depreciation
+            </button>
+          )}
+          {canManageAssets && (
+            <button onClick={openAdd}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Plus size={14} /> Add asset
+            </button>
+          )}
         </div>
       </div>
 
@@ -392,10 +404,12 @@ export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }
                         </span>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <button onClick={() => openEdit(a)}
-                          className="p-1.5 rounded hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
-                          <Pencil size={13} />
-                        </button>
+                        {canManageAssets && (
+                          <button onClick={() => openEdit(a)}
+                            className="p-1.5 rounded hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
+                            <Pencil size={13} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )
@@ -515,7 +529,7 @@ export default function AssetsTab({ selectedPeriod }: { selectedPeriod: string }
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={!canManageAssets || saving}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editRow ? 'Save changes' : 'Add asset'}
             </button>

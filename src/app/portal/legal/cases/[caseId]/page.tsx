@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Save, Loader2, X, Edit2,
@@ -131,6 +132,13 @@ export default function LegalCasePage() {
   // Add customer to case
   const [addCustomerOpen, setAddCustomerOpen] = useState(false)
   const [customerSearch, setCustomerSearch]   = useState('')
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canEditCases       = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.edit_cases')
+  const canManageTasks     = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_tasks')
+  const canManageComments  = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_comments')
+  const canManagePayments  = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_payments')
+  const canManageDocs      = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_documents')
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -379,14 +387,16 @@ export default function LegalCasePage() {
 
         {/* Update status */}
         <div className="flex items-center gap-2">
-          <select value={legalCase.status}
-            onChange={e => updateStatus(e.target.value)}
-            disabled={updatingStatus}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50">
-            {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
-            ))}
-          </select>
+          {canEditCases && (
+            <select value={legalCase.status}
+              onChange={e => updateStatus(e.target.value)}
+              disabled={updatingStatus}
+              className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50">
+              {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -440,10 +450,12 @@ export default function LegalCasePage() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-800">Associated customers</h3>
-                <button onClick={() => setAddCustomerOpen(!addCustomerOpen)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
-                  <Plus size={12} /> Add customer
-                </button>
+                {canEditCases && (
+                  <button onClick={() => setAddCustomerOpen(!addCustomerOpen)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+                    <Plus size={12} /> Add customer
+                  </button>
+                )}
               </div>
 
               {addCustomerOpen && (
@@ -483,10 +495,12 @@ export default function LegalCasePage() {
                       <button onClick={() => router.push(`/portal/accounts/customers/${c.customer_db_id}`)}>
                         {c.name} <span className="opacity-60 text-xs">({c.customer_id})</span>
                       </button>
-                      <button onClick={() => removeCustomerFromCase(c.id)}
-                        className="hover:opacity-60 ml-1">
-                        <X size={12} />
-                      </button>
+                      {canEditCases && (
+                        <button onClick={() => removeCustomerFromCase(c.id)}
+                          className="hover:opacity-60 ml-1">
+                          <X size={12} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -500,14 +514,16 @@ export default function LegalCasePage() {
           <div className="p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-800">Case tasks</h3>
-              <button onClick={() => setTaskOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
-                style={{ background: '#55249E' }}>
-                <Plus size={12} /> Add task
-              </button>
+              {canManageTasks && (
+                <button onClick={() => setTaskOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+                  style={{ background: '#55249E' }}>
+                  <Plus size={12} /> Add task
+                </button>
+              )}
             </div>
 
-            {taskOpen && (
+            {canManageTasks && taskOpen && (
               <form onSubmit={addTask} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2">
@@ -578,13 +594,15 @@ export default function LegalCasePage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <select value={task.status}
-                          onChange={e => updateTaskStatus(task.id, e.target.value)}
-                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
-                          <option value="open">Open</option>
-                          <option value="in_progress">In progress</option>
-                          <option value="done">Done</option>
-                        </select>
+                        {canManageTasks && (
+                          <select value={task.status}
+                            onChange={e => updateTaskStatus(task.id, e.target.value)}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
+                            <option value="open">Open</option>
+                            <option value="in_progress">In progress</option>
+                            <option value="done">Done</option>
+                          </select>
+                        )}
                       </div>
                     </div>
                   )
@@ -600,25 +618,27 @@ export default function LegalCasePage() {
             <h3 className="text-sm font-semibold text-gray-800">Notes & comments</h3>
 
             {/* Add comment */}
-            <form onSubmit={addComment} className="space-y-2">
-              <textarea rows={3} value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                placeholder="Add a note or comment..."
-                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={isInternal}
-                    onChange={e => setIsInternal(e.target.checked)}
-                    className="rounded" />
-                  <span className="text-xs text-gray-500">Internal note (not visible externally)</span>
-                </label>
-                <button type="submit" disabled={savingComment || !commentText.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg disabled:opacity-50"
-                  style={{ background: '#55249E' }}>
-                  {savingComment ? 'Saving…' : 'Add note'}
-                </button>
-              </div>
-            </form>
+            {canManageComments && (
+              <form onSubmit={addComment} className="space-y-2">
+                <textarea rows={3} value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  placeholder="Add a note or comment..."
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={isInternal}
+                      onChange={e => setIsInternal(e.target.checked)}
+                      className="rounded" />
+                    <span className="text-xs text-gray-500">Internal note (not visible externally)</span>
+                  </label>
+                  <button type="submit" disabled={savingComment || !commentText.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg disabled:opacity-50"
+                    style={{ background: '#55249E' }}>
+                    {savingComment ? 'Saving…' : 'Add note'}
+                  </button>
+                </div>
+              </form>
+            )}
 
             {/* Comments list */}
             {comments.length === 0 ? (
@@ -655,14 +675,16 @@ export default function LegalCasePage() {
                 <h3 className="text-sm font-semibold text-gray-800">Case payments</h3>
                 <p className="text-xs text-gray-400 mt-0.5">Total: {fmt(totalPayments)}</p>
               </div>
-              <button onClick={() => setPaymentOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
-                style={{ background: '#55249E' }}>
-                <Plus size={12} /> Record payment
-              </button>
+              {canManagePayments && (
+                <button onClick={() => setPaymentOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+                  style={{ background: '#55249E' }}>
+                  <Plus size={12} /> Record payment
+                </button>
+              )}
             </div>
 
-            {paymentOpen && (
+            {canManagePayments && paymentOpen && (
               <form onSubmit={addPayment} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
                 <div className="grid grid-cols-3 gap-3">
                   <div>

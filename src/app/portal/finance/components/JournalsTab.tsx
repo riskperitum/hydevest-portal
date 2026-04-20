@@ -61,8 +61,10 @@ const TYPE_COLOR: Record<string, string> = {
 
 export default function JournalsTab({
   selectedPeriod,
+  canManageJournals,
 }: {
   selectedPeriod: string
+  canManageJournals: boolean
 }) {
   const [journals, setJournals] = useState<Journal[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -177,7 +179,7 @@ export default function JournalsTab({
 
   async function saveJournal(e: React.FormEvent) {
     e.preventDefault()
-    if (!canSave) return
+    if (!canManageJournals || !canSave) return
     setSaving(true)
     const supabase = createClient()
 
@@ -218,6 +220,7 @@ export default function JournalsTab({
   }
 
   async function reverseJournal(journal: Journal) {
+    if (!canManageJournals) return
     if (!confirm(`Reverse journal ${journal.journal_id}? This creates a new reversing entry.`)) return
     const supabase = createClient()
     const seq = Date.now().toString().slice(-5)
@@ -263,23 +266,28 @@ export default function JournalsTab({
           <p className="text-xs text-gray-400 mt-0.5">Double-entry bookkeeping ledger</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowAutoJournal(v => !v)}
-            className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors
-              ${showAutoJournal ? 'bg-blue-600 text-white border-blue-600' : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>
-            <RefreshCw size={14} /> Auto-journal
-          </button>
-          <button onClick={() => { setNewOpen(true); setJournalForm(f => ({ ...f, period_id: selectedPeriod })) }}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-            <Plus size={14} /> New journal entry
-          </button>
+          {canManageJournals && (
+            <button onClick={() => setShowAutoJournal(v => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors
+                ${showAutoJournal ? 'bg-blue-600 text-white border-blue-600' : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>
+              <RefreshCw size={14} /> Auto-journal
+            </button>
+          )}
+          {canManageJournals && (
+            <button onClick={() => { setNewOpen(true); setJournalForm(f => ({ ...f, period_id: selectedPeriod })) }}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Plus size={14} /> New journal entry
+            </button>
+          )}
         </div>
       </div>
 
       {/* Auto-journal engine */}
-      {showAutoJournal && (
+      {showAutoJournal && canManageJournals && (
         <div className="bg-white rounded-xl border border-gray-100 p-5">
           <AutoJournalEngine
             selectedPeriod={selectedPeriod}
+            canManageJournals={canManageJournals}
             onComplete={() => { load(); setShowAutoJournal(false) }}
           />
         </div>
@@ -298,10 +306,12 @@ export default function JournalsTab({
           <div className="flex flex-col items-center justify-center py-12 gap-2">
             <BookOpen size={24} className="text-gray-200" />
             <p className="text-sm text-gray-400">No journal entries yet.</p>
-            <button onClick={() => setNewOpen(true)}
-              className="mt-1 text-xs font-medium text-brand-600 hover:underline">
-              Create first journal entry
-            </button>
+            {canManageJournals && (
+              <button onClick={() => setNewOpen(true)}
+                className="mt-1 text-xs font-medium text-brand-600 hover:underline">
+                Create first journal entry
+              </button>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
@@ -377,7 +387,7 @@ export default function JournalsTab({
                     </table>
 
                     {/* Actions */}
-                    {j.status === 'posted' && j.type === 'manual' && (
+                    {canManageJournals && j.status === 'posted' && j.type === 'manual' && (
                       <div className="flex justify-end mt-3 gap-2">
                         <button onClick={() => reverseJournal(j)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-red-200 bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
@@ -446,10 +456,12 @@ export default function JournalsTab({
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-gray-700">Journal lines</label>
-              <button type="button" onClick={addLine}
-                className="text-xs font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1">
-                <Plus size={12} /> Add line
-              </button>
+              {canManageJournals && (
+                <button type="button" onClick={addLine}
+                  className="text-xs font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1">
+                  <Plus size={12} /> Add line
+                </button>
+              )}
             </div>
 
             <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -497,7 +509,7 @@ export default function JournalsTab({
                           className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 text-right" />
                       </td>
                       <td className="px-3 py-2">
-                        {lines.length > 2 && (
+                        {canManageJournals && lines.length > 2 && (
                           <button type="button" onClick={() => removeLine(i)}
                             className="text-gray-300 hover:text-red-500 transition-colors">
                             ×
@@ -539,7 +551,7 @@ export default function JournalsTab({
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving || !canSave}
+            <button type="submit" disabled={!canManageJournals || saving || !canSave}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Posting…</> : <><Check size={14} /> Post journal</>}
             </button>

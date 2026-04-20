@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 import { useRouter } from 'next/navigation'
 import {
   Scale, FileText, DollarSign, Plus, Search,
@@ -61,6 +62,9 @@ export default function LegalPage() {
   const [summary, setSummary] = useState({
     total: 0, open: 0, in_progress: 0, settled: 0,
   })
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canCreateCases = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.create_cases')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,11 +133,13 @@ export default function LegalPage() {
           <p className="text-sm text-gray-400 mt-0.5">Case management, documents and legal payments</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => router.push('/portal/legal/cases/create')}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90"
-            style={{ background: '#55249E' }}>
-            <Plus size={14} /> New case
-          </button>
+          {canCreateCases && (
+            <button onClick={() => router.push('/portal/legal/cases/create')}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:opacity-90"
+              style={{ background: '#55249E' }}>
+              <Plus size={14} /> New case
+            </button>
+          )}
         </div>
       </div>
 
@@ -197,10 +203,12 @@ export default function LegalPage() {
               <div className="flex flex-col items-center justify-center py-12 gap-2">
                 <Scale size={24} className="text-gray-200" />
                 <p className="text-sm text-gray-400">No cases found</p>
-                <button onClick={() => router.push('/portal/legal/cases/create')}
-                  className="text-xs font-medium text-brand-600 hover:underline">
-                  Create first case
-                </button>
+                {canCreateCases && (
+                  <button onClick={() => router.push('/portal/legal/cases/create')}
+                    className="text-xs font-medium text-brand-600 hover:underline">
+                    Create first case
+                  </button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -277,6 +285,9 @@ export default function LegalPage() {
 
 // ── DOCUMENTS TAB ─────────────────────────────────────────────────────────────
 function LegalDocumentsTab() {
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canManageDocs = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_documents')
+
   const [docTab, setDocTab]           = useState<'internal' | 'agreements'>('internal')
   const [docs, setDocs]               = useState<any[]>([])
   const [agreements, setAgreements]   = useState<any[]>([])
@@ -362,14 +373,16 @@ function LegalDocumentsTab() {
             </button>
           ))}
         </div>
-        <button onClick={() => setUploadOpen(true)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
-          style={{ background: '#55249E' }}>
-          <Upload size={12} /> Upload document
-        </button>
+        {canManageDocs && (
+          <button onClick={() => setUploadOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+            style={{ background: '#55249E' }}>
+            <Upload size={12} /> Upload document
+          </button>
+        )}
       </div>
 
-      {uploadOpen && (
+      {canManageDocs && uploadOpen && (
         <form onSubmit={handleUpload} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -471,6 +484,9 @@ function LegalDocumentsTab() {
 
 // ── LEGAL PAYMENTS TAB ────────────────────────────────────────────────────────
 function LegalPaymentsTab() {
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canManagePayments = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_payments')
+
   const [payments, setPayments]     = useState<any[]>([])
   const [loading, setLoading]       = useState(true)
   const [addOpen, setAddOpen]       = useState(false)
@@ -524,14 +540,16 @@ function LegalPaymentsTab() {
           <h3 className="text-sm font-semibold text-gray-800">Legal payments</h3>
           <p className="text-xs text-gray-400 mt-0.5">Standalone legal expenses outside of cases · Total: {fmt(total)}</p>
         </div>
-        <button onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
-          style={{ background: '#55249E' }}>
-          <Plus size={12} /> Add payment
-        </button>
+        {canManagePayments && (
+          <button onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+            style={{ background: '#55249E' }}>
+            <Plus size={12} /> Add payment
+          </button>
+        )}
       </div>
 
-      {addOpen && (
+      {canManagePayments && addOpen && (
         <form onSubmit={handleAdd} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <div>

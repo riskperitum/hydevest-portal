@@ -88,7 +88,9 @@ export default function PresaleDetailPage() {
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canOverride = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
-  const canApprove = canOverride
+  const canEditPresale   = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.edit')
+  const canDeletePresale = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.delete')
+  const canApprove       = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.approve')
 
   const [presale, setPresale] = useState<Presale | null>(null)
   const [pallets, setPallets] = useState<PalletDistribution[]>([])
@@ -580,7 +582,7 @@ export default function PresaleDetailPage() {
               onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
               className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
               autoFocus />
-            {!useAutosave && (
+            {!useAutosave && canEditPresale && (
               <>
                 <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
                   className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
@@ -593,7 +595,7 @@ export default function PresaleDetailPage() {
               </>
             )}
           </div>
-        ) : (
+        ) : canEditPresale ? (
           <button type="button"
             onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
             disabled={!editOpen || (hasActiveSalesOrder && !overrideConfirmed)}
@@ -603,6 +605,12 @@ export default function PresaleDetailPage() {
             </span>
             <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
           </button>
+        ) : (
+          <div className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg">
+            <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+              {value || 'Not set'}
+            </span>
+          </div>
         )}
       </div>
     )
@@ -689,7 +697,7 @@ export default function PresaleDetailPage() {
                 <Lock size={14} />
                 Locked — active sales order
               </div>
-              {canOverride && (
+              {canEditPresale && canOverride && (
                 <button onClick={() => setOverrideOpen(true)}
                   className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
                   <AlertTriangle size={14} /> Override & edit
@@ -697,21 +705,27 @@ export default function PresaleDetailPage() {
               )}
             </div>
           ) : (
-            <button onClick={() => setEditOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-              <Pencil size={14} /> Edit presale
-            </button>
+            canEditPresale && (
+              <button onClick={() => setEditOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                <Pencil size={14} /> Edit presale
+              </button>
+            )
           )}
           {!isApproverMode && (
             <>
-              <button onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">
-                <Eye size={13} /> Request review
-              </button>
-              <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
-                <CheckCircle2 size={13} /> Request approval
-              </button>
+              {canEditPresale && (
+                <button onClick={() => { setWorkflowType('review'); setWorkflowOpen(true) }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">
+                  <Eye size={13} /> Request review
+                </button>
+              )}
+              {canEditPresale && (
+                <button onClick={() => { setWorkflowType('approval'); setWorkflowOpen(true) }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
+                  <CheckCircle2 size={13} /> Request approval
+                </button>
+              )}
             </>
           )}
           {isApproverMode && canApprove && (
@@ -726,10 +740,12 @@ export default function PresaleDetailPage() {
               </button>
             </div>
           )}
-          <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
-            <Trash2 size={13} /> Delete
-          </button>
+          {canDeletePresale && (
+            <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+              <Trash2 size={13} /> Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -939,12 +955,14 @@ export default function PresaleDetailPage() {
                 />
               </div>
               <div className="col-span-2 md:col-span-3 flex justify-end">
-                <button type="button"
-                  disabled={pricingLocked || savingPricing}
-                  onClick={() => void savePricingEdit()}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors">
-                  {savingPricing ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save pricing'}
-                </button>
+                {canEditPresale && (
+                  <button type="button"
+                    disabled={pricingLocked || savingPricing}
+                    onClick={() => void savePricingEdit()}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                    {savingPricing ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save pricing'}
+                  </button>
+                )}
               </div>
               {presale.sale_type === 'split_sale' && (
                 <EditableField fieldKey="total_number_of_pallets" label="Total number of pallets"
@@ -1002,10 +1020,12 @@ export default function PresaleDetailPage() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-700">Pallet distribution</h2>
-            <button onClick={() => setAddPalletOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
-              <Plus size={13} /> Add row
-            </button>
+            {canEditPresale && (
+              <button onClick={() => setAddPalletOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
+                <Plus size={13} /> Add row
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -1025,10 +1045,12 @@ export default function PresaleDetailPage() {
                     <td className="px-4 py-2.5 text-gray-700">{p.number_of_pallets}</td>
                     <td className="px-4 py-2.5 font-semibold text-brand-700">{(p.pallet_pieces * p.number_of_pallets).toLocaleString()}</td>
                     <td className="px-4 py-2.5">
-                      <button onClick={() => deletePalletRow(p.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                        <Trash2 size={13} />
-                      </button>
+                      {canEditPresale && (
+                        <button onClick={() => deletePalletRow(p.id)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

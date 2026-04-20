@@ -111,7 +111,10 @@ export default function SalesOrderDetailPage() {
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
-  const canApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
+  const canEditOrder    = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.edit')
+  const canDeleteOrder  = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.delete')
+  const canApproveOrder = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
+  const canWriteOff     = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.write_off')
 
   const [writeOffOpen, setWriteOffOpen] = useState(false)
   const [writeOffNote, setWriteOffNote] = useState('')
@@ -413,16 +416,20 @@ export default function SalesOrderDetailPage() {
             onChange={e => setFieldValue(e.target.value)}
             className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             autoFocus />
-          <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
-            className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-            <Check size={13} />
-          </button>
-          <button type="button" onClick={() => setEditField(null)}
-            className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
-            <X size={13} />
-          </button>
+          {canEditOrder && (
+            <>
+              <button type="button" onClick={() => updateField(fieldKey, fieldValue)}
+                className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+                <Check size={13} />
+              </button>
+              <button type="button" onClick={() => setEditField(null)}
+                className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
+                <X size={13} />
+              </button>
+            </>
+          )}
         </div>
-      ) : (
+      ) : canEditOrder ? (
         <button type="button"
           onClick={() => { setEditField(fieldKey); setFieldValue(value) }}
           className="group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-brand-50 transition-colors">
@@ -431,6 +438,12 @@ export default function SalesOrderDetailPage() {
           </span>
           <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
         </button>
+      ) : (
+        <div className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg">
+          <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+            {value || 'Not set'}
+          </span>
+        </div>
       )}
     </div>
   )
@@ -506,16 +519,20 @@ export default function SalesOrderDetailPage() {
               autoFocus
               className="flex-1 px-2 py-1.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
             />
-            <button type="button" onClick={() => updateField(fieldKey, localRaw)}
-              className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-              <Check size={13} />
-            </button>
-            <button type="button" onClick={() => setEditField(null)}
-              className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
-              <X size={13} />
-            </button>
+            {canEditOrder && (
+              <>
+                <button type="button" onClick={() => updateField(fieldKey, localRaw)}
+                  className="p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+                  <Check size={13} />
+                </button>
+                <button type="button" onClick={() => setEditField(null)}
+                  className="p-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors shrink-0">
+                  <X size={13} />
+                </button>
+              </>
+            )}
           </div>
-        ) : (
+        ) : canEditOrder ? (
           <button type="button"
             onClick={() => {
               setLocalRaw(value)
@@ -528,6 +545,12 @@ export default function SalesOrderDetailPage() {
             </span>
             <Pencil size={11} className="text-gray-300 group-hover:text-brand-400 shrink-0 transition-colors" />
           </button>
+        ) : (
+          <div className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg">
+            <span className={`text-sm truncate ${value ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+              {value ? `₦${formatDisplayValue(value)}` : 'Not set'}
+            </span>
+          </div>
         )}
       </div>
     )
@@ -611,10 +634,12 @@ export default function SalesOrderDetailPage() {
               <CheckCircle2 size={14} /> Request approval
             </button>
           )}
-          <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
-            <Trash2 size={14} /> Delete
-          </button>
+          {canDeleteOrder && (
+            <button onClick={() => { setWorkflowType('delete'); setWorkflowOpen(true) }}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -751,17 +776,23 @@ export default function SalesOrderDetailPage() {
               )}
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Payment method</p>
-                <select value={order.payment_method}
-                  onChange={async e => {
-                    const supabase = createClient()
-                    await supabase.from('sales_orders').update({ payment_method: e.target.value }).eq('id', orderId)
-                    await logActivity('Updated field', 'payment_method', order.payment_method, e.target.value)
-                    load()
-                  }}
-                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                  <option value="transfer">Bank transfer</option>
-                  <option value="cash">Cash</option>
-                </select>
+                {canEditOrder ? (
+                  <select value={order.payment_method}
+                    onChange={async e => {
+                      const supabase = createClient()
+                      await supabase.from('sales_orders').update({ payment_method: e.target.value }).eq('id', orderId)
+                      await logActivity('Updated field', 'payment_method', order.payment_method, e.target.value)
+                      load()
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                    <option value="transfer">Bank transfer</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                ) : (
+                  <p className="text-sm font-medium text-gray-900">
+                    {order.payment_method === 'cash' ? 'Cash' : 'Bank transfer'}
+                  </p>
+                )}
               </div>
               <AmountEditableField fieldKey="discount" label="Discount (₦)"
                 value={order.discount?.toString() ?? '0'} />
@@ -827,7 +858,7 @@ export default function SalesOrderDetailPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {order.write_off_status === 'pending_approval' && canApprove && (
+                    {order.write_off_status === 'pending_approval' && canApproveOrder && (
                       <>
                         <button type="button" onClick={() => void approveWriteOff()}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700">
@@ -840,13 +871,15 @@ export default function SalesOrderDetailPage() {
                       </>
                     )}
                     {!order.write_off_status || order.write_off_status === 'rejected' ? (
-                      <button type="button" onClick={() => {
-                        setWriteOffAmount(order.outstanding_balance.toString())
-                        setWriteOffOpen(true)
-                      }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
-                        <AlertTriangle size={12} /> Write off as bad debt
-                      </button>
+                      canWriteOff && (
+                        <button type="button" onClick={() => {
+                          setWriteOffAmount(order.outstanding_balance.toString())
+                          setWriteOffOpen(true)
+                        }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
+                          <AlertTriangle size={12} /> Write off as bad debt
+                        </button>
+                      )
                     ) : null}
                   </div>
                 </div>

@@ -20,7 +20,7 @@ interface Director {
   notes: string | null
 }
 
-export default function DirectorsTab() {
+export default function DirectorsTab({ canManageSettings }: { canManageSettings: boolean }) {
   const [directors, setDirectors] = useState<Director[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -73,6 +73,7 @@ export default function DirectorsTab() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (!canManageSettings) return
     setSaving(true)
     const supabase = createClient()
     const seq = Date.now().toString().slice(-4)
@@ -96,6 +97,7 @@ export default function DirectorsTab() {
   }
 
   async function toggleActive(row: Director) {
+    if (!canManageSettings) return
     const supabase = createClient()
     const update: any = { is_active: !row.is_active }
     if (row.is_active) update.resigned_date = new Date().toISOString().split('T')[0]
@@ -116,10 +118,12 @@ export default function DirectorsTab() {
             {activeDirectors.length} active director{activeDirectors.length !== 1 ? 's' : ''} · Total shareholding: {totalShares.toFixed(2)}%
           </p>
         </div>
-        <button onClick={openAdd}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Plus size={14} /> Add director
-        </button>
+        {canManageSettings && (
+          <button onClick={openAdd}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+            <Plus size={14} /> Add director
+          </button>
+        )}
       </div>
 
       {/* Shareholding visual */}
@@ -206,14 +210,18 @@ export default function DirectorsTab() {
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-1">
-                        <button onClick={() => openEdit(d)}
-                          className="p-1.5 rounded hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
-                          <Pencil size={13} />
-                        </button>
-                        <button onClick={() => toggleActive(d)}
-                          className="text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition-colors">
-                          {d.is_active ? 'Resign' : 'Reinstate'}
-                        </button>
+                        {canManageSettings && (
+                          <button onClick={() => openEdit(d)}
+                            className="p-1.5 rounded hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                        {canManageSettings && (
+                          <button onClick={() => toggleActive(d)}
+                            className="text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition-colors">
+                            {d.is_active ? 'Resign' : 'Reinstate'}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -295,7 +303,7 @@ export default function DirectorsTab() {
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={!canManageSettings || saving}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editRow ? 'Save changes' : 'Add director'}
             </button>

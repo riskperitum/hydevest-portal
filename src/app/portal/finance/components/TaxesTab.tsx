@@ -67,8 +67,10 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function TaxesTab({
   selectedPeriod,
+  canManageJournals,
 }: {
   selectedPeriod: string
+  canManageJournals: boolean
 }) {
   const [taxes, setTaxes] = useState<TaxRecord[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -178,7 +180,7 @@ export default function TaxesTab({
   }, [load])
 
   async function calculateTaxes() {
-    if (!selectedPeriod || !settings) return
+    if (!canManageJournals || !selectedPeriod || !settings) return
     setCalculating(true)
     setCalcResult(null)
     const supabase = createClient()
@@ -261,6 +263,7 @@ export default function TaxesTab({
   }
 
   async function updateStatus(id: string, status: string) {
+    if (!canManageJournals) return
     const supabase = createClient()
     const updates: any = { status }
     if (status === 'paid') updates.paid_date = new Date().toISOString().split('T')[0]
@@ -288,11 +291,13 @@ export default function TaxesTab({
           <h2 className="text-sm font-semibold text-gray-800">Nigerian tax compliance</h2>
           <p className="text-xs text-gray-400 mt-0.5">CIT · VAT · Education Tax · NITDA · WHT · PAYE</p>
         </div>
-        <button onClick={calculateTaxes} disabled={calculating || !selectedPeriod}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
-          {calculating ? <Loader2 size={14} className="animate-spin" /> : <Calculator size={14} />}
-          Calculate taxes for {periodName || 'selected period'}
-        </button>
+        {canManageJournals && (
+          <button onClick={calculateTaxes} disabled={calculating || !selectedPeriod}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+            {calculating ? <Loader2 size={14} className="animate-spin" /> : <Calculator size={14} />}
+            Calculate taxes for {periodName || 'selected period'}
+          </button>
+        )}
       </div>
 
       {/* Calc result */}
@@ -360,10 +365,12 @@ export default function TaxesTab({
           <div className="flex flex-col items-center justify-center py-10 gap-2">
             <Calculator size={24} className="text-gray-200" />
             <p className="text-sm text-gray-400">No taxes calculated for this period yet.</p>
-            <button onClick={calculateTaxes} disabled={calculating}
-              className="text-xs font-medium text-brand-600 hover:underline">
-              Run calculation
-            </button>
+            {canManageJournals && (
+              <button onClick={calculateTaxes} disabled={calculating}
+                className="text-xs font-medium text-brand-600 hover:underline">
+                Run calculation
+              </button>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
@@ -419,13 +426,13 @@ export default function TaxesTab({
 
                     {/* Status actions */}
                     <div className="flex items-center gap-2 shrink-0">
-                      {tax.status === 'calculated' && (
+                      {canManageJournals && tax.status === 'calculated' && (
                         <button onClick={() => updateStatus(tax.id, 'filed')}
                           className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100">
                           Mark filed
                         </button>
                       )}
-                      {(tax.status === 'calculated' || tax.status === 'filed') && (
+                      {canManageJournals && (tax.status === 'calculated' || tax.status === 'filed') && (
                         <button onClick={() => updateStatus(tax.id, 'paid')}
                           className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
                           Mark paid

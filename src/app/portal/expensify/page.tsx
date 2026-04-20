@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, Search, Filter, Download, FileText, Pencil, CheckCircle2,
+  Plus, Search, Filter, Download, FileText, Pencil, CheckCircle2, Check,
   Loader2, X, Upload, Eye, Trash2, AlertTriangle,
   Receipt, TrendingDown, DollarSign, Globe
 } from 'lucide-react'
@@ -125,6 +125,9 @@ export default function ExpensifyPage() {
   const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
   const canViewTripExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canViewLegalExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'legal.*')
+  const canCreateExpense  = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.create')
+  const canDeleteExpense  = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.delete')
+  const canApproveExpense = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.approve')
 
   const autoCategory = description.length > 2 ? detectCategory(description) : ''
   const editAutoCategory = editForm.description.length > 2 ? detectCategory(editForm.description) : ''
@@ -222,7 +225,7 @@ export default function ExpensifyPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    if (!effectiveCategory || !amount) return
+    if (!canCreateExpense || !effectiveCategory || !amount) return
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -245,8 +248,21 @@ export default function ExpensifyPage() {
     load()
   }
 
+  async function handleApproveExpense(id: string) {
+    if (!canApproveExpense) return
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('expenses').update({
+      approval_status: 'approved',
+      needs_approval: false,
+      last_approved_by: user?.id ?? null,
+      last_approved_at: new Date().toISOString(),
+    }).eq('id', id)
+    load()
+  }
+
   async function handleDelete(id: string, source: string) {
-    if (source !== 'manual') return
+    if (!canDeleteExpense || source !== 'manual') return
     if (!confirm('Delete this expense?')) return
     const supabase = createClient()
     await supabase.from('expenses').delete().eq('id', id)
@@ -274,6 +290,7 @@ export default function ExpensifyPage() {
 
   async function submitWorkflow() {
     if (!assignee || !workflowType || !workflowExpense) return
+    if (workflowType === 'delete' && !canDeleteExpense) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -398,10 +415,12 @@ export default function ExpensifyPage() {
           <h1 className="text-xl font-semibold text-gray-900">Expensify</h1>
           <p className="text-sm text-gray-400 mt-0.5">{expenses.length} expense{expenses.length !== 1 ? 's' : ''} tracked</p>
         </div>
-        <button onClick={() => { resetForm(); setModalOpen(true) }}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
-          <Plus size={16} /> <span className="hidden sm:inline">Record expense</span>
-        </button>
+        {canCreateExpense && (
+          <button onClick={() => { resetForm(); setModalOpen(true) }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors shrink-0">
+            <Plus size={16} /> <span className="hidden sm:inline">Record expense</span>
+          </button>
+        )}
       </div>
 
       {/* Metrics */}
@@ -646,16 +665,27 @@ export default function ExpensifyPage() {
                           className="p-1.5 rounded-lg hover:bg-green-50 text-gray-300 hover:text-green-600 transition-colors">
                           <CheckCircle2 size={13} />
                         </button>
-                        <button
-                          title="Request deletion"
-                          onClick={() => {
-                            setWorkflowExpense(expense)
-                            setWorkflowType('delete')
-                            setWorkflowOpen(true)
-                          }}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={13} />
-                        </button>
+                        {canApproveExpense && expense.approval_status !== 'approved' && (
+                          <button
+                            type="button"
+                            title="Approve"
+                            onClick={() => void handleApproveExpense(expense.id)}
+                            className="p-1.5 rounded-lg hover:bg-green-50 text-gray-300 hover:text-green-700 transition-colors">
+                            <Check size={13} />
+                          </button>
+                        )}
+                        {canDeleteExpense && (
+                          <button
+                            title="Request deletion"
+                            onClick={() => {
+                              setWorkflowExpense(expense)
+                              setWorkflowType('delete')
+                              setWorkflowOpen(true)
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     )}
                     {expense.source === 'trip' && (
@@ -993,7 +1023,8 @@ export default function ExpensifyPage() {
                 className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+              <button onClick={submitWorkflow}
+                disabled={submittingWorkflow || !assignee || (workflowType === 'delete' && !canDeleteExpense)}
                 className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                   ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
                 {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}

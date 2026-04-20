@@ -48,6 +48,12 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'runs' | 'employees' | 'advances' | 'settings'>('runs')
 
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canRunPayroll       = isSuperAdmin || can(permissions, isSuperAdmin, 'payroll.run')
+  const canManageEmployees  = isSuperAdmin || can(permissions, isSuperAdmin, 'payroll.manage_employees')
+  const canManageAdvances   = isSuperAdmin || can(permissions, isSuperAdmin, 'payroll.manage_advances')
+  const canApprovePayroll   = isSuperAdmin || can(permissions, isSuperAdmin, 'payroll.approve')
+
   const load = useCallback(async () => {
     const supabase = createClient()
 
@@ -94,10 +100,12 @@ export default function PayrollPage() {
           <p className="text-sm text-gray-400 mt-0.5">Nigerian PAYE payroll management</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
-            <Play size={14} /> Run payroll
-          </button>
+          {canRunPayroll && (
+            <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+              <Play size={14} /> Run payroll
+            </button>
+          )}
         </div>
       </div>
 
@@ -136,10 +144,12 @@ export default function PayrollPage() {
           <div className="p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-800">Payroll run history</h3>
-              <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-                <Plus size={12} /> New run
-              </button>
+              {canRunPayroll && (
+                <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                  <Plus size={12} /> New run
+                </button>
+              )}
             </div>
 
             {loading ? (
@@ -150,10 +160,12 @@ export default function PayrollPage() {
               <div className="flex flex-col items-center justify-center py-12 gap-2">
                 <Play size={24} className="text-gray-200" />
                 <p className="text-sm text-gray-400">No payroll runs yet</p>
-                <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
-                  className="text-xs font-medium text-brand-600 hover:underline">
-                  Run first payroll
-                </button>
+                {canRunPayroll && (
+                  <button type="button" onClick={() => router.push('/portal/payroll/run/new')}
+                    className="text-xs font-medium text-brand-600 hover:underline">
+                    Run first payroll
+                  </button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -199,10 +211,14 @@ export default function PayrollPage() {
 
         {/* Other tabs — built as separate components */}
         {activeTab === 'employees' && (
-          <PayrollEmployeesTab onRefresh={load} />
+          <PayrollEmployeesTab onRefresh={load} canManageEmployees={canManageEmployees} />
         )}
         {activeTab === 'advances' && (
-          <PayrollAdvancesTab onRefresh={load} />
+          <PayrollAdvancesTab
+            onRefresh={load}
+            canManageAdvances={canManageAdvances}
+            canApprovePayroll={canApprovePayroll}
+          />
         )}
         {activeTab === 'settings' && (
           <div className="p-5 text-sm text-gray-400">Payroll settings coming soon.</div>
@@ -214,7 +230,7 @@ export default function PayrollPage() {
 }
 
 // ── EMPLOYEES TAB ─────────────────────────────────────────────────────────────
-function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
+function PayrollEmployeesTab({ onRefresh, canManageEmployees }: { onRefresh: () => void; canManageEmployees: boolean }) {
   const router = useRouter()
   const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading]     = useState(true)
@@ -259,6 +275,7 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
   }, [])
 
   async function toggleSalaryEarning(profileId: string, payrollId: string | null, current: boolean) {
+    if (!canManageEmployees) return
     setSaving(profileId)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -314,12 +331,18 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
                 return (
                   <tr key={emp.id} className="hover:bg-gray-50/50">
                     <td className="px-3 py-3">
-                      <button type="button"
-                        onClick={() => toggleSalaryEarning(emp.id, pe?.id ?? null, pe?.is_salary_earning ?? false)}
-                        disabled={saving === emp.id}
-                        className={`w-9 h-5 rounded-full transition-colors relative ${pe?.is_salary_earning ? 'bg-brand-600' : 'bg-gray-200'}`}>
-                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${pe?.is_salary_earning ? 'left-4' : 'left-0.5'}`} />
-                      </button>
+                      {canManageEmployees ? (
+                        <button type="button"
+                          onClick={() => toggleSalaryEarning(emp.id, pe?.id ?? null, pe?.is_salary_earning ?? false)}
+                          disabled={saving === emp.id}
+                          className={`w-9 h-5 rounded-full transition-colors relative ${pe?.is_salary_earning ? 'bg-brand-600' : 'bg-gray-200'}`}>
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${pe?.is_salary_earning ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                      ) : (
+                        <div className={`w-9 h-5 rounded-full relative pointer-events-none ${pe?.is_salary_earning ? 'bg-brand-600' : 'bg-gray-200'}`}>
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow ${pe?.is_salary_earning ? 'left-4' : 'left-0.5'}`} />
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       {pe?.is_pension_enrolled ? (
@@ -346,10 +369,14 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-3">
-                      <button type="button" onClick={() => router.push(`/portal/payroll/employee/${emp.id}`)}
-                        className="text-xs font-medium text-brand-600 hover:underline whitespace-nowrap">
-                        Edit salary →
-                      </button>
+                      {canManageEmployees ? (
+                        <button type="button" onClick={() => router.push(`/portal/payroll/employee/${emp.id}`)}
+                          className="text-xs font-medium text-brand-600 hover:underline whitespace-nowrap">
+                          Edit salary →
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 )
@@ -363,7 +390,15 @@ function PayrollEmployeesTab({ onRefresh }: { onRefresh: () => void }) {
 }
 
 // ── ADVANCES TAB ─────────────────────────────────────────────────────────────
-function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
+function PayrollAdvancesTab({
+  onRefresh,
+  canManageAdvances,
+  canApprovePayroll,
+}: {
+  onRefresh: () => void
+  canManageAdvances: boolean
+  canApprovePayroll: boolean
+}) {
   const [advances, setAdvances]   = useState<any[]>([])
   const [loading, setLoading]     = useState(true)
   const [addOpen, setAddOpen]     = useState(false)
@@ -371,8 +406,6 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
   const [currentUser, setCurrentUser] = useState<{ id: string; isSuperAdmin: boolean } | null>(null)
   const [employees, setEmployees] = useState<any[]>([])
   const [form, setForm]           = useState({ employee_id: '', amount: '', reason: '' })
-  const { permissions, isSuperAdmin } = usePermissions()
-  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
 
   useEffect(() => {
     const supabase = createClient()
@@ -405,13 +438,13 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
 
   async function submitAdvance(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.employee_id || !form.amount) return
+    if (!canManageAdvances || !form.employee_id || !form.amount) return
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     const seq = Date.now().toString().slice(-5)
 
-    const status = canSelfApprove ? 'approved' : 'pending'
+    const status = canApprovePayroll ? 'approved' : 'pending'
 
     await supabase.from('payroll_advances').insert({
       advance_id:   `ADV-${seq}`,
@@ -420,11 +453,11 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
       reason:       form.reason || null,
       status,
       requested_by: user?.id,
-      approved_by:  canSelfApprove ? user?.id : null,
-      approved_at:  canSelfApprove ? new Date().toISOString() : null,
+      approved_by:  canApprovePayroll ? user?.id : null,
+      approved_at:  canApprovePayroll ? new Date().toISOString() : null,
     })
 
-    if (!canSelfApprove) {
+    if (!canApprovePayroll) {
       // Create approval task
       await supabase.from('tasks').insert({
         task_id:      `TASK-${seq}`,
@@ -445,6 +478,7 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
   }
 
   async function approveAdvance(id: string) {
+    if (!canApprovePayroll) return
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     await supabase.from('payroll_advances').update({
@@ -457,6 +491,7 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
   }
 
   async function rejectAdvance(id: string) {
+    if (!canApprovePayroll) return
     const supabase = createClient()
     await supabase.from('payroll_advances').update({ status: 'rejected' }).eq('id', id)
     loadData()
@@ -476,13 +511,15 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
     <div className="p-5 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-800">Salary advances</h3>
-        <button type="button" onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Plus size={12} /> Record advance
-        </button>
+        {canManageAdvances && (
+          <button type="button" onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+            <Plus size={12} /> Record advance
+          </button>
+        )}
       </div>
 
-      {addOpen && (
+      {canManageAdvances && addOpen && (
         <form onSubmit={submitAdvance} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -517,7 +554,7 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
             </button>
             <button type="submit" disabled={saving}
               className="px-3 py-1.5 text-xs font-semibold bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
-              {saving ? 'Saving…' : canSelfApprove ? 'Record & approve' : 'Submit for approval'}
+              {saving ? 'Saving…' : canApprovePayroll ? 'Record & approve' : 'Submit for approval'}
             </button>
           </div>
         </form>
@@ -564,7 +601,7 @@ function PayrollAdvancesTab({ onRefresh }: { onRefresh: () => void }) {
                   {new Date(adv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap">
-                  {adv.status === 'pending' && canSelfApprove && (
+                  {adv.status === 'pending' && canApprovePayroll && (
                     <div className="flex gap-1">
                       <button type="button" onClick={() => approveAdvance(adv.id)}
                         className="text-xs font-medium text-green-600 hover:underline">Approve</button>

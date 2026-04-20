@@ -101,6 +101,10 @@ export default function RecoveryDetailPage() {
 
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewActivity = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
+  const canEditRecovery   = isSuperAdmin || can(permissions, isSuperAdmin, 'recoveries.edit')
+  const canDeleteRecovery = isSuperAdmin || can(permissions, isSuperAdmin, 'recoveries.delete')
+  const canApproveRecovery = isSuperAdmin || can(permissions, isSuperAdmin, 'recoveries.approve')
+
   const displayedTab: 'recoveries' | 'activity' =
     !canViewActivity && activeTab === 'activity' ? 'recoveries' : activeTab
 
@@ -180,7 +184,7 @@ export default function RecoveryDetailPage() {
 
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault()
-    if (!editRecovery) return
+    if (!editRecovery || !canEditRecovery) return
     setSavingEdit(true)
     const supabase = createClient()
     const isCreator = editRecovery.created_by === currentUserId
@@ -241,6 +245,8 @@ export default function RecoveryDetailPage() {
 
   async function submitWorkflow() {
     if (!assignee || !workflowType || !workflowRecovery || !order) return
+    if (workflowType === 'delete' && !canDeleteRecovery) return
+    if (workflowType === 'approval' && !canEditRecovery) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -321,11 +327,13 @@ export default function RecoveryDetailPage() {
             </div>
           </div>
         </div>
-        <Link
-          href={`/portal/recoveries/create?orderId=${order.id}&customerId=${order.customer?.id}&returnTo=${orderId}`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors">
-          + Record recovery
-        </Link>
+        {canEditRecovery && (
+          <Link
+            href={`/portal/recoveries/create?orderId=${order.id}&customerId=${order.customer?.id}&returnTo=${orderId}`}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors">
+            + Record recovery
+          </Link>
+        )}
       </div>
 
       {/* Financial summary cards */}
@@ -561,7 +569,7 @@ export default function RecoveryDetailPage() {
                           </a>
                         ))}
                         {/* Upload more */}
-                        {rec.payment_type !== 'initial' && (
+                        {rec.payment_type !== 'initial' && canEditRecovery && (
                           <label className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 cursor-pointer transition-colors mt-0.5">
                             <Upload size={11} /> Add file
                             <input type="file" multiple className="hidden" onChange={async e => {
@@ -610,18 +618,22 @@ export default function RecoveryDetailPage() {
                       {rec.created_by_profile?.full_name ?? rec.created_by_profile?.email ?? '—'}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      {rec.payment_type !== 'initial' && (
+                      {rec.payment_type !== 'initial' && (canEditRecovery || canDeleteRecovery) && (
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => {
-                            setEditRecovery(rec)
-                            setEditForm({ amount_paid: rec.amount_paid.toString(), payment_date: rec.payment_date, payment_method: rec.payment_method, comments: rec.comments ?? '' })
-                          }} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
-                            <Pencil size={13} />
-                          </button>
-                          <button onClick={() => { setWorkflowRecovery(rec); setWorkflowType('delete'); setWorkflowOpen(true) }}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
-                            <Trash2 size={13} />
-                          </button>
+                          {canEditRecovery && (
+                            <button onClick={() => {
+                              setEditRecovery(rec)
+                              setEditForm({ amount_paid: rec.amount_paid.toString(), payment_date: rec.payment_date, payment_method: rec.payment_method, comments: rec.comments ?? '' })
+                            }} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {canDeleteRecovery && (
+                            <button onClick={() => { setWorkflowRecovery(rec); setWorkflowType('delete'); setWorkflowOpen(true) }}
+                              className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -736,11 +748,13 @@ export default function RecoveryDetailPage() {
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={() => { setEditRecovery(null); setAssignee('') }}
                 className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button type="submit"
-                disabled={savingEdit || (editRecovery.created_by === currentUserId && editRecovery.approval_status === 'approved' && !assignee)}
-                className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save changes'}
-              </button>
+              {canEditRecovery && (
+                <button type="submit"
+                  disabled={savingEdit || (editRecovery.created_by === currentUserId && editRecovery.approval_status === 'approved' && !assignee)}
+                  className="flex-1 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Save changes'}
+                </button>
+              )}
             </div>
           </form>
         )}
@@ -773,7 +787,13 @@ export default function RecoveryDetailPage() {
           <div className="flex gap-3">
             <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null) }}
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+            <button onClick={submitWorkflow}
+              disabled={
+                submittingWorkflow ||
+                !assignee ||
+                (workflowType === 'delete' && !canDeleteRecovery) ||
+                (workflowType === 'approval' && !canEditRecovery)
+              }
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2
                 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
               {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}

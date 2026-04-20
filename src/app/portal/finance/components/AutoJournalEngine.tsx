@@ -23,9 +23,11 @@ interface Period {
 
 export default function AutoJournalEngine({
   selectedPeriod,
+  canManageJournals,
   onComplete,
 }: {
   selectedPeriod: string
+  canManageJournals: boolean
   onComplete: () => void
 }) {
   const [running, setRunning] = useState(false)
@@ -56,7 +58,7 @@ export default function AutoJournalEngine({
   function acct(code: string) { return accounts[code] ?? null }
 
   async function runAutoJournals() {
-    if (!selectedPeriod || !period || !currentUser) return
+    if (!canManageJournals || !selectedPeriod || !period || !currentUser) return
     setRunning(true)
     setResults([])
     const supabase = createClient()
@@ -418,10 +420,12 @@ export default function AutoJournalEngine({
               {new Date(period.period_end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
             </p>
           </div>
-          <button onClick={runAutoJournals} disabled={running}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50">
-            {running ? <><Loader2 size={14} className="animate-spin" /> Running…</> : <><RefreshCw size={14} /> Run auto-journals</>}
-          </button>
+          {canManageJournals && (
+            <button onClick={runAutoJournals} disabled={running}
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50">
+              {running ? <><Loader2 size={14} className="animate-spin" /> Running…</> : <><RefreshCw size={14} /> Run auto-journals</>}
+            </button>
+          )}
         </div>
       )}
 

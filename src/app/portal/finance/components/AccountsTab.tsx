@@ -41,7 +41,7 @@ const SUBTYPES: Record<string, string[]> = {
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-export default function AccountsTab() {
+export default function AccountsTab({ canManageSettings }: { canManageSettings: boolean }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState('all')
@@ -109,6 +109,7 @@ export default function AccountsTab() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (!canManageSettings) return
     setSaving(true)
     const supabase = createClient()
     const payload = {
@@ -129,7 +130,7 @@ export default function AccountsTab() {
   }
 
   async function toggleActive(row: Account) {
-    if (row.is_system) return
+    if (!canManageSettings || row.is_system) return
     const supabase = createClient()
     await supabase.from('finance_accounts').update({ is_active: !row.is_active }).eq('id', row.id)
     load()
@@ -158,10 +159,12 @@ export default function AccountsTab() {
           <h2 className="text-sm font-semibold text-gray-800">Chart of accounts</h2>
           <p className="text-xs text-gray-400 mt-0.5">{accounts.filter(a => a.is_active).length} active accounts</p>
         </div>
-        <button onClick={openAdd}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Plus size={14} /> Add account
-        </button>
+        {canManageSettings && (
+          <button onClick={openAdd}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+            <Plus size={14} /> Add account
+          </button>
+        )}
       </div>
 
       {/* Summary cards */}
@@ -241,13 +244,13 @@ export default function AccountsTab() {
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          {!a.is_system && (
+                          {!a.is_system && canManageSettings && (
                             <button onClick={() => openEdit(a)}
                               className="p-1.5 rounded hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors">
                               <Pencil size={13} />
                             </button>
                           )}
-                          {!a.is_system && (
+                          {!a.is_system && canManageSettings && (
                             <button onClick={() => toggleActive(a)}
                               className={`p-1.5 rounded transition-colors ${a.is_active ? 'hover:bg-red-50 text-gray-300 hover:text-red-500' : 'hover:bg-green-50 text-gray-300 hover:text-green-600'}`}>
                               {a.is_active ? <X size={13} /> : <Check size={13} />}
@@ -347,7 +350,7 @@ export default function AccountsTab() {
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={!canManageSettings || saving}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : editRow ? 'Save changes' : 'Add account'}
             </button>

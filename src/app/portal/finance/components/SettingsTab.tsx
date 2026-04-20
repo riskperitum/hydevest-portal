@@ -45,7 +45,7 @@ const SETTING_LABELS: Record<string, { label: string; group: string; type: strin
 
 const GROUPS = ['Company', 'Exchange', 'Tax rates', 'Automation']
 
-export default function SettingsTab() {
+export default function SettingsTab({ canManageSettings }: { canManageSettings: boolean }) {
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [periods, setPeriods] = useState<Period[]>([])
   const [loading, setLoading] = useState(true)
@@ -153,6 +153,7 @@ export default function SettingsTab() {
   }, [settings])
 
   function clearSignature() {
+    if (!canManageSettings) return
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -163,6 +164,7 @@ export default function SettingsTab() {
   }
 
   async function saveSignature() {
+    if (!canManageSettings) return
     const canvas = canvasRef.current
     if (!canvas) return
     const dataUrl = canvas.toDataURL('image/png')
@@ -178,6 +180,7 @@ export default function SettingsTab() {
 
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault()
+    if (!canManageSettings) return
     setSaving(true)
     const supabase = createClient()
     for (const [key, value] of Object.entries(settings)) {
@@ -191,6 +194,7 @@ export default function SettingsTab() {
 
   async function createPeriod(e: React.FormEvent) {
     e.preventDefault()
+    if (!canManageSettings) return
     setSavingPeriod(true)
     const supabase = createClient()
     await supabase.from('finance_periods').insert({
@@ -207,6 +211,7 @@ export default function SettingsTab() {
   }
 
   async function closePeriod(id: string) {
+    if (!canManageSettings) return
     if (!confirm('Close this period? No more journal entries can be posted to a closed period.')) return
     const supabase = createClient()
     await supabase.from('finance_periods').update({ status: 'closed' }).eq('id', id)
@@ -214,6 +219,7 @@ export default function SettingsTab() {
   }
 
   async function lockPeriod(id: string) {
+    if (!canManageSettings) return
     if (!confirm('Lock this period? This is permanent and cannot be undone.')) return
     const supabase = createClient()
     await supabase.from('finance_periods').update({ status: 'locked' }).eq('id', id)
@@ -222,6 +228,7 @@ export default function SettingsTab() {
 
   // Auto-generate next month period name
   function autoNextPeriod() {
+    if (!canManageSettings) return
     const lastPeriod = periods.find(p => !p.is_opening)
     if (!lastPeriod) return
     const nextStart = new Date(lastPeriod.period_end)
@@ -322,25 +329,31 @@ export default function SettingsTab() {
             )}
 
             <div className="flex items-center gap-3">
-              <button type="button" onClick={saveSignature}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
-                {sigSaved ? '✓ Signature saved' : 'Save signature'}
-              </button>
-              <button type="button" onClick={clearSignature}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50">
-                Clear
-              </button>
+              {canManageSettings && (
+                <button type="button" onClick={saveSignature}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+                  {sigSaved ? '✓ Signature saved' : 'Save signature'}
+                </button>
+              )}
+              {canManageSettings && (
+                <button type="button" onClick={clearSignature}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50">
+                  Clear
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         <div className="flex justify-end">
-          <button type="submit" disabled={saving}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50">
-            {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</>
-              : saved ? <><Check size={14} /> Saved!</>
-              : <><Save size={14} /> Save settings</>}
-          </button>
+          {canManageSettings && (
+            <button type="submit" disabled={saving}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</>
+                : saved ? <><Check size={14} /> Saved!</>
+                : <><Save size={14} /> Save settings</>}
+            </button>
+          )}
         </div>
       </form>
 
@@ -348,10 +361,12 @@ export default function SettingsTab() {
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Accounting periods</h3>
-          <button onClick={autoNextPeriod}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-            <Plus size={12} /> Add next period
-          </button>
+          {canManageSettings && (
+            <button onClick={autoNextPeriod}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              <Plus size={12} /> Add next period
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -386,7 +401,7 @@ export default function SettingsTab() {
                     </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {p.status === 'open' && !p.is_opening && (
+                    {canManageSettings && p.status === 'open' && !p.is_opening && (
                       <div className="flex items-center gap-2">
                         <button onClick={() => closePeriod(p.id)}
                           className="text-xs font-medium text-amber-600 hover:text-amber-700 hover:underline">
@@ -394,7 +409,7 @@ export default function SettingsTab() {
                         </button>
                       </div>
                     )}
-                    {p.status === 'closed' && (
+                    {canManageSettings && p.status === 'closed' && (
                       <button onClick={() => lockPeriod(p.id)}
                         className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline">
                         Lock
@@ -441,7 +456,7 @@ export default function SettingsTab() {
                   className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
                   Cancel
                 </button>
-                <button type="submit" disabled={savingPeriod}
+                <button type="submit" disabled={!canManageSettings || savingPeriod}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingPeriod ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create
                 </button>

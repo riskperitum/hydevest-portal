@@ -38,7 +38,13 @@ interface Period {
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-export default function BanksTab({ selectedPeriod }: { selectedPeriod: string }) {
+export default function BanksTab({
+  selectedPeriod,
+  canManageBanks,
+}: {
+  selectedPeriod: string
+  canManageBanks: boolean
+}) {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [selectedBank, setSelectedBank] = useState<string>('')
   const [statements, setStatements] = useState<BankStatement[]>([])
@@ -135,7 +141,7 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
 
   async function addStatement(e: React.FormEvent) {
     e.preventDefault()
-    if (!selectedBank) return
+    if (!canManageBanks || !selectedBank) return
     setSaving(true)
     const supabase = createClient()
     await supabase.from('finance_bank_statements').insert({
@@ -157,6 +163,7 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
   }
 
   async function toggleReconciled(stmt: BankStatement) {
+    if (!canManageBanks) return
     const supabase = createClient()
     await supabase.from('finance_bank_statements')
       .update({ is_reconciled: !stmt.is_reconciled })
@@ -165,6 +172,7 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
   }
 
   async function deleteStatement(id: string) {
+    if (!canManageBanks) return
     if (!confirm('Delete this statement line?')) return
     const supabase = createClient()
     await supabase.from('finance_bank_statements').delete().eq('id', id)
@@ -190,10 +198,12 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
           <h2 className="text-sm font-semibold text-gray-800">Bank reconciliation</h2>
           <p className="text-xs text-gray-400 mt-0.5">Match bank statement lines against journal entries</p>
         </div>
-        <button onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-          <Plus size={14} /> Add statement line
-        </button>
+        {canManageBanks && (
+          <button onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+            <Plus size={14} /> Add statement line
+          </button>
+        )}
       </div>
 
       {/* Bank account selector */}
@@ -306,10 +316,12 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
             <div className="flex flex-col items-center justify-center py-10 gap-2">
               <Building2 size={24} className="text-gray-200" />
               <p className="text-sm text-gray-400">No statement lines yet.</p>
-              <button onClick={() => setAddOpen(true)}
-                className="text-xs font-medium text-brand-600 hover:underline">
-                Add first statement line
-              </button>
+              {canManageBanks && (
+                <button onClick={() => setAddOpen(true)}
+                  className="text-xs font-medium text-brand-600 hover:underline">
+                  Add first statement line
+                </button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -343,14 +355,21 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
                         {stmt.balance != null ? fmt(stmt.balance) : '—'}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
-                        <button onClick={() => toggleReconciled(stmt)}
-                          className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors
-                            ${stmt.is_reconciled ? 'bg-green-500 text-white' : 'border-2 border-gray-200 hover:border-green-400'}`}>
-                          {stmt.is_reconciled && <Check size={12} />}
-                        </button>
+                        {canManageBanks ? (
+                          <button onClick={() => toggleReconciled(stmt)}
+                            className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors
+                              ${stmt.is_reconciled ? 'bg-green-500 text-white' : 'border-2 border-gray-200 hover:border-green-400'}`}>
+                            {stmt.is_reconciled && <Check size={12} />}
+                          </button>
+                        ) : (
+                          <span className={`inline-flex w-6 h-6 rounded-full items-center justify-center
+                            ${stmt.is_reconciled ? 'bg-green-500 text-white' : 'border-2 border-gray-200'}`}>
+                            {stmt.is_reconciled && <Check size={12} />}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
-                        {!stmt.is_reconciled && (
+                        {canManageBanks && !stmt.is_reconciled && (
                           <button onClick={() => deleteStatement(stmt.id)}
                             className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors">
                             <X size={13} />
@@ -430,7 +449,7 @@ export default function BanksTab({ selectedPeriod }: { selectedPeriod: string })
               className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving || !stmtForm.description}
+            <button type="submit" disabled={!canManageBanks || saving || !stmtForm.description}
               className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
               {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><Plus size={14} /> Add line</>}
             </button>

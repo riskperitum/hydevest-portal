@@ -1,8 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createServerClient } from '@/lib/supabase/server'
+import { rateLimit } from '@/lib/utils/rateLimit'
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  const { allowed } = rateLimit(`create-login:${ip}`, 10, 60_000)
+  if (!allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 })
+  }
+
   try {
     const supabase = await createServerClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -19,7 +26,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { email, password, full_name, partner_id } = await req.json()
+    const { email, password, full_name, partner_id } = await request.json()
     if (!email || !password || !full_name || !partner_id) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }

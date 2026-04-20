@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Search, Shield, ChevronDown, ChevronUp, Check } from 'lucide-react'
+import { clearPermissionCache } from '@/lib/permissions/hooks'
 
 interface Permission {
   id: string
@@ -103,6 +104,7 @@ export default function PermissionsPage() {
         .insert({ role_id: selectedRole, permission_key: permKey })
       setRolePermissions(prev => [...prev, { role_id: selectedRole, permission_key: permKey }])
     }
+    clearPermissionCache()
     setSaving(null)
   }
 

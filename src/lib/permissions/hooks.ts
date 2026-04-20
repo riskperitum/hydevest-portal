@@ -10,9 +10,12 @@ interface PermissionState {
 }
 
 // Cache permissions per session to avoid repeated DB calls
+// Cache with timestamp to auto-expire after 30 seconds
 let cachedPermissions: Set<string> | null = null
 let cachedIsSuperAdmin: boolean | null = null
 let cacheUserId: string | null = null
+let cacheTimestamp: number = 0
+const CACHE_TTL_MS = 30_000 // 30 seconds
 
 export function usePermissions() {
   const [state, setState] = useState<PermissionState>({
@@ -26,8 +29,14 @@ export function usePermissions() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setState({ permissions: new Set(), isSuperAdmin: false, loading: false }); return }
 
-    // Return cached if same user
-    if (cacheUserId === user.id && cachedPermissions !== null && cachedIsSuperAdmin !== null) {
+    // Return cached if same user and cache is fresh
+    const now = Date.now()
+    if (
+      cacheUserId === user.id &&
+      cachedPermissions !== null &&
+      cachedIsSuperAdmin !== null &&
+      (now - cacheTimestamp) < CACHE_TTL_MS
+    ) {
       setState({ permissions: cachedPermissions, isSuperAdmin: cachedIsSuperAdmin, loading: false })
       return
     }
@@ -77,6 +86,7 @@ export function usePermissions() {
     cacheUserId = user.id
     cachedPermissions = granted
     cachedIsSuperAdmin = isSuperAdmin
+    cacheTimestamp = Date.now()
 
     setState({ permissions: granted, isSuperAdmin, loading: false })
   }, [])
@@ -90,6 +100,7 @@ export function clearPermissionCache() {
   cachedPermissions = null
   cachedIsSuperAdmin = null
   cacheUserId = null
+  cacheTimestamp = 0
 }
 
 // Main permission check function

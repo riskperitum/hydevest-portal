@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams } from 'next/navigation'
 import { ArrowLeft, Loader2, Check, Search, Lock } from 'lucide-react'
 import Link from 'next/link'
+import { clearPermissionCache } from '@/lib/permissions/hooks'
 
 interface Permission {
   id: string
@@ -21,7 +22,14 @@ interface Role {
   is_system: boolean
 }
 
-const MODULE_ORDER = ['system','trips','containers','presales','sales_orders','recoveries','expenses','accounts','reports','admin']
+const MODULE_ORDER = [
+  'system','admin','global',
+  'trips','containers','inventory',
+  'presales','sales_orders','recoveries',
+  'expenses','accounts','partnership',
+  'requestbox','tasks','reports',
+  'finance','payroll','legal',
+]
 
 export default function RoleDetailPage() {
   const params = useParams()
@@ -60,6 +68,7 @@ export default function RoleDetailPage() {
       await supabase.from('role_permissions').insert({ role_id: roleId, permission_key: key })
       setAssigned(prev => new Set([...prev, key]))
     }
+    clearPermissionCache()
     setSaving(null)
   }
 
@@ -77,6 +86,7 @@ export default function RoleDetailPage() {
         setAssigned(prev => new Set([...prev, ...toAdd.map(p => p.key)]))
       }
     }
+    clearPermissionCache()
   }
 
   const filtered = permissions.filter(p =>

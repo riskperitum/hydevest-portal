@@ -71,14 +71,14 @@ export default function CustomerDebtReportPage() {
       if (!acc[o.customer_id]) acc[o.customer_id] = []
       acc[o.customer_id].push(o)
       return acc
-    }, {} as Record<string, typeof orders[0][]>)
+    }, {} as Record<string, any[]>)
 
     // Group recoveries by order
     const recsByOrder = (recoveries ?? []).reduce((acc, r) => {
       if (!acc[r.sales_order_id]) acc[r.sales_order_id] = []
       acc[r.sales_order_id].push(r)
       return acc
-    }, {} as Record<string, typeof recoveries[0][]>)
+    }, {} as Record<string, any[]>)
 
     const result: CustomerDebtRow[] = (customers ?? [])
       .map(customer => {

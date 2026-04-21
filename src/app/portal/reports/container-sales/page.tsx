@@ -99,7 +99,7 @@ export default function ContainerSalesReportPage() {
       if (!acc[pd.presale_id]) acc[pd.presale_id] = []
       acc[pd.presale_id].push(pd)
       return acc
-    }, {} as Record<string, typeof palletDists[0][]>)
+    }, {} as Record<string, any[]>)
 
     const result: ContainerSalesRow[] = (presales ?? []).map(presale => {
       const container = containerMap[presale.container_id]

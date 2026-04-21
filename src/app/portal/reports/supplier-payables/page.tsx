@@ -53,7 +53,7 @@ export default function SupplierPayablesPage() {
       if (!acc[c.trip_id]) acc[c.trip_id] = []
       acc[c.trip_id].push(c)
       return acc
-    }, {} as Record<string, typeof containers[0][]>)
+    }, {} as Record<string, any[]>)
 
     // Group expenses by trip
     const expensesByTrip = (tripExpenses ?? []).reduce((acc, e) => {

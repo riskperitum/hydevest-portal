@@ -128,7 +128,7 @@ export default function ContainerSalesDrilldownPage() {
       if (!acc[pl.order_id]) acc[pl.order_id] = []
       acc[pl.order_id].push(pl)
       return acc
-    }, {} as Record<string, typeof palletLines[0][]>)
+    }, {} as Record<string, any[]>)
 
     setSalesOrders((orders ?? []).map(o => {
       const lines = palletsByOrder[o.id] ?? []

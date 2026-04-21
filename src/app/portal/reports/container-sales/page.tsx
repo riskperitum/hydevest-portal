@@ -85,14 +85,14 @@ export default function ContainerSalesReportPage() {
       if (!acc[so.presale_id]) acc[so.presale_id] = []
       acc[so.presale_id].push(so)
       return acc
-    }, {} as Record<string, typeof salesOrders[0][]>)
+    }, {} as Record<string, any[]>)
 
     // Group recoveries by sales order
     const recoveriesByOrder = (recoveries ?? []).reduce((acc, r) => {
       if (!acc[r.sales_order_id]) acc[r.sales_order_id] = []
       acc[r.sales_order_id].push(r)
       return acc
-    }, {} as Record<string, typeof recoveries[0][]>)
+    }, {} as Record<string, any[]>)
 
     // Group pallet distributions by presale
     const palletsByPresale = (palletDists ?? []).reduce((acc, pd) => {

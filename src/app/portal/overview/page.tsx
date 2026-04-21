@@ -181,7 +181,7 @@ export default function OverviewPage() {
 
     const revenue     = (allSalesOrders ?? []).reduce((s: number, so: any) => s + Number(so.customer_payable), 0)
     const outstanding = (allSalesOrders ?? []).reduce((s: number, so: any) => s + Number(so.outstanding_balance ?? 0), 0)
-    const recovered   = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
+    const recovered   = (recoveries ?? []).reduce((s: number, r: any) => s + Number(r.amount_paid), 0)
 
     // Top debtors
     const debtorMap: Record<string, { name: string; billed: number; outstanding: number; collected: number }> = {}

@@ -25,7 +25,7 @@ jobs:
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd /var/www/hydevest-portal-staging
             git checkout staging
-            git pull origin staging
+            git fetch origin staging && git reset --hard origin/staging
             npm install
             npm run build
             pm2 restart hydevest-staging

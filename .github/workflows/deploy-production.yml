@@ -24,7 +24,8 @@ jobs:
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd /var/www/hydevest-portal
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             npm install
             npm run build
             pm2 restart hydevest-portal

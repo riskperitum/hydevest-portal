@@ -175,8 +175,8 @@ export default function OverviewPage() {
     ])
 
     // KPI calculations
-    const active    = (containers ?? []).filter(c => c.status !== 'completed').length
-    const invVal    = (containers ?? []).filter(c => c.status !== 'completed')
+    const active    = (containers ?? []).filter((c: any) => c.status !== 'completed').length
+    const invVal    = (containers ?? []).filter((c: any) => c.status !== 'completed')
       .reduce((s: number, c: any) => s + Number(c.estimated_landing_cost ?? 0), 0)
 
     const revenue     = (allSalesOrders ?? []).reduce((s: number, so: any) => s + Number(so.customer_payable), 0)
@@ -197,8 +197,8 @@ export default function OverviewPage() {
       .sort((a, b) => b.outstanding - a.outstanding)
 
     // Container data for chart
-    const contData = (containers ?? []).map(c => {
-      const soForContainer = (allSalesOrders ?? []).filter(so => (so.container as any)?.container_id === c.container_id)
+    const contData = (containers ?? []).map((c: any) => {
+      const soForContainer = (allSalesOrders ?? []).filter((so: any) => (so.container as any)?.container_id === c.container_id)
       const rev = soForContainer.reduce((s: number, so: any) => s + Number(so.customer_payable), 0)
       return {
         id:       c.container_id,

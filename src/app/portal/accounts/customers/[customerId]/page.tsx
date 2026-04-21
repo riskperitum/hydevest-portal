@@ -109,7 +109,7 @@ export default function CustomerProfilePage() {
     ])
 
     setCustomer(customerData)
-    setOrders(ordersData ?? [])
+    setOrders((ordersData ?? []) as any)
     setBadDebts(badDebtData ?? [])
     setLegalCases((legalData ?? []).map(l => (l.case as any)))
     setLoading(false)

@@ -696,7 +696,7 @@ export default function TripDetailPage() {
 
     // Build changes summary for review requests
     let changesSummary: string | null = null
-    if (workflowType === 'review' || workflowType === 'approve') {
+    if ((workflowType as string) === 'review' || (workflowType as string) === 'approve') {
       const relevantLogs = activityLogs.filter(log =>
         log.action?.includes('Updated') ||
         log.action?.includes('added') ||

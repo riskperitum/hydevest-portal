@@ -55,6 +55,7 @@ export default function EmployeesTab() {
       ...p,
       user_id: p.id,
       roles: (roleMap[p.id] ?? []).join(', ') || 'No role',
+      blocked: false,
     })))
     setLoading(false)
   }

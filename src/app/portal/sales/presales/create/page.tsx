@@ -87,10 +87,10 @@ export default function CreatePresalePage() {
           .order('created_at', { ascending: false })
           .then(({ data }) => {
             setContainers(
-              (data ?? []).filter(c =>
+              ((data ?? []).filter(c =>
                 !presoldIds.has(c.id) &&
                 (c.trip as any)?.status === 'completed'
-              )
+              )) as any
             )
           })
       })

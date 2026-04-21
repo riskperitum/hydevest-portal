@@ -177,10 +177,10 @@ export default function OverviewPage() {
     // KPI calculations
     const active    = (containers ?? []).filter(c => c.status !== 'completed').length
     const invVal    = (containers ?? []).filter(c => c.status !== 'completed')
-      .reduce((s, c) => s + Number(c.estimated_landing_cost ?? 0), 0)
+      .reduce((s: number, c: any) => s + Number(c.estimated_landing_cost ?? 0), 0)
 
-    const revenue     = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.customer_payable), 0)
-    const outstanding = (allSalesOrders ?? []).reduce((s, so) => s + Number(so.outstanding_balance ?? 0), 0)
+    const revenue     = (allSalesOrders ?? []).reduce((s: number, so: any) => s + Number(so.customer_payable), 0)
+    const outstanding = (allSalesOrders ?? []).reduce((s: number, so: any) => s + Number(so.outstanding_balance ?? 0), 0)
     const recovered   = (recoveries ?? []).reduce((s, r) => s + Number(r.amount_paid), 0)
 
     // Top debtors
@@ -199,7 +199,7 @@ export default function OverviewPage() {
     // Container data for chart
     const contData = (containers ?? []).map(c => {
       const soForContainer = (allSalesOrders ?? []).filter(so => (so.container as any)?.container_id === c.container_id)
-      const rev = soForContainer.reduce((s, so) => s + Number(so.customer_payable), 0)
+      const rev = soForContainer.reduce((s: number, so: any) => s + Number(so.customer_payable), 0)
       return {
         id:       c.container_id,
         revenue:  rev,

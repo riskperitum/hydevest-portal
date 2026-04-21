@@ -63,7 +63,7 @@ export default function SupplierPayablesPage() {
 
     const result: SupplierPayableRow[] = (trips ?? []).map(trip => {
       const tripContainers = containersByTrip[trip.id] ?? []
-      const supplier = trip.supplier as { id: string; name: string } | null
+      const supplier = trip.supplier as unknown as { id: string; name: string } | null
 
       // Total cost = sum of (unit_price_usd * pieces_purchased) + shipping_amount_usd per container
       const totalCostUsd = tripContainers.reduce((s, c) => {

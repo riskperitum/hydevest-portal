@@ -527,7 +527,7 @@ export default function ReportsTab({
                   <div className="flex items-center justify-between">
                     <span className="text-base font-bold text-gray-900">NET CHANGE IN CASH</span>
                     <span className="text-base font-bold text-brand-700">
-                      {display(allBalances.filter(b => b.account.is_bank || b.account.code === '1001').reduce((s, b) => s + b.balance, 0))}
+                      {display(allBalances.filter(b => (b.account as any).is_bank || b.account.code === '1001').reduce((s, b) => s + b.balance, 0))}
                     </span>
                   </div>
                 </div>

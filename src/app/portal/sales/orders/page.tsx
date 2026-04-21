@@ -139,7 +139,7 @@ export default function SalesOrdersPage() {
           order_count:      0,
         }
       }
-      groupMap[cId].orders.push(order as SalesOrder)
+      groupMap[cId].orders.push(order as unknown as SalesOrder)
       groupMap[cId].total_revenue     += Number(order.customer_payable)
       groupMap[cId].total_outstanding += Number(order.outstanding_balance)
       groupMap[cId].total_collected   += Number(order.amount_paid)

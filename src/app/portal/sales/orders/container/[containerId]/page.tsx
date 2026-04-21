@@ -67,7 +67,7 @@ export default function ContainerOrdersPage() {
     ])
 
     setContainer(containerData as any)
-    setOrders(ordersData ?? [])
+    setOrders((ordersData ?? []) as any)
     setLoading(false)
   }, [containerId])
 

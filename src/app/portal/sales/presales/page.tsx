@@ -6,6 +6,7 @@ import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Search, Eye, Trash2, Loader2, Package, Download, Filter, FileText, ClipboardCheck, CheckCircle2 } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
 
 interface Presale {
   id: string
@@ -47,6 +48,9 @@ export default function PresalesPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportType, setReportType] = useState<'filtered' | 'full'>('filtered')
   const [workflowPresale, setWorkflowPresale] = useState<Presale | null>(null)
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'presales.approve')
+  const [selfApprove, setSelfApprove] = useState(false)
   const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'approval' | null>(null)
   const [workflowNote, setWorkflowNote] = useState('')
   const [assignee, setAssignee] = useState('')
@@ -79,12 +83,61 @@ export default function PresalesPage() {
   }
 
   async function submitWorkflow() {
-    if (!assignee || !workflowType || !workflowPresale) return
+    if (!workflowType || !workflowPresale) return
+    if (!selfApprove && !assignee) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     const typeKeys = { delete: 'delete_approval', review: 'review_request', approval: 'approval_request' }
     const typeLabels = { delete: 'Delete approval', review: 'Review request', approval: 'Approval request' }
+
+    // Self-approve branch
+    if (selfApprove && canSelfApprove) {
+      await supabase.from('tasks').insert({
+        type: typeKeys[workflowType],
+        title: `${typeLabels[workflowType]}: ${workflowPresale.presale_id} (self-approved)`,
+        description: workflowNote || `${typeLabels[workflowType]} for presale ${workflowPresale.presale_id}`,
+        module: 'presales',
+        record_id: workflowPresale.id,
+        record_ref: workflowPresale.presale_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+
+      if (workflowType === 'review') {
+        await supabase.from('presales').update({
+          approval_status: 'reviewed',
+          needs_review: false,
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: user?.id,
+        }).eq('id', workflowPresale.id)
+      } else if (workflowType === 'approval') {
+        await supabase.from('presales').update({
+          approval_status: 'approved',
+          needs_review: false,
+          status: 'confirmed',
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: user?.id,
+          last_approved_at: new Date().toISOString(),
+          last_approved_by: user?.id,
+        }).eq('id', workflowPresale.id)
+      } else if (workflowType === 'delete') {
+        await supabase.from('presales').delete().eq('id', workflowPresale.id)
+      }
+
+      setSubmittingWorkflow(false)
+      setWorkflowPresale(null)
+      setWorkflowType(null)
+      setWorkflowNote('')
+      setAssignee('')
+      setSelfApprove(false)
+      load()
+      return
+    }
+
     const { data: task } = await supabase.from('tasks').insert({
       type: typeKeys[workflowType],
       title: `${typeLabels[workflowType]}: ${workflowPresale.presale_id}`,
@@ -111,6 +164,7 @@ export default function PresalesPage() {
     setWorkflowType(null)
     setWorkflowNote('')
     setAssignee('')
+    setSelfApprove(false)
     load()
   }
 
@@ -409,7 +463,7 @@ export default function PresalesPage() {
       {/* Workflow modal */}
       {workflowPresale && workflowType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setWorkflowPresale(null); setWorkflowType(null) }} />
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setWorkflowPresale(null); setWorkflowType(null); setSelfApprove(false) }} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
             <h2 className="text-base font-semibold text-gray-900">
               {workflowType === 'delete' ? 'Request deletion' : workflowType === 'review' ? 'Request review' : 'Request approval'}
@@ -419,6 +473,18 @@ export default function PresalesPage() {
                 <p className="text-xs text-red-700 font-medium">The presale will only be deleted after the assigned user approves it.</p>
               </div>
             )}
+            {canSelfApprove && (
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={selfApprove} onChange={e => setSelfApprove(e.target.checked)} className="mt-0.5" />
+                  <div>
+                    <span className="text-sm font-medium text-amber-900">Self-approve (skip approval)</span>
+                    <p className="text-xs text-amber-700 mt-0.5">As an admin, you can execute this action immediately without sending an approval request.</p>
+                  </div>
+                </label>
+              </div>
+            )}
+            {!selfApprove && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
               <select required value={assignee} onChange={e => setAssignee(e.target.value)}
@@ -429,20 +495,25 @@ export default function PresalesPage() {
                 ))}
               </select>
             </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
               <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setWorkflowPresale(null); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+              <button onClick={() => { setWorkflowPresale(null); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
                 className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-              <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+              <button onClick={submitWorkflow} disabled={submittingWorkflow || (!selfApprove && !assignee)}
                 className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                   ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' :
                     workflowType === 'approval' ? 'bg-green-600 text-white hover:bg-green-700' :
                     'bg-brand-600 text-white hover:bg-brand-700'}`}>
-                {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit'}
+                {submittingWorkflow
+                  ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+                  : selfApprove
+                    ? (workflowType === 'delete' ? 'Delete now' : workflowType === 'approval' ? 'Approve now' : 'Mark reviewed now')
+                    : 'Submit'}
               </button>
             </div>
           </div>

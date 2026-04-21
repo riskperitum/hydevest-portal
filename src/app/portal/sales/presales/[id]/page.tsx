@@ -91,6 +91,7 @@ export default function PresaleDetailPage() {
   const canEditPresale   = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.edit')
   const canDeletePresale = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.delete')
   const canApprove       = isSuperAdmin || can(permissions, isSuperAdmin, 'presales.approve')
+  const canSelfApprove   = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'presales.approve')
 
   const [presale, setPresale] = useState<Presale | null>(null)
   const [pallets, setPallets] = useState<PalletDistribution[]>([])
@@ -105,6 +106,7 @@ export default function PresaleDetailPage() {
   const [workflowOpen, setWorkflowOpen] = useState(false)
   const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'approval' | null>(null)
   const [workflowNote, setWorkflowNote] = useState('')
+  const [selfApprove, setSelfApprove] = useState(false)
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
@@ -346,7 +348,8 @@ export default function PresaleDetailPage() {
   }
 
   async function submitWorkflow() {
-    if (!assignee || !workflowType || !presale) return
+    if (!workflowType || !presale) return
+    if (!selfApprove && !assignee) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -390,6 +393,64 @@ export default function PresaleDetailPage() {
         : 'No changes recorded.'
     }
 
+    // Self-approve branch
+    if (selfApprove && canSelfApprove) {
+      await supabase.from('tasks').insert({
+        type: typeKeys[workflowType],
+        title: `${typeLabels[workflowType]}: ${presale.presale_id} (self-approved)`,
+        description: workflowNote || `${typeLabels[workflowType]} for presale ${presale.presale_id}`,
+        module: 'presales',
+        record_id: presaleId,
+        record_ref: presale.presale_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+        changes_summary: changesSummary,
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+
+      if (workflowType === 'review') {
+        await supabase.from('presales').update({
+          approval_status: 'reviewed',
+          needs_review: false,
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: user?.id,
+        }).eq('id', presaleId)
+      } else if (workflowType === 'approval') {
+        await supabase.from('presales').update({
+          approval_status: 'approved',
+          needs_review: false,
+          status: 'confirmed',
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: user?.id,
+          last_approved_at: new Date().toISOString(),
+          last_approved_by: user?.id,
+        }).eq('id', presaleId)
+      } else if (workflowType === 'delete') {
+        await logActivity('Presale deleted (self-approved)', 'workflow', '', user?.id ?? '')
+        await supabase.from('presales').delete().eq('id', presaleId)
+        setSubmittingWorkflow(false)
+        setWorkflowOpen(false)
+        setWorkflowType(null)
+        setWorkflowNote('')
+        setAssignee('')
+        setSelfApprove(false)
+        router.push('/portal/sales/presales')
+        return
+      }
+
+      await logActivity(`${typeLabels[workflowType]} self-approved`, 'workflow', '', user?.id ?? '')
+      setSubmittingWorkflow(false)
+      setWorkflowOpen(false)
+      setWorkflowType(null)
+      setWorkflowNote('')
+      setAssignee('')
+      setSelfApprove(false)
+      load()
+      return
+    }
+
     const { data: task } = await supabase.from('tasks').insert({
       type: typeKeys[workflowType],
       title: `${typeLabels[workflowType]}: ${presale.presale_id}`,
@@ -421,6 +482,7 @@ export default function PresaleDetailPage() {
     setWorkflowType(null)
     setWorkflowNote('')
     setAssignee('')
+    setSelfApprove(false)
     load()
   }
 
@@ -1132,7 +1194,7 @@ export default function PresaleDetailPage() {
       {/* Workflow modal */}
       <Modal
         open={workflowOpen}
-        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
         title={
           workflowType === 'delete' ? 'Request presale deletion' :
           workflowType === 'review' ? 'Request presale review' :
@@ -1157,6 +1219,18 @@ export default function PresaleDetailPage() {
               <p className="text-xs text-green-700 font-medium">Once approved, this presale will be marked as <strong>Confirmed</strong>.</p>
             </div>
           )}
+          {canSelfApprove && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={selfApprove} onChange={e => setSelfApprove(e.target.checked)} className="mt-0.5" />
+                <div>
+                  <span className="text-sm font-medium text-amber-900">Self-approve (skip approval)</span>
+                  <p className="text-xs text-amber-700 mt-0.5">As an admin, you can execute this action immediately without sending an approval request.</p>
+                </div>
+              </label>
+            </div>
+          )}
+          {!selfApprove && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
             <select required value={assignee} onChange={e => setAssignee(e.target.value)}
@@ -1167,6 +1241,7 @@ export default function PresaleDetailPage() {
               ))}
             </select>
           </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
             <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
@@ -1174,14 +1249,18 @@ export default function PresaleDetailPage() {
               placeholder="Add context for the assignee..." />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null) }}
+            <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-            <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+            <button onClick={submitWorkflow} disabled={submittingWorkflow || (!selfApprove && !assignee)}
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' :
                   workflowType === 'approval' ? 'bg-green-600 text-white hover:bg-green-700' :
                   'bg-brand-600 text-white hover:bg-brand-700'}`}>
-              {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
+              {submittingWorkflow
+                ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+                : selfApprove
+                  ? (workflowType === 'delete' ? 'Delete now' : workflowType === 'approval' ? 'Approve now' : 'Mark reviewed now')
+                  : 'Submit request'}
             </button>
           </div>
         </div>

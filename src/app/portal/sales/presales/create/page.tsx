@@ -292,7 +292,7 @@ export default function CreatePresalePage() {
                       if (!isNaN(piece)) setPricePerPiece(piece.toFixed(4))
                     }
                   }}
-                  type="number" step="0.01" min="0"
+                  type="number" step="0.0001" min="0"
                   placeholder="0.00"
                   className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>

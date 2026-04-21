@@ -914,7 +914,7 @@ export default function PresaleDetailPage() {
                 <label className="block text-xs text-gray-400 uppercase tracking-wide mb-1">Price per kilo (₦)</label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.0001"
                   min="0"
                   value={editForm.price_per_kilo}
                   onChange={e => {

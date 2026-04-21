@@ -182,8 +182,8 @@ function SupplierReceivablesDrilldownInner() {
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionTarget, setMentionTarget] = useState<'note' | 'reply'>('note')
   const [cursorPosition, setCursorPosition] = useState(0)
-  const noteInputRef = useRef<HTMLTextAreaElement>(null)
-  const replyInputRef = useRef<HTMLTextAreaElement>(null)
+  const noteInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const replyInputRef = useRef<HTMLTextAreaElement | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()

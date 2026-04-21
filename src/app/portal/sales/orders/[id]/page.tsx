@@ -451,7 +451,7 @@ export default function SalesOrderDetailPage() {
   const AmountEditableField = ({ fieldKey, label, value }: {
     fieldKey: string; label: string; value: string
   }) => {
-    const inputRef = useRef<HTMLInputElement>(null)
+    const inputRef = useRef<HTMLInputElement | null>(null)
     const [localRaw, setLocalRaw] = useState(value)
     const [localDisplay, setLocalDisplay] = useState(formatAmount(value))
 

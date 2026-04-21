@@ -31,7 +31,7 @@ export default function AmountInput({
   className = '',
   id,
 }: AmountInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const focused = useRef(false)
 
   // Display is fully controlled by this component while focused

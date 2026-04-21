@@ -35,7 +35,7 @@ export default function AccountTable<T>({
   const [search, setSearch] = useState('')
   const [dropdown, setDropdown] = useState<DropdownState | null>(null)
   const [page, setPage] = useState(1)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement | null>(null)
   const PER_PAGE = 10
 
   const filtered = data.filter(row =>

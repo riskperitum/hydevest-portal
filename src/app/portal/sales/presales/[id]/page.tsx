@@ -194,7 +194,7 @@ export default function PresaleDetailPage() {
         supabase.from('sales_orders').select('id').eq('container_id', cid).eq('payment_status', 'paid'),
         supabase.from('sales_orders').select('outstanding_balance, write_off_status').eq('container_id', cid),
         supabase.from('presales').select('sale_type, total_number_of_pallets').eq('container_id', cid).order('created_at', { ascending: true }).limit(1).maybeSingle(),
-        supabase.from('presale_pallet_distributions').select('id').eq('presale_id', presaleData.id),
+        supabase.from('presale_pallet_distributions').select('id').eq('presale_id', presaleData?.id ?? ''),
       ])
 
       const tripRaw = (tripData as { trip?: { status?: string } | { status?: string }[] } | null)?.trip

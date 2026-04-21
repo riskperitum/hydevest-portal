@@ -10,6 +10,7 @@ import {
   User, Calendar, Activity, Lock, Unlock
 } from 'lucide-react'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
+import { notifyTaskAssigned } from '@/lib/email/notify'
 
 interface LegalCase {
   id: string
@@ -280,6 +281,34 @@ export default function LegalCasePage() {
       created_by:  currentUser?.id,
     })
     await logActivity('Task added', taskForm.title)
+
+    // Send email notification to assignee
+    if (taskForm.assigned_to) {
+      const { data: assignee } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', taskForm.assigned_to)
+        .single()
+
+      if (assignee?.email) {
+        const { data: currentProfile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', currentUser?.id ?? '')
+          .single()
+
+        await notifyTaskAssigned({
+          recipientEmail:  assignee.email,
+          recipientName:   assignee.full_name ?? assignee.email,
+          taskTitle:       taskForm.title,
+          taskDescription: taskForm.description || null,
+          assignedBy:      currentProfile?.full_name ?? currentProfile?.email ?? 'A team member',
+          dueDate:         taskForm.due_date ? new Date(taskForm.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null,
+          taskUrl:         `${window.location.origin}/portal/legal/cases/${caseId}`,
+        })
+      }
+    }
+
     setSavingTask(false)
     setTaskOpen(false)
     setTaskForm({ title: '', description: '', assigned_to: '', due_date: '' })

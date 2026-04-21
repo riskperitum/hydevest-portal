@@ -9,6 +9,7 @@ import {
   Users, Filter, PenSquare, AtSign
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
+import { notifyRequestBoxMessage } from '@/lib/email/notify'
 
 interface RBMessage {
   id: string
@@ -359,6 +360,9 @@ export default function RequestBoxPage() {
       assigned_to_user: currentUser.id,
     }).select().single()
 
+    let assignedToEmail: string | null = null
+    let assignedToName: string | null = null
+
     // Notify recipient
     if (isToPartner) {
       const { data: partner } = await supabase
@@ -372,6 +376,15 @@ export default function RequestBoxPage() {
           record_id: msg?.id,
           module:    'requestbox',
         })
+        const { data: assignedProfile } = await supabase
+          .from('profiles')
+          .select('email, full_name')
+          .eq('id', partner.user_id)
+          .single()
+        if (assignedProfile?.email) {
+          assignedToEmail = assignedProfile.email
+          assignedToName = assignedProfile.full_name ?? assignedProfile.email.split('@')[0] ?? 'User'
+        }
       }
     }
 
@@ -383,6 +396,28 @@ export default function RequestBoxPage() {
         message:   composeSubject,
         record_id: msg?.id,
         module:    'requestbox',
+      })
+      const { data: assignedProfile } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', composeToUser)
+        .single()
+      if (assignedProfile?.email) {
+        assignedToEmail = assignedProfile.email
+        assignedToName = assignedProfile.full_name ?? assignedProfile.email.split('@')[0] ?? 'User'
+      }
+    }
+
+    // Send email notification to assigned user
+    if (assignedToEmail && assignedToName) {
+      await notifyRequestBoxMessage({
+        recipientEmail: assignedToEmail,
+        recipientName: assignedToName,
+        subject: composeSubject,
+        senderName: currentUser.full_name ?? currentUser.email ?? 'Someone',
+        messagePreview:
+          composeBody.slice(0, 150) + (composeBody.length > 150 ? '...' : ''),
+        messageUrl: `${window.location.origin}/portal/requestbox`,
       })
     }
 

@@ -15,6 +15,7 @@ import { displayName, fullDisplayName } from '@/lib/utils/displayName'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { getTripStatusBadge } from '@/lib/utils/containerStatus'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
+import { notifyApprovalRequest } from '@/lib/email/notify'
 
 interface Trip {
   id: string
@@ -740,6 +741,41 @@ export default function TripDetailPage() {
       record_ref: trip.trip_id,
       module: 'trips',
     })
+
+    // Send email notification to approver (assignee)
+    if (assignee) {
+      const { data: approverProfile } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', assignee)
+        .single()
+
+      if (approverProfile?.email) {
+        const { data: requesterProfile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', user?.id ?? '')
+          .single()
+
+        const itemTypeLabel =
+          workflowType === 'review'
+            ? 'trip review'
+            : workflowType === 'completion'
+              ? 'trip completion approval'
+              : 'trip deletion approval'
+
+        await notifyApprovalRequest({
+          recipientEmail: approverProfile.email,
+          recipientName: approverProfile.full_name ?? approverProfile.email,
+          itemType: itemTypeLabel,
+          itemId: trip.trip_id,
+          itemTitle: trip.title,
+          requestedBy: requesterProfile?.full_name ?? requesterProfile?.email ?? 'A team member',
+          notes: workflowNote || null,
+          itemUrl: `${window.location.origin}/portal/tasks`,
+        })
+      }
+    }
 
     await logTripActivity(`${typeLabels[workflowType]} requested`, 'workflow', '', assignee)
 

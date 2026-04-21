@@ -255,6 +255,7 @@ export default function TripDetailPage() {
   const [workflowOpen, setWorkflowOpen] = useState(false)
   const [workflowType, setWorkflowType] = useState<'delete' | 'review' | 'completion' | null>(null)
   const [workflowNote, setWorkflowNote] = useState('')
+  const [selfApprove, setSelfApprove] = useState(false)
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
   const [submittingWorkflow, setSubmittingWorkflow] = useState(false)
@@ -671,7 +672,8 @@ export default function TripDetailPage() {
   }
 
   async function submitWorkflow() {
-    if (!assignee || !workflowType || !trip) return
+    if (!workflowType || !trip) return
+    if (!selfApprove && !assignee) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -717,6 +719,61 @@ export default function TripDetailPage() {
       }
     }
 
+    // If self-approving, execute the action directly and create completed task
+    if (selfApprove && canSelfApprove) {
+      // Create the task as already approved
+      await supabase.from('tasks').insert({
+        type: typeKeys[workflowType],
+        title: `${typeLabels[workflowType]}: ${trip.trip_id} (self-approved)`,
+        description: workflowNote || descriptions[workflowType],
+        module: 'trips',
+        record_id: tripId,
+        record_ref: trip.trip_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+        changes_summary: changesSummary,
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+
+      // Execute the action directly
+      if (workflowType === 'review') {
+        await supabase.from('trips').update({
+          approval_status: 'reviewed',
+          needs_review: false,
+          last_reviewed_at: new Date().toISOString(),
+          last_reviewed_by: user?.id,
+        }).eq('id', tripId)
+      } else if (workflowType === 'completion') {
+        await supabase.from('trips').update({
+          status: 'completed',
+        }).eq('id', tripId)
+      } else if (workflowType === 'delete') {
+        await supabase.from('trips').delete().eq('id', tripId)
+        await logTripActivity('Trip deleted (self-approved)', 'workflow', '', user?.id ?? '')
+        setSubmittingWorkflow(false)
+        setWorkflowOpen(false)
+        setWorkflowType(null)
+        setWorkflowNote('')
+        setSelfApprove(false)
+        setAssignee('')
+        router.push('/portal/purchase/trips')
+        return
+      }
+
+      await logTripActivity(`${typeLabels[workflowType]} self-approved`, 'workflow', '', user?.id ?? '')
+      setSubmittingWorkflow(false)
+      setWorkflowOpen(false)
+      setWorkflowType(null)
+      setWorkflowNote('')
+      setSelfApprove(false)
+      setAssignee('')
+      load()
+      return
+    }
+
+    // Normal workflow - create pending task
     const { data: task } = await supabase.from('tasks').insert({
       type: typeKeys[workflowType],
       title: `${typeLabels[workflowType]}: ${trip.trip_id}`,
@@ -783,6 +840,7 @@ export default function TripDetailPage() {
     setWorkflowOpen(false)
     setWorkflowType(null)
     setWorkflowNote('')
+    setSelfApprove(false)
     setAssignee('')
     load()
   }
@@ -2152,7 +2210,7 @@ export default function TripDetailPage() {
       {/* Workflow modal */}
       <Modal
         open={workflowOpen}
-        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
         title={
           workflowType === 'delete' ? 'Request trip deletion' :
           workflowType === 'review' ? 'Request trip review' :
@@ -2183,6 +2241,7 @@ export default function TripDetailPage() {
               </p>
             </div>
           )}
+          {!selfApprove && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Assign to <span className="text-red-400">*</span>
@@ -2199,23 +2258,46 @@ export default function TripDetailPage() {
                 ))}
             </select>
           </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
             <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
               placeholder="Add context for the assignee..." />
           </div>
+          {canSelfApprove && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selfApprove}
+                  onChange={e => setSelfApprove(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <div>
+                  <span className="text-sm font-medium text-amber-900">Self-approve (skip approval)</span>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    As an admin, you can execute this action immediately without sending an approval request.
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+            <button type="button" onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
-            <button type="button" onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+            <button type="button" onClick={submitWorkflow} disabled={submittingWorkflow || (!selfApprove && !assignee)}
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete'
                   ? 'bg-red-600 text-white hover:bg-red-700'
                   : 'bg-brand-600 text-white hover:bg-brand-700'}`}>
-              {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
+              {submittingWorkflow
+                ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+                : selfApprove
+                  ? (workflowType === 'delete' ? 'Delete now' : workflowType === 'completion' ? 'Mark complete now' : 'Mark reviewed now')
+                  : 'Submit request'}
             </button>
           </div>
         </div>

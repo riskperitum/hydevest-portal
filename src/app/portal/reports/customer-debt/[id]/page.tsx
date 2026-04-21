@@ -372,7 +372,7 @@ function CustomerDebtDrilldownPageInner() {
     saving: boolean
     placeholder: string
     submitLabel: string
-    ref?: React.RefObject<HTMLTextAreaElement>
+    ref?: React.RefObject<HTMLTextAreaElement | null>
   }) => (
     <form onSubmit={onSubmit} className="space-y-2">
       <div className="relative">

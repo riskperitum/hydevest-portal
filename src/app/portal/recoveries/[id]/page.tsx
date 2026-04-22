@@ -286,7 +286,7 @@ export default function RecoveryDetailPage() {
     ...recoveries.filter(r => r.payment_type !== 'initial').sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     ...recoveries.filter(r => r.payment_type === 'initial'),
   ]
-  const totalRecovered = recoveries.reduce((s, r) => s + Number(r.amount_paid), 0) + Number(order?.initial_payment ?? 0)
+  const totalRecovered = recoveries.reduce((s, r) => s + Number(r.amount_paid), 0) + Number(order?.amount_paid ?? 0)
   const totalSale = Number(order?.customer_payable ?? 0)
   const progressPct = totalSale > 0 ? Math.min((totalRecovered / totalSale) * 100, 100) : 0
   const statusCfg = order ? (PAYMENT_STATUS[order.payment_status as keyof typeof PAYMENT_STATUS] ?? PAYMENT_STATUS.outstanding) : PAYMENT_STATUS.outstanding

@@ -75,7 +75,7 @@ export default function RecoveriesPage() {
       (salesOrders ?? []).map(o => ({
         ...o,
         sales_order_id: o.id,
-        total_recovered: (totalsByOrder[o.id] ?? 0) + Number((o as any).initial_payment ?? 0),
+        total_recovered: (totalsByOrder[o.id] ?? 0) + Number((o as any).amount_paid ?? 0),
         customer: one(o.customer),
         container: one(o.container),
       })) as RecoverySummary[],

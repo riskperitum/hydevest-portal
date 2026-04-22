@@ -85,44 +85,99 @@ export default function CreateSalesOrderPage() {
 
   useEffect(() => {
     const supabase = createClient()
-    Promise.all([
-      supabase.from('presales')
-        .select('container_id, sale_type')
-        .in('status', ['draft', 'confirmed', 'altered']),
-      supabase.from('sales_orders')
-        .select('container_id, sale_type')
-        .eq('sale_type', 'box_sale'),
-    ]).then(([{ data: presales }, { data: boxSales }]) => {
+    let cancelled = false
+
+    void (async () => {
+      const [{ data: presales }, { data: boxSales }] = await Promise.all([
+        supabase.from('presales')
+          .select('id, container_id, sale_type, total_number_of_pallets')
+          .in('status', ['draft', 'confirmed', 'altered']),
+        supabase.from('sales_orders')
+          .select('container_id, sale_type')
+          .eq('sale_type', 'box_sale'),
+      ])
+      if (cancelled) return
+
       const soldBoxIds = new Set((boxSales ?? []).map(o => o.container_id))
-      const availablePresales = (presales ?? []).filter(p => {
-        if (p.sale_type === 'box_sale' && soldBoxIds.has(p.container_id)) return false
-        return true
-      })
+      const candidatePresales = (presales ?? []).filter(
+        p => !(p.sale_type === 'box_sale' && soldBoxIds.has(p.container_id)),
+      )
+
+      const splitContainerIds = [...new Set(
+        candidatePresales.filter(p => p.sale_type === 'split_sale').map(p => p.container_id),
+      )]
+      const splitCapByContainer = new Map<string, number>()
+      for (const p of candidatePresales) {
+        if (p.sale_type !== 'split_sale' || p.total_number_of_pallets == null) continue
+        const n = Number(p.total_number_of_pallets)
+        if (Number.isNaN(n)) continue
+        const prev = splitCapByContainer.get(p.container_id)
+        splitCapByContainer.set(p.container_id, prev == null ? n : Math.max(prev, n))
+      }
+
+      const soldOutSplit = new Set<string>()
+      if (splitContainerIds.length) {
+        const { data: splitOrders } = await supabase
+          .from('sales_orders')
+          .select('id, container_id')
+          .in('container_id', splitContainerIds)
+          .eq('sale_type', 'split_sale')
+        if (cancelled) return
+        const orderIds = (splitOrders ?? []).map(o => o.id)
+        const orderToContainer = new Map((splitOrders ?? []).map(o => [o.id, o.container_id]))
+        let palletRows: { pallets_sold: number; order_id: string }[] = []
+        if (orderIds.length) {
+          const { data: pr } = await supabase
+            .from('sales_order_pallets')
+            .select('pallets_sold, order_id')
+            .in('order_id', orderIds)
+          palletRows = pr ?? []
+        }
+        const soldByContainer = new Map<string, number>()
+        for (const row of palletRows) {
+          const cid = orderToContainer.get(row.order_id)
+          if (cid) soldByContainer.set(cid, (soldByContainer.get(cid) ?? 0) + Number(row.pallets_sold))
+        }
+        for (const cid of splitContainerIds) {
+          const cap = splitCapByContainer.get(cid)
+          if (cap != null && (soldByContainer.get(cid) ?? 0) >= cap) soldOutSplit.add(cid)
+        }
+      }
+
+      const availablePresales = candidatePresales.filter(
+        p => !(p.sale_type === 'split_sale' && soldOutSplit.has(p.container_id)),
+      )
       const ids = [...new Set(availablePresales.map(p => p.container_id))]
-      if (!ids.length) { setContainers([]); return }
-      supabase.from('containers')
+      if (!ids.length) {
+        setContainers([])
+        return
+      }
+
+      const { data: c } = await supabase
+        .from('containers')
         .select('*, trip:trips!containers_trip_id_fkey(trip_id, title, status)')
         .in('id', ids)
-        .then(({ data: c }) => {
-          // Only show containers from completed trips
-          const filtered = (c ?? []).filter(con => (con.trip as any)?.status === 'completed')
-          setContainers(filtered)
+      if (cancelled) return
 
-          // Auto-select container if coming from grouped sales orders page
-          if (preselectedContainerId && filtered.length > 0) {
-            const preselected = filtered.find(ct => ct.id === preselectedContainerId)
-            if (preselected) {
-              void selectContainer(preselected)
-              setCurrentStep('customer')
-            }
-          }
-        })
-    })
-    supabase.from('customers')
+      const filtered = (c ?? []).filter(con => (con.trip as { status?: string } | null)?.status === 'completed')
+      setContainers(filtered)
+
+      if (preselectedContainerId && filtered.length > 0) {
+        const preselected = filtered.find(ct => ct.id === preselectedContainerId)
+        if (preselected) {
+          void selectContainer(preselected)
+          setCurrentStep('customer')
+        }
+      }
+    })()
+
+    void supabase.from('customers')
       .select('id, customer_id, name, phone')
       .eq('is_active', true)
-      .then(({ data }) => setCustomers(data ?? []))
-  }, [])
+      .then(({ data }) => { if (!cancelled) setCustomers(data ?? []) })
+
+    return () => { cancelled = true }
+  }, [preselectedContainerId])
 
   async function selectContainer(c: Container) {
     setSelectedContainer(c)

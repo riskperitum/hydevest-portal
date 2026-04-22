@@ -103,6 +103,7 @@ export default function SalesOrderDetailPage() {
 
   const [workflowOpen, setWorkflowOpen] = useState(false)
   const [workflowType, setWorkflowType] = useState<'delete' | 'approval' | null>(null)
+  const [selfApprove, setSelfApprove] = useState(false)
   const [workflowNote, setWorkflowNote] = useState('')
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<{ id: string; full_name: string | null; email: string }[]>([])
@@ -114,6 +115,7 @@ export default function SalesOrderDetailPage() {
   const canEditOrder    = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.edit')
   const canDeleteOrder  = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.delete')
   const canApproveOrder = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.approve')
+  const canSelfApprove  = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'sales_orders.approve')
   const canWriteOff     = isSuperAdmin || can(permissions, isSuperAdmin, 'sales_orders.write_off')
 
   const [writeOffOpen, setWriteOffOpen] = useState(false)
@@ -403,13 +405,61 @@ export default function SalesOrderDetailPage() {
   }
 
   async function submitWorkflow() {
-    if (!assignee || !workflowType || !order) return
+    if (!workflowType || !order) return
+    if (!selfApprove && !assignee) return
     setSubmittingWorkflow(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
     const typeKeys = { delete: 'delete_approval', approval: 'approval_request' }
     const typeLabels = { delete: 'Delete approval', approval: 'Approval request' }
+
+    // Self-approve branch
+    if (selfApprove && canSelfApprove) {
+      await supabase.from('tasks').insert({
+        type: typeKeys[workflowType],
+        title: `${typeLabels[workflowType]}: ${order.order_id} (self-approved)`,
+        description: workflowNote || `${typeLabels[workflowType]} for sales order ${order.order_id}`,
+        module: 'sales_orders',
+        record_id: orderId,
+        record_ref: order.order_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+
+      if (workflowType === 'approval') {
+        await supabase.from('sales_orders').update({
+          approval_status: 'approved',
+          needs_approval: false,
+          last_approved_at: new Date().toISOString(),
+          last_approved_by: user?.id,
+        }).eq('id', orderId)
+      } else if (workflowType === 'delete') {
+        await supabase.from('sales_orders').delete().eq('id', orderId)
+        await logActivity('Sales order deleted (self-approved)', 'workflow', '', user?.id ?? '')
+        setSubmittingWorkflow(false)
+        setWorkflowOpen(false)
+        setWorkflowType(null)
+        setWorkflowNote('')
+        setAssignee('')
+        setSelfApprove(false)
+        router.push('/portal/sales/orders')
+        return
+      }
+
+      await logActivity(`${typeLabels[workflowType]} self-approved`, 'workflow', '', user?.id ?? '')
+      setSubmittingWorkflow(false)
+      setWorkflowOpen(false)
+      setWorkflowType(null)
+      setWorkflowNote('')
+      setAssignee('')
+      setSelfApprove(false)
+      load()
+      return
+    }
 
     const { data: task } = await supabase.from('tasks').insert({
       type: typeKeys[workflowType],
@@ -440,6 +490,7 @@ export default function SalesOrderDetailPage() {
     setWorkflowType(null)
     setWorkflowNote('')
     setAssignee('')
+    setSelfApprove(false)
     load()
   }
 
@@ -977,7 +1028,7 @@ export default function SalesOrderDetailPage() {
       {/* Workflow modal */}
       <Modal
         open={workflowOpen}
-        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee('') }}
+        onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
         title={workflowType === 'delete' ? 'Request deletion' : 'Request approval'}
         size="md"
       >
@@ -992,6 +1043,18 @@ export default function SalesOrderDetailPage() {
               <p className="text-xs text-green-700 font-medium">Once approved, this order will be marked as approved and the needs approval flag will be cleared.</p>
             </div>
           )}
+          {canSelfApprove && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={selfApprove} onChange={e => setSelfApprove(e.target.checked)} className="mt-0.5" />
+                <div>
+                  <span className="text-sm font-medium text-amber-900">Self-approve (skip approval)</span>
+                  <p className="text-xs text-amber-700 mt-0.5">As an admin, you can execute this action immediately without sending an approval request.</p>
+                </div>
+              </label>
+            </div>
+          )}
+          {!selfApprove && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
             <select required value={assignee} onChange={e => setAssignee(e.target.value)}
@@ -1002,18 +1065,23 @@ export default function SalesOrderDetailPage() {
               ))}
             </select>
           </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
             <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null) }}
+            <button onClick={() => { setWorkflowOpen(false); setWorkflowType(null); setWorkflowNote(''); setAssignee(''); setSelfApprove(false) }}
               className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-            <button onClick={submitWorkflow} disabled={submittingWorkflow || !assignee}
+            <button onClick={submitWorkflow} disabled={submittingWorkflow || (!selfApprove && !assignee)}
               className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2
                 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
-              {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
+              {submittingWorkflow
+                ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+                : selfApprove
+                  ? (workflowType === 'delete' ? 'Delete now' : 'Approve now')
+                  : 'Submit request'}
             </button>
           </div>
         </div>

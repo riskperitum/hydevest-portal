@@ -350,6 +350,44 @@ export default function SalesOrderDetailPage() {
         outstanding_balance: newOutstanding,
         payment_status: newPaymentStatus,
       }
+
+      // If amount_paid was changed, handle recovery entries
+      if (field === 'amount_paid') {
+        const oldAmountPaid = Number(order?.amount_paid ?? 0)
+        const delta = newAmountPaid - oldAmountPaid
+
+        // Check if an initial recovery exists
+        const { data: existingInitial } = await supabase
+          .from('recoveries')
+          .select('id, amount_paid')
+          .eq('sales_order_id', orderId)
+          .eq('payment_type', 'initial')
+          .maybeSingle()
+
+        const { data: { user: currentUser } } = await supabase.auth.getUser()
+
+        if (existingInitial) {
+          // Update existing initial recovery to new amount
+          await supabase.from('recoveries').update({
+            amount_paid: newAmountPaid,
+          }).eq('id', existingInitial.id)
+        } else if (delta > 0) {
+          // No initial recovery exists yet — create one with the full new amount
+          await supabase.from('recoveries').insert({
+            sales_order_id: orderId,
+            customer_id: order?.customer?.id,
+            payment_type: 'initial',
+            amount_paid: newAmountPaid,
+            payment_date: new Date().toISOString().split('T')[0],
+            payment_method: 'transfer',
+            approval_status: 'approved',
+            created_by: currentUser?.id,
+          })
+        }
+
+        // Also update initial_payment field on sales_order to keep it in sync
+        updateData.initial_payment = newAmountPaid
+      }
     }
 
     // Flag needs approval if was approved

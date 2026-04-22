@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Eye, Package, TrendingUp, Clock, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Package, TrendingUp, Clock, CheckCircle2, Grid3x3 } from 'lucide-react'
 
 interface SalesOrder {
   id: string
@@ -45,6 +45,7 @@ export default function ContainerOrdersPage() {
   const [container, setContainer] = useState<ContainerInfo | null>(null)
   const [orders, setOrders]       = useState<SalesOrder[]>([])
   const [loading, setLoading]     = useState(true)
+  const [presaleInfo, setPresaleInfo] = useState<{ sale_type: string | null; total_pallets: number; pallets_sold: number } | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -68,6 +69,32 @@ export default function ContainerOrdersPage() {
 
     setContainer(containerData as any)
     setOrders((ordersData ?? []) as any)
+
+    // Fetch presale info and pallet sales data
+    const { data: presaleData } = await supabase
+      .from('presales')
+      .select('sale_type, total_number_of_pallets')
+      .eq('container_id', containerId)
+      .in('status', ['draft', 'confirmed', 'altered'])
+      .maybeSingle()
+
+    let palletsSold = 0
+    if (presaleData?.sale_type === 'split_sale') {
+      const orderIds = (ordersData ?? []).map(o => o.id)
+      if (orderIds.length) {
+        const { data: palletRows } = await supabase
+          .from('sales_order_pallets')
+          .select('pallets_sold')
+          .in('order_id', orderIds)
+        palletsSold = (palletRows ?? []).reduce((s, p) => s + Number(p.pallets_sold), 0)
+      }
+    }
+
+    setPresaleInfo({
+      sale_type: presaleData?.sale_type ?? null,
+      total_pallets: Number(presaleData?.total_number_of_pallets ?? 0),
+      pallets_sold: palletsSold,
+    })
     setLoading(false)
   }, [containerId])
 
@@ -127,6 +154,43 @@ export default function ContainerOrdersPage() {
           </div>
         ))}
       </div>
+      {/* Split-sale pallet metrics */}
+      {presaleInfo?.sale_type === 'split_sale' && presaleInfo.total_pallets > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-purple-50 rounded-xl p-4 border border-white shadow-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <Grid3x3 size={15} className="text-purple-600" />
+              <p className="text-xs text-gray-500">Total pallets</p>
+            </div>
+            <p className="text-lg font-bold text-purple-700">{presaleInfo.total_pallets}</p>
+          </div>
+          <div className="bg-green-50 rounded-xl p-4 border border-white shadow-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 size={15} className="text-green-600" />
+              <p className="text-xs text-gray-500">Pallets sold</p>
+            </div>
+            <p className="text-lg font-bold text-green-700">{presaleInfo.pallets_sold}</p>
+          </div>
+          <div className="bg-amber-50 rounded-xl p-4 border border-white shadow-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <Package size={15} className="text-amber-600" />
+              <p className="text-xs text-gray-500">Pallets available</p>
+            </div>
+            <p className="text-lg font-bold text-amber-700">{Math.max(presaleInfo.total_pallets - presaleInfo.pallets_sold, 0)}</p>
+          </div>
+          <div className="bg-brand-50 rounded-xl p-4 border border-white shadow-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp size={15} className="text-brand-600" />
+              <p className="text-xs text-gray-500">Sold %</p>
+            </div>
+            <p className="text-lg font-bold text-brand-700">
+              {presaleInfo.total_pallets > 0
+                ? ((presaleInfo.pallets_sold / presaleInfo.total_pallets) * 100).toFixed(0)
+                : 0}%
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Recovery progress */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">

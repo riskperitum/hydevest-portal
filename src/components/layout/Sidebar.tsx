@@ -46,8 +46,9 @@ const NAV: NavItem[] = [
     label: 'Sales',
     icon: TrendingUp,
     children: [
-      { label: 'Pre-sales',    href: '/portal/sales/presales', permKey: 'presales.view'      },
-      { label: 'Sales orders', href: '/portal/sales/orders',   permKey: 'sales_orders.view'  },
+      { label: 'Pre-sales',    href: '/portal/sales/presales',    permKey: 'presales.view'      },
+      { label: 'Sales orders', href: '/portal/sales/orders',      permKey: 'sales_orders.view'  },
+      { label: 'Commission',   href: '/portal/sales/commission',  permKey: 'commission.view'    },
     ]
   },
   {

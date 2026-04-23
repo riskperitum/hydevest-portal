@@ -91,12 +91,14 @@ export default function ContainerProfitReportPage() {
       { data: salesOrders },
       { data: recoveries },
       { data: palletDists },
+      { data: commissions },
     ] = await Promise.all([
       supabase.from('containers').select('id, container_id, tracking_number, trip_id, pieces_purchased, estimated_landing_cost, unit_price_usd, shipping_amount_usd'),
       supabase.from('presales').select('id, presale_id, container_id, sale_type, expected_sale_revenue, price_per_piece, warehouse_confirmed_pieces, total_number_of_pallets'),
       supabase.from('sales_orders').select('id, container_id, presale_id, customer_payable, sale_type'),
       supabase.from('recoveries').select('sales_order_id, amount_paid'),
       supabase.from('presale_pallet_distributions').select('presale_id, pallet_pieces, number_of_pallets, pallets_sold'),
+      supabase.from('commissions').select('sales_order_id, commission_amount, status').in('status', ['approved', 'paid']),
     ])
 
     const tripIds = [...new Set((containers ?? []).map(c => c.trip_id).filter(Boolean))]
@@ -116,6 +118,10 @@ export default function ContainerProfitReportPage() {
       acc[r.sales_order_id].push(r)
       return acc
     }, {} as Record<string, NonNullable<typeof recoveries>[number][]>)
+    const commissionsByOrder = (commissions ?? []).reduce((acc, c) => {
+      acc[c.sales_order_id] = (acc[c.sales_order_id] ?? 0) + Number(c.commission_amount)
+      return acc
+    }, {} as Record<string, number>)
     const palletsByPresale = (palletDists ?? []).reduce((acc, pd) => {
       if (!acc[pd.presale_id]) acc[pd.presale_id] = []
       acc[pd.presale_id].push(pd)
@@ -165,7 +171,8 @@ export default function ContainerProfitReportPage() {
         const expectedProfit = expectedRevenue - landingCost
         const expectedProfitMargin = landingCost > 0 ? (expectedProfit / landingCost) * 100 : 0
 
-        const actualProfit = salesToDate - landingCost
+        const totalCommissions = orders.reduce((s, o) => s + (commissionsByOrder[o.id] ?? 0), 0)
+        const actualProfit = salesToDate - landingCost - totalCommissions
         const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
 
         // Unearned profit = value of unsold pieces at presale price minus proportional cost

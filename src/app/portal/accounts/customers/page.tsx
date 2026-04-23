@@ -17,6 +17,8 @@ interface CustomerRow {
   total_outstanding: number
   total_bad_debt: number
   active_cases: number
+  split_pallets: number
+  box_containers: number
 }
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -36,11 +38,13 @@ export default function CustomerProfilesPage() {
       { data: ordersData },
       { data: badDebtData },
       { data: legalData },
+      { data: palletData },
     ] = await Promise.all([
       supabase.from('customers').select('id, customer_id, name, phone, address, is_active').order('name'),
-      supabase.from('sales_orders').select('customer_id, customer_payable, outstanding_balance, payment_status'),
+      supabase.from('sales_orders').select('id, customer_id, sale_type, container_id, customer_payable, outstanding_balance, payment_status, container:containers(container_id, tracking_number)'),
       supabase.from('bad_debts').select('customer_id, amount_ngn, status'),
       supabase.from('legal_case_customers').select('customer_id, case:legal_cases!legal_case_customers_case_id_fkey(id, status)'),
+      supabase.from('sales_order_pallets').select('order_id, pallets_sold'),
     ])
 
     const ordersMap: Record<string, { count: number; revenue: number; outstanding: number }> = {}
@@ -49,6 +53,27 @@ export default function CustomerProfilesPage() {
       ordersMap[o.customer_id].count++
       ordersMap[o.customer_id].revenue     += Number(o.customer_payable)
       ordersMap[o.customer_id].outstanding += Number(o.outstanding_balance)
+    }
+
+    // Build pallet map per order (for split sales)
+    const palletsByOrder: Record<string, number> = {}
+    for (const p of (palletData ?? [])) {
+      palletsByOrder[p.order_id] = (palletsByOrder[p.order_id] ?? 0) + Number(p.pallets_sold)
+    }
+
+    // Build split pallets and box containers per customer
+    const splitPalletsMap: Record<string, number> = {}
+    const boxContainersMap: Record<string, Set<string>> = {}
+    for (const o of (ordersData ?? [])) {
+      if (o.sale_type === 'split_sale') {
+        splitPalletsMap[o.customer_id] = (splitPalletsMap[o.customer_id] ?? 0) + (palletsByOrder[o.id] ?? 0)
+      } else if (o.sale_type === 'box_sale') {
+        if (!boxContainersMap[o.customer_id]) boxContainersMap[o.customer_id] = new Set()
+        const rawCont = o.container as { tracking_number?: string | null; container_id?: string } | { tracking_number?: string | null; container_id?: string }[] | null | undefined
+        const cont = Array.isArray(rawCont) ? rawCont[0] : rawCont
+        const trackingNo = cont?.tracking_number ?? cont?.container_id
+        if (trackingNo) boxContainersMap[o.customer_id].add(trackingNo)
+      }
     }
 
     const badDebtMap: Record<string, number> = {}
@@ -78,6 +103,8 @@ export default function CustomerProfilesPage() {
       total_outstanding: ordersMap[c.id]?.outstanding ?? 0,
       total_bad_debt:    badDebtMap[c.id]             ?? 0,
       active_cases:      caseMap[c.id]                ?? 0,
+      split_pallets:     splitPalletsMap[c.id]        ?? 0,
+      box_containers:    boxContainersMap[c.id]?.size ?? 0,
     })))
 
     setLoading(false)
@@ -142,7 +169,7 @@ export default function CustomerProfilesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
-                  {['Customer','ID','Phone','Orders','Revenue','Outstanding','Bad debt','Cases',''].map(h => (
+                  {['Customer','ID','Phone','Orders','Split Pallets','Box Containers','Revenue','Outstanding','Bad debt','Cases',''].map(h => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -164,6 +191,8 @@ export default function CustomerProfilesPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{c.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-xs font-medium text-gray-700">{c.total_orders}</td>
+                    <td className="px-4 py-3 text-xs font-medium text-gray-700 whitespace-nowrap">{c.split_pallets}</td>
+                    <td className="px-4 py-3 text-xs font-medium text-gray-700 whitespace-nowrap">{c.box_containers}</td>
                     <td className="px-4 py-3 text-xs font-semibold text-green-700 whitespace-nowrap">
                       {c.total_revenue > 0 ? fmt(c.total_revenue) : '—'}
                     </td>

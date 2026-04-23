@@ -29,11 +29,13 @@ interface ProfitDetail {
   actual_profit: number
   actual_profit_margin: number
   unearned_profit: number
+  total_commissions: number
   sales_status: string
   profit_status: string
 }
 
 interface OrderRow {
+  id: string
   order_id: string
   customer_name: string
   sale_type: string
@@ -46,6 +48,7 @@ interface OrderRow {
   created_at: string
   profit_contribution: number
   profit_margin: number
+  commission_amount: number
 }
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -80,6 +83,21 @@ export default function ContainerProfitDrilldownPage() {
       ? await supabase.from('sales_order_pallets').select('order_id, pallets_sold, total_pieces, line_total').in('order_id', orderIds)
       : { data: [] }
 
+    // Fetch approved/paid commissions for these orders
+    const { data: commissions } = orderIds.length > 0
+      ? await supabase.from('commissions')
+          .select('sales_order_id, commission_amount, status')
+          .in('sales_order_id', orderIds)
+          .in('status', ['approved', 'paid'])
+      : { data: [] }
+
+    const commissionsByOrder = (commissions ?? []).reduce((acc, c) => {
+      acc[c.sales_order_id] = (acc[c.sales_order_id] ?? 0) + Number(c.commission_amount)
+      return acc
+    }, {} as Record<string, number>)
+
+    const totalCommissions = (commissions ?? []).reduce((s, c) => s + Number(c.commission_amount), 0)
+
     const palletsByOrder = (palletLines ?? []).reduce((acc, pl) => {
       if (!acc[pl.order_id]) acc[pl.order_id] = []
       acc[pl.order_id].push(pl)
@@ -105,7 +123,7 @@ export default function ContainerProfitDrilldownPage() {
 
     const expectedProfit = expectedRevenue - landingCost
     const expectedProfitMargin = landingCost > 0 ? (expectedProfit / landingCost) * 100 : 0
-    const actualProfit = salesToDate - landingCost
+    const actualProfit = salesToDate - landingCost - totalCommissions
     const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
     const unearnedRevenue = piecesRemaining * (pricePerPiece ?? 0)
     const proportionalCost = whPieces > 0 ? (piecesRemaining / whPieces) * landingCost : 0
@@ -147,6 +165,7 @@ export default function ContainerProfitDrilldownPage() {
       expected_profit_margin: expectedProfitMargin,
       actual_profit: actualProfit,
       actual_profit_margin: actualProfitMargin,
+      total_commissions: totalCommissions,
       unearned_profit: unearnedProfit,
       sales_status: salesStatus,
       profit_status: profitStatus,
@@ -158,10 +177,12 @@ export default function ContainerProfitDrilldownPage() {
       const palletsSold = lines.reduce((s, l) => s + l.pallets_sold, 0)
       const piecesSoldInOrder = lines.reduce((s, l) => s + l.total_pieces, 0)
       const proportionalCostForOrder = whPieces > 0 ? (piecesSoldInOrder / whPieces) * landingCost : 0
-      const profitContribution = Number(o.customer_payable) - (presale.sale_type === 'box_sale' ? landingCost : proportionalCostForOrder)
+      const commissionForOrder = commissionsByOrder[o.id] ?? 0
+      const profitContribution = Number(o.customer_payable) - (presale.sale_type === 'box_sale' ? landingCost : proportionalCostForOrder) - commissionForOrder
       const profitMargin = proportionalCostForOrder > 0 ? (profitContribution / proportionalCostForOrder) * 100 : 0
 
       return {
+        id: o.id,
         order_id: o.order_id,
         customer_name: (o.customer as any)?.name ?? '—',
         sale_type: o.sale_type,
@@ -174,8 +195,9 @@ export default function ContainerProfitDrilldownPage() {
         created_at: o.created_at,
         profit_contribution: profitContribution,
         profit_margin: presale.sale_type === 'box_sale'
-          ? (Number(o.customer_payable) - landingCost) / landingCost * 100
+          ? (Number(o.customer_payable) - landingCost - commissionForOrder) / landingCost * 100
           : profitMargin,
+        commission_amount: commissionForOrder,
       }
     }))
 
@@ -238,6 +260,7 @@ export default function ContainerProfitDrilldownPage() {
               { label: 'Landing cost', value: fmt(detail.estimated_landing_cost), color: 'text-gray-900' },
               { label: 'Expected revenue', value: fmt(detail.expected_sale_revenue), color: 'text-brand-700' },
               { label: isCompleted ? 'Actual sales' : 'Sales to date', value: detail.total_sales_to_date > 0 ? fmt(detail.total_sales_to_date) : '—', color: 'text-blue-700' },
+              { label: 'Commissions', value: detail.total_commissions > 0 ? fmt(detail.total_commissions) : '—', color: 'text-purple-700' },
               { label: 'Unearned profit', value: detail.unearned_profit > 0 ? fmt(detail.unearned_profit) : '—', color: 'text-amber-700' },
             ].map(m => (
               <div key={m.label} className="bg-white/60 rounded-xl p-3">
@@ -320,7 +343,7 @@ export default function ContainerProfitDrilldownPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  {['Order ID','Customer','Pieces sold','Sale revenue','Profit contribution','Profit margin','Payment','Date'].map(h => (
+                  {['Order ID','Customer','Pieces sold','Sale revenue','Commission','Profit contribution','Profit margin','Payment','Date'].map(h => (
                     <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -336,6 +359,13 @@ export default function ContainerProfitDrilldownPage() {
                       <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{order.customer_name}</td>
                       <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{order.pieces_sold.toLocaleString()}</td>
                       <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(order.customer_payable)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {order.commission_amount > 0 ? (
+                          <span className="text-xs text-purple-700 font-semibold">-{fmt(order.commission_amount)}</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className={`font-bold ${isProfit ? 'text-green-600' : 'text-red-500'}`}>
                           {isProfit ? '+' : ''}{fmt(order.profit_contribution)}
@@ -365,6 +395,13 @@ export default function ContainerProfitDrilldownPage() {
                 <tr className="bg-gray-50 border-t-2 border-brand-100">
                   <td colSpan={3} className="px-3 py-2.5 text-xs font-bold text-gray-500 uppercase">Totals</td>
                   <td className="px-3 py-2.5 text-xs font-bold text-brand-700 whitespace-nowrap">{fmt(orders.reduce((s,o)=>s+o.customer_payable,0))}</td>
+                  <td className="px-3 py-2.5 text-xs font-bold whitespace-nowrap">
+                    {orders.reduce((s,o)=>s+o.commission_amount,0) > 0 ? (
+                      <span className="text-purple-700">-{fmt(orders.reduce((s,o)=>s+o.commission_amount,0))}</span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-xs font-bold whitespace-nowrap">
                     <span className={`${orders.reduce((s,o)=>s+o.profit_contribution,0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                       {orders.reduce((s,o)=>s+o.profit_contribution,0) >= 0 ? '+' : ''}{fmt(orders.reduce((s,o)=>s+o.profit_contribution,0))}

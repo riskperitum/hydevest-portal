@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { Search, Users, ChevronRight, TrendingUp, AlertTriangle } from 'lucide-react'
+import { Search, Users, ChevronRight, TrendingUp, AlertTriangle, Download, Filter } from 'lucide-react'
 
 interface CustomerRow {
   id: string
@@ -28,6 +28,13 @@ export default function CustomerProfilesPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [hasOutstanding, setHasOutstanding] = useState(false)
+  const [hasBadDebt, setHasBadDebt] = useState(false)
+  const [hasCases, setHasCases] = useState(false)
+  const [sortField, setSortField] = useState<'name' | 'total_orders' | 'total_revenue' | 'total_outstanding' | 'split_pallets' | 'box_containers'>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -112,12 +119,62 @@ export default function CustomerProfilesPage() {
 
   useEffect(() => { load() }, [load])
 
-  const filtered = customers.filter(c =>
-    search === '' ||
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.customer_id.toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone ?? '').includes(search)
-  )
+  const activeFilterCount = [
+    statusFilter !== 'all',
+    hasOutstanding,
+    hasBadDebt,
+    hasCases,
+  ].filter(Boolean).length
+
+  const filtered = customers
+    .filter(c => {
+      const matchSearch = search === '' ||
+        c.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.customer_id.toLowerCase().includes(search.toLowerCase()) ||
+        (c.phone ?? '').includes(search)
+      const matchStatus = statusFilter === 'all' ||
+        (statusFilter === 'active' && c.is_active) ||
+        (statusFilter === 'inactive' && !c.is_active)
+      const matchOutstanding = !hasOutstanding || c.total_outstanding > 0
+      const matchBadDebt = !hasBadDebt || c.total_bad_debt > 0
+      const matchCases = !hasCases || c.active_cases > 0
+      return matchSearch && matchStatus && matchOutstanding && matchBadDebt && matchCases
+    })
+    .sort((a, b) => {
+      const aVal = a[sortField]
+      const bVal = b[sortField]
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal)
+      }
+      const aNum = Number(aVal)
+      const bNum = Number(bVal)
+      return sortDir === 'asc' ? aNum - bNum : bNum - aNum
+    })
+
+  function exportToCSV() {
+    const headers = ['Customer','Customer ID','Phone','Orders','Split Pallets','Box Containers','Revenue','Outstanding','Bad Debt','Active Cases','Status']
+    const rows = filtered.map(c => [
+      c.name,
+      c.customer_id,
+      c.phone ?? '',
+      c.total_orders,
+      c.split_pallets,
+      c.box_containers,
+      c.total_revenue,
+      c.total_outstanding,
+      c.total_bad_debt,
+      c.active_cases,
+      c.is_active ? 'Active' : 'Inactive',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `customer-profiles-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const totalRevenue     = customers.reduce((s, c) => s + c.total_revenue, 0)
   const totalOutstanding = customers.reduce((s, c) => s + c.total_outstanding, 0)
@@ -144,11 +201,107 @@ export default function CustomerProfilesPage() {
         ))}
       </div>
 
-      <div className="relative max-w-sm">
-        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name, ID or phone..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search by name, ID or phone..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFilters(v => !v)}
+            className={`inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
+              showFilters || activeFilterCount > 0 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Filter size={14} /> Filters
+            {activeFilterCount > 0 && (
+              <span className="bg-brand-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">{activeFilterCount}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={exportToCSV}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm text-white rounded-lg hover:opacity-90 disabled:opacity-40"
+            style={{ background: '#55249E' }}
+          >
+            <Download size={14} /> Export CSV
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+              >
+                <option value="all">All customers</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Sort by</label>
+              <select
+                value={`${sortField}|${sortDir}`}
+                onChange={e => {
+                  const [f, d] = e.target.value.split('|')
+                  setSortField(f as typeof sortField)
+                  setSortDir(d as 'asc' | 'desc')
+                }}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+              >
+                <option value="name|asc">Name A-Z</option>
+                <option value="name|desc">Name Z-A</option>
+                <option value="total_orders|desc">Most orders</option>
+                <option value="total_orders|asc">Least orders</option>
+                <option value="total_revenue|desc">Highest revenue</option>
+                <option value="total_revenue|asc">Lowest revenue</option>
+                <option value="total_outstanding|desc">Highest outstanding</option>
+                <option value="total_outstanding|asc">Lowest outstanding</option>
+                <option value="split_pallets|desc">Most split pallets</option>
+                <option value="box_containers|desc">Most box containers</option>
+              </select>
+            </div>
+            <div className="md:col-span-2 flex flex-wrap items-end gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={hasOutstanding} onChange={e => setHasOutstanding(e.target.checked)} />
+                <span className="text-xs text-gray-600">Has outstanding</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={hasBadDebt} onChange={e => setHasBadDebt(e.target.checked)} />
+                <span className="text-xs text-gray-600">Has bad debt</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={hasCases} onChange={e => setHasCases(e.target.checked)} />
+                <span className="text-xs text-gray-600">Has active case</span>
+              </label>
+            </div>
+            {activeFilterCount > 0 && (
+              <div className="col-span-2 md:col-span-4 flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter('all')
+                    setHasOutstanding(false)
+                    setHasBadDebt(false)
+                    setHasCases(false)
+                  }}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">

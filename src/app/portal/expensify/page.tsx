@@ -70,9 +70,19 @@ function detectCategory(description: string): string {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  manual: 'bg-brand-50 text-brand-700',
-  trip:   'bg-blue-50 text-blue-700',
-  payroll:'bg-purple-50 text-purple-700',
+  manual:     'bg-brand-50 text-brand-700',
+  trip:       'bg-blue-50 text-blue-700',
+  payroll:    'bg-purple-50 text-purple-700',
+  legal:      'bg-orange-50 text-orange-700',
+  commission: 'bg-pink-50 text-pink-700',
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'Manual',
+  trip: 'Trip',
+  payroll: 'Payroll',
+  legal: 'Legal',
+  commission: 'Commission',
 }
 
 export default function ExpensifyPage() {
@@ -125,6 +135,7 @@ export default function ExpensifyPage() {
   const { permissions, isSuperAdmin, loading: permLoading } = usePermissions()
   const canViewTripExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*')
   const canViewLegalExpenses = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'legal.*')
+  const canViewCommission = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || can(permissions, isSuperAdmin, 'commission.view')
   const canCreateExpense  = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.create')
   const canDeleteExpense  = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.delete')
   const canApproveExpense = isSuperAdmin || can(permissions, isSuperAdmin, 'expenses.approve')
@@ -147,14 +158,17 @@ export default function ExpensifyPage() {
       .select('*')
       .order('expense_date', { ascending: false })
 
-    if (!canViewTripExpenses && !canViewLegalExpenses) {
-      expenseQuery = expenseQuery.eq('source', 'manual')
-    } else if (!canViewTripExpenses && canViewLegalExpenses) {
-      expenseQuery = expenseQuery.in('source', ['manual', 'legal'])
-    } else if (canViewTripExpenses && !canViewLegalExpenses) {
-      expenseQuery = expenseQuery.in('source', ['manual', 'trip', 'payroll'])
+    const allowedSources: string[] = ['manual']
+    if (canViewTripExpenses) {
+      allowedSources.push('trip', 'payroll')
     }
-    // If both — show all sources
+    if (canViewLegalExpenses) {
+      allowedSources.push('legal')
+    }
+    if (canViewCommission) {
+      allowedSources.push('commission')
+    }
+    expenseQuery = expenseQuery.in('source', allowedSources)
 
     const { data: expenseData } = await expenseQuery
 
@@ -179,7 +193,7 @@ export default function ExpensifyPage() {
       trip: e.trip_id ? tripMap[e.trip_id] ?? null : null,
     })))
     setLoading(false)
-  }, [canViewTripExpenses, canViewLegalExpenses])
+  }, [canViewTripExpenses, canViewLegalExpenses, canViewCommission])
 
   useEffect(() => {
     if (!permLoading) load()
@@ -191,7 +205,8 @@ export default function ExpensifyPage() {
   useEffect(() => {
     if (!canViewTripExpenses && (sourceFilter === 'trip' || sourceFilter === 'payroll')) setSourceFilter('')
     if (!canViewLegalExpenses && sourceFilter === 'legal') setSourceFilter('')
-  }, [canViewTripExpenses, canViewLegalExpenses, sourceFilter])
+    if (!canViewCommission && sourceFilter === 'commission') setSourceFilter('')
+  }, [canViewTripExpenses, canViewLegalExpenses, canViewCommission, sourceFilter])
 
   function resetForm() {
     setDescription('')
@@ -507,6 +522,9 @@ export default function ExpensifyPage() {
                 {canViewLegalExpenses && (
                   <option value="legal">Legal expenses</option>
                 )}
+                {canViewCommission && (
+                  <option value="commission">Commission</option>
+                )}
               </select>
             </div>
             <div>
@@ -590,12 +608,8 @@ export default function ExpensifyPage() {
                     </div>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      expense.source === 'trip'    ? 'bg-blue-50 text-blue-700'   :
-                      expense.source === 'payroll' ? 'bg-purple-50 text-purple-700' :
-                      'bg-gray-100 text-gray-500'
-                    }`}>
-                      {expense.source === 'manual' ? 'Manual' : expense.source === 'trip' ? 'Trip' : 'Payroll'}
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_COLORS[expense.source] ?? 'bg-gray-100 text-gray-500'}`}>
+                      {SOURCE_LABELS[expense.source] ?? expense.source}
                     </span>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">

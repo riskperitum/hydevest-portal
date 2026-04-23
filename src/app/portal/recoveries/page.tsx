@@ -9,6 +9,26 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 
+interface RecoveryTransaction {
+  id: string
+  sales_order_id: string
+  amount_paid: number
+  payment_date: string
+  payment_method: string
+  payment_type: string | null
+  comments: string | null
+  approval_status: string | null
+  created_at: string
+  sales_order: {
+    order_id: string
+    sale_type: string
+    customer_payable: number
+    container: { tracking_number: string | null; container_id: string } | null
+    customer: { name: string; customer_id: string; phone: string | null } | null
+  } | null
+  created_by_profile: { full_name: string | null; email: string } | null
+}
+
 interface RecoverySummary {
   sales_order_id: string
   order_id: string
@@ -35,6 +55,8 @@ export default function RecoveriesPage() {
   const router = useRouter()
   const [orders, setOrders] = useState<RecoverySummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [transactions, setTransactions] = useState<RecoveryTransaction[]>([])
+  const [viewMode, setViewMode] = useState<'orders' | 'transactions'>('orders')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
@@ -80,12 +102,46 @@ export default function RecoveriesPage() {
         container: one(o.container),
       })) as RecoverySummary[],
     )
+
+    // Load all recovery transactions for the transactions view
+    const { data: recoveryTxns } = await supabase
+      .from('recoveries')
+      .select(`
+        id, sales_order_id, amount_paid, payment_date, payment_method,
+        payment_type, comments, approval_status, created_at,
+        sales_order:sales_orders!recoveries_sales_order_id_fkey(
+          order_id, sale_type, customer_payable,
+          container:containers(tracking_number, container_id),
+          customer:customers(name, customer_id, phone)
+        ),
+        created_by_profile:profiles!recoveries_created_by_fkey(full_name, email)
+      `)
+      .order('created_at', { ascending: false })
+
+    setTransactions(
+      (recoveryTxns ?? []).map(r => ({
+        ...r,
+        sales_order: one(r.sales_order),
+        created_by_profile: one(r.created_by_profile),
+      })) as RecoveryTransaction[],
+    )
+
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  const filteredTransactions = transactions.filter(t => {
+    const matchSearch = search === '' ||
+      (t.sales_order?.customer?.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (t.sales_order?.order_id ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (t.sales_order?.container?.tracking_number ?? '').toLowerCase().includes(search.toLowerCase())
+    const matchFrom = dateFrom === '' || new Date(t.payment_date) >= new Date(dateFrom)
+    const matchTo = dateTo === '' || new Date(t.payment_date) <= new Date(dateTo + 'T23:59:59')
+    return matchSearch && matchFrom && matchTo
+  })
 
   const filtered = orders.filter(o => {
     const matchSearch = search === '' ||
@@ -187,6 +243,32 @@ export default function RecoveriesPage() {
         ))}
       </div>
 
+      {/* View tabs */}
+      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+        <button
+          type="button"
+          onClick={() => setViewMode('orders')}
+          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+            viewMode === 'orders'
+              ? 'bg-white text-brand-700 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          By Order
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('transactions')}
+          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+            viewMode === 'transactions'
+              ? 'bg-white text-brand-700 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          By Transaction
+        </button>
+      </div>
+
       {/* Search + filters */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
@@ -252,7 +334,8 @@ export default function RecoveriesPage() {
         )}
       </div>
 
-      {/* Table */}
+      {/* Table - Orders view */}
+      {viewMode === 'orders' && (
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[800px]">
@@ -318,7 +401,7 @@ export default function RecoveriesPage() {
                     </td>
                     <td className="px-3 py-3 text-gray-400 text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString()}</td>
                     <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => router.push(`/portal/recoveries/${o.sales_order_id}`)}
+                      <button type="button" onClick={() => router.push(`/portal/recoveries/${o.sales_order_id}`)}
                         className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors opacity-0 group-hover:opacity-100">
                         <Eye size={14} />
                       </button>
@@ -342,6 +425,119 @@ export default function RecoveriesPage() {
           </table>
         </div>
       </div>
+      )}
+
+      {/* Table - Transactions view */}
+      {viewMode === 'transactions' && (
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                {['Recovery ID','Date','Order ID','Customer','Tracking No.','Amount Paid','Payment Type','Method','Status','Created By',''].map(h => (
+                  <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    {Array.from({ length: 11 }).map((_, j) => (
+                      <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
+                    ))}
+                  </tr>
+                ))
+              ) : filteredTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="px-4 py-16 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+                        <TrendingUp size={20} className="text-gray-300" />
+                      </div>
+                      <p className="text-sm text-gray-400">No transactions found</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredTransactions.map(t => (
+                  <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className="text-xs font-mono bg-brand-50 text-brand-700 px-2 py-0.5 rounded">
+                        {t.id.slice(0, 8).toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600">
+                      {new Date(t.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <Link href={`/portal/sales/orders/${t.sales_order_id}`} className="text-xs font-medium text-brand-600 hover:underline">
+                        {t.sales_order?.order_id ?? '—'}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <p className="text-xs font-medium text-gray-800">{t.sales_order?.customer?.name ?? '—'}</p>
+                      <p className="text-xs text-gray-400">{t.sales_order?.customer?.customer_id ?? ''}</p>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600 font-mono">
+                      {t.sales_order?.container?.tracking_number ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs font-bold text-green-700">
+                      {fmt(t.amount_paid)}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className={`text-xs px-2 py-0.5 rounded font-medium capitalize ${
+                        t.payment_type === 'initial'
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'bg-purple-50 text-purple-700'
+                      }`}>
+                        {t.payment_type ?? 'recovery'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600 capitalize">
+                      {t.payment_method}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        t.approval_status === 'approved'
+                          ? 'bg-green-50 text-green-700'
+                          : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {t.approval_status ?? 'approved'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">
+                      {t.created_by_profile?.full_name ?? t.created_by_profile?.email ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/portal/recoveries/${t.sales_order_id}`)}
+                        className="text-gray-400 hover:text-brand-600 transition-colors"
+                        title="View order recoveries"
+                      >
+                        <Eye size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 border-t border-gray-100 font-bold">
+                <td colSpan={5} className="px-3 py-3 text-xs text-gray-700 uppercase">
+                  {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
+                </td>
+                <td className="px-3 py-3 text-xs text-green-700 whitespace-nowrap">
+                  {fmt(filteredTransactions.reduce((s, t) => s + Number(t.amount_paid), 0))}
+                </td>
+                <td colSpan={5} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      )}
 
       {/* Report modal */}
       {reportOpen && (

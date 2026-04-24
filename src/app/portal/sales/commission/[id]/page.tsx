@@ -81,7 +81,7 @@ export default function CommissionDetailPage() {
   const [deleteReason, setDeleteReason] = useState('')
 
   const [workflowOpen, setWorkflowOpen] = useState(false)
-  const [workflowType, setWorkflowType] = useState<'edit' | 'delete' | 'mark_paid' | null>(null)
+  const [workflowType, setWorkflowType] = useState<'edit' | 'delete' | 'mark_paid' | 'revert_paid' | null>(null)
   const [selfApprove, setSelfApprove] = useState(false)
   const [assignee, setAssignee] = useState('')
   const [employees, setEmployees] = useState<Array<{ id: string; full_name: string | null; email: string }>>([])
@@ -191,6 +191,7 @@ export default function CommissionDetailPage() {
       edit: 'Edit approval',
       delete: 'Delete approval',
       mark_paid: 'Mark paid approval',
+      revert_paid: 'Revert paid approval',
     }
 
     // Self-approve path
@@ -198,7 +199,7 @@ export default function CommissionDetailPage() {
       await supabase.from('tasks').insert({
         type: 'approval_request',
         title: `${typeLabels[workflowType]}: ${commission.commission_id} (self-approved)`,
-        description: workflowType === 'edit' ? editReason : workflowType === 'delete' ? deleteReason : 'Mark as paid',
+        description: workflowType === 'edit' ? editReason : workflowType === 'delete' ? deleteReason : workflowType === 'revert_paid' ? 'Revert to unpaid' : 'Mark as paid',
         module: 'commission',
         record_id: commission.id,
         record_ref: commission.commission_id,
@@ -240,6 +241,13 @@ export default function CommissionDetailPage() {
           paid_by: user?.id,
         }).eq('id', commission.id)
         await logActivity('Commission marked as paid (self-approved)')
+      } else if (workflowType === 'revert_paid') {
+        await supabase.from('commissions').update({
+          status: 'approved',
+          paid_at: null,
+          paid_by: null,
+        }).eq('id', commission.id)
+        await logActivity('Commission reverted to unpaid (self-approved)')
       }
 
       setSubmitting(false)
@@ -259,7 +267,7 @@ export default function CommissionDetailPage() {
     const { data: task } = await supabase.from('tasks').insert({
       type: 'approval_request',
       title: `${typeLabels[workflowType]}: ${commission.commission_id}`,
-      description: workflowType === 'edit' ? editReason : workflowType === 'delete' ? deleteReason : 'Mark as paid',
+      description: workflowType === 'edit' ? editReason : workflowType === 'delete' ? deleteReason : workflowType === 'revert_paid' ? 'Revert to unpaid' : 'Mark as paid',
       module: 'commission',
       record_id: commission.id,
       record_ref: commission.commission_id,
@@ -340,7 +348,16 @@ export default function CommissionDetailPage() {
                 <DollarSign size={14} /> Mark as paid
               </button>
             )}
-            {canEdit && commission.status !== 'paid' && commission.status !== 'modified_pending' && (
+            {canMarkPaid && commission.status === 'paid' && (
+              <button
+                type="button"
+                onClick={() => { setWorkflowType('revert_paid'); setWorkflowOpen(true) }}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+              >
+                <Clock size={14} /> Revert to unpaid
+              </button>
+            )}
+            {canEdit && commission.status !== 'modified_pending' && (
               <button
                 type="button"
                 onClick={() => setEditOpen(true)}
@@ -349,7 +366,7 @@ export default function CommissionDetailPage() {
                 <Edit2 size={14} /> Edit
               </button>
             )}
-            {canDelete && commission.status !== 'paid' && (
+            {canDelete && (
               <button
                 type="button"
                 onClick={() => setDeleteOpen(true)}
@@ -561,7 +578,7 @@ export default function CommissionDetailPage() {
         <Modal
           open={workflowOpen}
           onClose={() => { setWorkflowOpen(false); setWorkflowType(null); setSelfApprove(false); setAssignee('') }}
-          title={workflowType === 'edit' ? 'Request edit approval' : workflowType === 'delete' ? 'Request delete approval' : 'Mark as paid'}
+          title={workflowType === 'edit' ? 'Request edit approval' : workflowType === 'delete' ? 'Request delete approval' : workflowType === 'revert_paid' ? 'Revert to unpaid' : 'Mark as paid'}
           size="sm"
         >
           <div className="space-y-4">
@@ -593,12 +610,12 @@ export default function CommissionDetailPage() {
                 type="button"
                 onClick={submitWorkflow}
                 disabled={submitting || (!selfApprove && !assignee)}
-                className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : workflowType === 'mark_paid' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-brand-600 text-white hover:bg-brand-700'}`}
+                className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2 ${workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : workflowType === 'mark_paid' ? 'bg-green-600 text-white hover:bg-green-700' : workflowType === 'revert_paid' ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-brand-600 text-white hover:bg-brand-700'}`}
               >
                 {submitting
                   ? <><Loader2 size={14} className="animate-spin" /> Submitting...</>
                   : selfApprove
-                    ? (workflowType === 'delete' ? 'Delete now' : workflowType === 'mark_paid' ? 'Mark paid now' : 'Apply edit now')
+                    ? (workflowType === 'delete' ? 'Delete now' : workflowType === 'mark_paid' ? 'Mark paid now' : workflowType === 'revert_paid' ? 'Revert now' : 'Apply edit now')
                     : 'Submit request'}
               </button>
             </div>

@@ -45,6 +45,7 @@ interface ContainerProfitRow {
   actual_profit: number
   actual_profit_margin: number
   unearned_profit: number
+  total_commissions: number
 
   // Status
   sales_status: 'not_started' | 'in_progress' | 'completed'
@@ -228,6 +229,7 @@ export default function ContainerProfitReportPage() {
           actual_profit: actualProfit,
           actual_profit_margin: actualProfitMargin,
           unearned_profit: unearnedProfit,
+          total_commissions: totalCommissions,
           sales_status: salesStatus,
           profit_status: profitStatus,
         }
@@ -270,6 +272,7 @@ export default function ContainerProfitReportPage() {
   const totalExpectedProfit = filtered.reduce((s, r) => s + r.expected_profit, 0)
   const totalActualProfit = filtered.reduce((s, r) => s + (r.sales_status === 'completed' ? r.actual_profit : 0), 0)
   const totalUnearnedProfit = filtered.reduce((s, r) => s + Math.max(r.unearned_profit, 0), 0)
+  const totalCommissions = filtered.reduce((s, r) => s + r.total_commissions, 0)
   const completedCount = filtered.filter(r => r.sales_status === 'completed').length
   const portfolioMargin = totalLandingCost > 0 ? ((totalExpectedRevenue - totalLandingCost) / totalLandingCost) * 100 : 0
 
@@ -374,11 +377,12 @@ export default function ContainerProfitReportPage() {
       ) : canViewCosts ? (
         <>
           {/* Portfolio overview cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
             {[
               { label: 'Total landing cost', value: fmt(totalLandingCost), color: 'text-gray-900', icon: <Package size={14} className="text-gray-500" /> },
               { label: 'Expected revenue', value: fmt(totalExpectedRevenue), color: 'text-brand-700', icon: <Target size={14} className="text-brand-600" /> },
               { label: 'Expected profit', value: fmt(totalExpectedProfit), color: totalExpectedProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <TrendingUp size={14} className={totalExpectedProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
+              { label: 'Total commissions', value: fmt(totalCommissions), color: 'text-purple-700', icon: <TrendingUp size={14} className="text-purple-600" /> },
               { label: 'Actual profit', value: completedCount > 0 ? fmt(totalActualProfit) : '—', color: totalActualProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <Zap size={14} className={totalActualProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
               { label: 'Unearned profit', value: fmt(totalUnearnedProfit), color: 'text-amber-700', icon: <BarChart2 size={14} className="text-amber-600" /> },
               { label: 'Portfolio margin', value: fmtPct(portfolioMargin), color: portfolioMargin >= 0 ? 'text-green-700' : 'text-red-600', icon: <DollarSign size={14} className={portfolioMargin >= 0 ? 'text-green-600' : 'text-red-500'} /> },
@@ -577,11 +581,17 @@ export default function ContainerProfitReportPage() {
                     </div>
 
                     {/* Footer metrics */}
-                    <div className="px-5 pb-4 pt-1 grid grid-cols-3 gap-2 border-t border-gray-50">
+                    <div className="px-5 pb-4 pt-1 grid grid-cols-4 gap-2 border-t border-gray-50">
                       <div>
                         <p className="text-xs text-gray-400 text-[10px]">Exp. revenue</p>
                         <p className="text-xs font-semibold text-gray-700 truncate text-[11px]">{fmt(row.expected_sale_revenue)}</p>
                       </div>
+                      {row.total_commissions > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-400 text-[10px]">Commissions</p>
+                          <p className="text-xs font-semibold text-purple-600 truncate text-[11px]">{fmt(row.total_commissions)}</p>
+                        </div>
+                      )}
                       {!isCompleted && row.unearned_profit > 0 && (
                         <div>
                           <p className="text-xs text-gray-400 text-[10px]">Unearned</p>

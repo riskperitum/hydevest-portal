@@ -19,6 +19,7 @@ interface ExpenseRow {
   category: string
   type: string
   description: string
+  notes?: string | null
   amount: number
   currency: string
   exchange_rate: number
@@ -103,6 +104,9 @@ export default function ExpensifyPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [description, setDescription] = useState('')
+  const [notes, setNotes] = useState('')
+  const [notesModalOpen, setNotesModalOpen] = useState(false)
+  const [notesModalContent, setNotesModalContent] = useState<{ title: string; content: string } | null>(null)
   const [category, setCategory] = useState('')
   const [amount, setAmount] = useState('')
   const [currency, setCurrency] = useState('NGN')
@@ -115,6 +119,7 @@ export default function ExpensifyPage() {
   const [editExpense, setEditExpense] = useState<ExpenseRow | null>(null)
   const [editForm, setEditForm] = useState({
     description: '',
+    notes: '',
     category: '',
     amount: '',
     currency: 'NGN',
@@ -210,6 +215,7 @@ export default function ExpensifyPage() {
 
   function resetForm() {
     setDescription('')
+    setNotes('')
     setCategory('')
     setAmount('')
     setCurrency('NGN')
@@ -248,6 +254,7 @@ export default function ExpensifyPage() {
     await supabase.from('expenses').insert({
       category: effectiveCategory,
       description,
+      notes: notes.trim() || null,
       amount: parseFloat(amount),
       currency,
       exchange_rate: parseFloat(exchangeRate) || 1,
@@ -291,6 +298,7 @@ export default function ExpensifyPage() {
     const supabase = createClient()
     await supabase.from('expenses').update({
       description: editForm.description,
+      notes: editForm.notes?.trim() || null,
       category: editEffectiveCategory,
       amount: parseFloat(editForm.amount),
       currency: editForm.currency,
@@ -570,7 +578,7 @@ export default function ExpensifyPage() {
           <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                {['Expense ID','Source','Category','Description','Amount','Currency','Amount (NGN)','Date','Approval','Trip','Created by','Attachments',''].map(h => (
+                {['Expense ID','Source','Category','Description','Notes','Amount','Currency','Amount (NGN)','Date','Approval','Trip','Created by','Attachments',''].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -579,14 +587,14 @@ export default function ExpensifyPage() {
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 13 }).map((_, j) => (
+                    {Array.from({ length: 14 }).map((_, j) => (
                       <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-16 text-center">
+                  <td colSpan={14} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
                         <Receipt size={20} className="text-gray-300" />
@@ -616,6 +624,23 @@ export default function ExpensifyPage() {
                     <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-medium">{expense.category}</span>
                   </td>
                   <td className="px-3 py-3 text-gray-700 max-w-[180px] truncate">{expense.description}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {expense.notes ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setNotesModalContent({ title: expense.expense_id, content: expense.notes ?? '' })
+                          setNotesModalOpen(true)
+                        }}
+                        className="text-xs text-brand-600 hover:text-brand-700 underline font-medium"
+                      >
+                        View notes
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{fmt(expense.amount, expense.currency)}</td>
                   <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{expense.currency}</td>
                   <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">₦{Number(expense.amount_ngn).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -659,6 +684,7 @@ export default function ExpensifyPage() {
                             setEditExpense(expense)
                             setEditForm({
                               description: expense.description,
+                              notes: expense.notes ?? '',
                               category: expense.category,
                               amount: expense.amount.toString(),
                               currency: expense.currency,
@@ -749,6 +775,13 @@ export default function ExpensifyPage() {
                   <input required value={description} onChange={e => setDescription(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     placeholder="e.g. Fuel for truck delivery" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+                  <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                    placeholder="Optional context, receipt refs, etc." />
                 </div>
 
                 {/* Category — auto-detected */}
@@ -919,6 +952,13 @@ export default function ExpensifyPage() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+                  <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                    placeholder="Optional context, receipt refs, etc." />
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-sm font-medium text-gray-700">Category <span className="text-red-400">*</span></label>
                     {editAutoCategory && !editForm.category && (
@@ -1044,6 +1084,28 @@ export default function ExpensifyPage() {
                 {submittingWorkflow ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : 'Submit request'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {notesModalOpen && notesModalContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => { setNotesModalOpen(false); setNotesModalContent(null) }}
+          />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900 truncate">Notes · {notesModalContent.title}</h2>
+              <button
+                type="button"
+                onClick={() => { setNotesModalOpen(false); setNotesModalContent(null) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{notesModalContent.content}</p>
           </div>
         </div>
       )}

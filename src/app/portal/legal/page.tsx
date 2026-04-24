@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import { useRouter } from 'next/navigation'
+import Modal from '@/components/ui/Modal'
+import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
 import {
   Scale, FileText, DollarSign, Plus, Search,
   AlertCircle, Clock, CheckCircle2, RefreshCw,
-  Upload, ChevronRight, Users
+  Upload, ChevronRight, Users, Trash2, Shield, X, Eye, Loader2, Paperclip,
 } from 'lucide-react'
 
 interface LegalCase {
@@ -486,27 +488,83 @@ function LegalDocumentsTab() {
 function LegalPaymentsTab() {
   const { permissions, isSuperAdmin } = usePermissions()
   const canManagePayments = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_payments')
+  const canApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.*') || can(permissions, isSuperAdmin, 'legal.approve')
+  const canSelfApprove = isSuperAdmin || can(permissions, isSuperAdmin, 'admin.*') || canApprove
 
-  const [payments, setPayments]     = useState<any[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [addOpen, setAddOpen]       = useState(false)
-  const [saving, setSaving]         = useState(false)
-  const [form, setForm]             = useState({
+  const [payments, setPayments] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
-    category: 'other', description: '', payee: '',
+    category: 'other', description: '', payee: '', notes: '',
   })
 
-  useEffect(() => { loadPayments() }, [])
+  // File upload state
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+
+  // Workflow state
+  const [workflowOpen, setWorkflowOpen] = useState(false)
+  const [workflowType, setWorkflowType] = useState<'approve' | 'delete' | null>(null)
+  const [workflowPayment, setWorkflowPayment] = useState<any | null>(null)
+  const [workflowNote, setWorkflowNote] = useState('')
+  const [selfApprove, setSelfApprove] = useState(false)
+  const [assignee, setAssignee] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [employees, setEmployees] = useState<Array<{ id: string; full_name: string | null; email: string }>>([])
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  // Notes modal
+  const [notesModalOpen, setNotesModalOpen] = useState(false)
+  const [notesContent, setNotesContent] = useState<{ title: string; content: string } | null>(null)
+
+  // Attachments modal
+  const [attachmentsModalOpen, setAttachmentsModalOpen] = useState(false)
+  const [attachmentsList, setAttachmentsList] = useState<{ url: string; name: string; type: string }[]>([])
+
+  useEffect(() => {
+    void loadPayments()
+    const init = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      setCurrentUserId(user?.id ?? null)
+      const emps = await getAdminProfiles()
+      setEmployees(emps)
+    }
+    void init()
+  }, [])
 
   async function loadPayments() {
     setLoading(true)
     const supabase = createClient()
     const { data } = await supabase.from('legal_payments').select(`
-      id, payment_id, amount, payment_date, category, description, payee, created_at,
+      id, payment_id, amount, payment_date, category, description, payee, notes,
+      file_urls, status, is_modified, approved_at, created_at, created_by,
       creator:profiles!legal_payments_created_by_fkey(full_name, email)
     `).order('payment_date', { ascending: false })
     setPayments(data ?? [])
     setLoading(false)
+  }
+
+  async function handleUpload(files: File[]) {
+    if (!files.length) return
+    setUploading(true)
+    const supabase = createClient()
+    const uploaded: { url: string; name: string; type: string }[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `legal-payments/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+        uploaded.push({ url: publicUrl, name: file.name, type: file.type })
+      }
+    }
+    setUploadedFiles(prev => [...prev, ...uploaded])
+    setUploading(false)
+    setUploadFiles([])
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -516,29 +574,122 @@ function LegalPaymentsTab() {
     const { data: { user } } = await supabase.auth.getUser()
     const seq = Date.now().toString().slice(-5)
     await supabase.from('legal_payments').insert({
-      payment_id:   `LEG-${seq}`,
-      amount:       parseFloat(form.amount),
+      payment_id: `LEG-${seq}`,
+      amount: parseFloat(form.amount),
       payment_date: form.payment_date,
-      category:     form.category,
-      description:  form.description || null,
-      payee:        form.payee || null,
-      created_by:   user?.id,
+      category: form.category,
+      description: form.description || null,
+      payee: form.payee || null,
+      notes: form.notes || null,
+      file_urls: uploadedFiles,
+      status: 'pending_approval',
+      created_by: user?.id,
     })
     setSaving(false)
     setAddOpen(false)
-    setForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], category: 'other', description: '', payee: '' })
-    loadPayments()
+    setForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], category: 'other', description: '', payee: '', notes: '' })
+    setUploadedFiles([])
+    setUploadFiles([])
+    void loadPayments()
+  }
+
+  async function submitWorkflow() {
+    if (!workflowPayment || !workflowType) return
+    if (!selfApprove && !assignee) return
+
+    setSubmitting(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (selfApprove && canSelfApprove) {
+      if (workflowType === 'approve') {
+        await supabase.from('legal_payments').update({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          approved_by: user?.id,
+        }).eq('id', workflowPayment.id)
+        await supabase.from('legal_payment_activity_log').insert({
+          legal_payment_id: workflowPayment.id,
+          action: 'Payment approved (self-approved)',
+          performed_by: user?.id,
+          new_value: workflowNote || null,
+        })
+      } else if (workflowType === 'delete') {
+        await supabase.from('legal_payment_activity_log').insert({
+          legal_payment_id: workflowPayment.id,
+          action: 'Payment deleted (self-approved)',
+          performed_by: user?.id,
+          new_value: workflowNote || null,
+        })
+        await supabase.from('legal_payments').delete().eq('id', workflowPayment.id)
+      }
+
+      await supabase.from('tasks').insert({
+        type: workflowType === 'delete' ? 'delete_approval' : 'approval_request',
+        title: `Legal payment ${workflowType}: ${workflowPayment.payment_id} (self-approved)`,
+        description: workflowNote || '',
+        module: 'legal_payments',
+        record_id: workflowPayment.id,
+        record_ref: workflowPayment.payment_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+    } else {
+      const { data: task } = await supabase.from('tasks').insert({
+        type: workflowType === 'delete' ? 'delete_approval' : 'approval_request',
+        title: `Legal payment ${workflowType}: ${workflowPayment.payment_id}`,
+        description: workflowNote || '',
+        module: 'legal_payments',
+        record_id: workflowPayment.id,
+        record_ref: workflowPayment.payment_id,
+        requested_by: user?.id,
+        assigned_to: assignee,
+        priority: workflowType === 'delete' ? 'high' : 'normal',
+      }).select().single()
+
+      await supabase.from('notifications').insert({
+        user_id: assignee,
+        type: `task_${workflowType === 'delete' ? 'delete_approval' : 'approval_request'}`,
+        title: `New task: Legal payment ${workflowType}`,
+        message: workflowPayment.payment_id,
+        task_id: task?.id,
+        record_id: workflowPayment.id,
+        record_ref: workflowPayment.payment_id,
+        module: 'legal_payments',
+      })
+    }
+
+    setSubmitting(false)
+    setWorkflowOpen(false)
+    setWorkflowType(null)
+    setWorkflowPayment(null)
+    setWorkflowNote('')
+    setSelfApprove(false)
+    setAssignee('')
+    void loadPayments()
   }
 
   const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const total = payments.reduce((s, p) => s + Number(p.amount), 0)
+  const total = payments.filter(p => p.status === 'approved' || p.status === 'paid').reduce((s, p) => s + Number(p.amount), 0)
+
+  function closeWorkflow() {
+    setWorkflowOpen(false)
+    setWorkflowType(null)
+    setWorkflowPayment(null)
+    setSelfApprove(false)
+    setAssignee('')
+    setWorkflowNote('')
+  }
 
   return (
     <div className="p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-800">Legal payments</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Standalone legal expenses outside of cases · Total: {fmt(total)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Standalone legal expenses outside of cases · Approved total: {fmt(total)}</p>
         </div>
         {canManagePayments && (
           <button onClick={() => setAddOpen(true)}
@@ -555,18 +706,17 @@ function LegalPaymentsTab() {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount <span className="text-red-400">*</span></label>
               <input type="number" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                placeholder="0.00"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                placeholder="0.00" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Date</label>
               <input type="date" value={form.payment_date} onChange={e => setForm(f => ({ ...f, payment_date: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Category</label>
               <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white">
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
                 {['retainer','filing_fee','counsel_fee','other'].map(c => (
                   <option key={c} value={c} className="capitalize">{c.replace('_', ' ')}</option>
                 ))}
@@ -575,18 +725,52 @@ function LegalPaymentsTab() {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Payee</label>
               <input value={form.payee} onChange={e => setForm(f => ({ ...f, payee: e.target.value }))}
-                placeholder="Who was paid?"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                placeholder="Who was paid?" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Description</label>
               <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Details of the payment"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                placeholder="Details of the payment" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+            </div>
+            <div className="col-span-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Notes</label>
+              <textarea rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Any additional notes..." className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
             </div>
           </div>
+
+          {/* Attachments */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Attachments</label>
+            {uploadedFiles.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {uploadedFiles.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                    <span className="text-xs text-gray-700 truncate">{f.name}</span>
+                    <button type="button" onClick={() => setUploadedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-xs text-red-500 hover:text-red-700"><X size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input type="file" multiple className="hidden" onChange={e => setUploadFiles(Array.from(e.target.files ?? []))} />
+                <span className="block px-3 py-2 text-xs text-gray-500 border border-gray-200 border-dashed rounded-lg hover:bg-gray-50">
+                  {uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''} selected` : 'Click to attach files'}
+                </span>
+              </label>
+              {uploadFiles.length > 0 && (
+                <button type="button" onClick={() => void handleUpload(uploadFiles)} disabled={uploading}
+                  className="px-3 py-2 text-xs font-semibold text-white rounded-lg disabled:opacity-50" style={{ background: '#55249E' }}>
+                  {uploading ? <><Loader2 size={12} className="animate-spin inline" /> Uploading</> : 'Upload'}
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="flex gap-2">
-            <button type="button" onClick={() => setAddOpen(false)}
+            <button type="button" onClick={() => { setAddOpen(false); setUploadedFiles([]); setUploadFiles([]) }}
               className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
             <button type="submit" disabled={saving}
               className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg disabled:opacity-50"
@@ -597,44 +781,164 @@ function LegalPaymentsTab() {
         </form>
       )}
 
-      {loading ? (
-        Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />)
-      ) : payments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 gap-2">
-          <DollarSign size={24} className="text-gray-200" />
-          <p className="text-sm text-gray-400">No legal payments recorded</p>
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-100">
-              {['Ref','Amount','Date','Category','Payee','Description','Recorded by'].map(h => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {payments.map((p: any) => (
-              <tr key={p.id} className="hover:bg-gray-50/50">
-                <td className="px-3 py-3">
-                  <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: '#f0ecfc', color: '#55249E' }}>
-                    {p.payment_id}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-sm font-bold text-gray-800">{fmt(Number(p.amount))}</td>
-                <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">
-                  {new Date(p.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </td>
-                <td className="px-3 py-3 text-xs text-gray-500 capitalize">{p.category?.replace('_', ' ')}</td>
-                <td className="px-3 py-3 text-xs text-gray-500">{p.payee ?? '—'}</td>
-                <td className="px-3 py-3 text-xs text-gray-500 max-w-[160px] truncate">{p.description ?? '—'}</td>
-                <td className="px-3 py-3 text-xs text-gray-500">{p.creator?.full_name ?? p.creator?.email ?? '—'}</td>
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                {['Payment ID','Date','Category','Payee','Description','Notes','Attachments','Amount','Status','Actions'].map(h => (
+                  <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-xs text-gray-400">Loading...</td></tr>
+              ) : payments.length === 0 ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-xs text-gray-400">No payments found</td></tr>
+              ) : payments.map(p => (
+                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{p.payment_id}</span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600">
+                    {new Date(p.payment_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-700 capitalize">{p.category?.replace('_', ' ')}</td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-700">{p.payee ?? '—'}</td>
+                  <td className="px-3 py-3 text-xs text-gray-600 max-w-[180px] truncate">{p.description ?? '—'}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {p.notes ? (
+                      <button type="button" onClick={() => { setNotesContent({ title: p.payment_id, content: p.notes }); setNotesModalOpen(true) }}
+                        className="text-xs text-brand-600 hover:text-brand-700 underline">View notes</button>
+                    ) : <span className="text-xs text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {Array.isArray(p.file_urls) && p.file_urls.length > 0 ? (
+                      <button type="button" onClick={() => { setAttachmentsList(p.file_urls); setAttachmentsModalOpen(true) }}
+                        className="inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 underline">
+                        <Paperclip size={11} /> {p.file_urls.length}
+                      </button>
+                    ) : <span className="text-xs text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap font-semibold text-gray-900">{fmt(p.amount)}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      p.status === 'approved' ? 'bg-green-50 text-green-700' :
+                      p.status === 'paid' ? 'bg-blue-50 text-blue-700' :
+                      p.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                      'bg-amber-50 text-amber-700'
+                    }`}>
+                      {p.status?.replace('_', ' ')}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <div className="flex items-center gap-1">
+                      {canApprove && p.status === 'pending_approval' && (
+                        <button type="button"
+                          onClick={() => { setWorkflowPayment(p); setWorkflowType('approve'); setWorkflowOpen(true) }}
+                          className="p-1 rounded hover:bg-green-50 text-gray-400 hover:text-green-600"
+                          title="Approve"><Shield size={13} /></button>
+                      )}
+                      {canManagePayments && (
+                        <button type="button"
+                          onClick={() => { setWorkflowPayment(p); setWorkflowType('delete'); setWorkflowOpen(true) }}
+                          className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                          title="Delete"><Trash2 size={13} /></button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Workflow modal */}
+      <Modal open={workflowOpen} onClose={closeWorkflow}
+        title={workflowType === 'approve' ? 'Approve legal payment' : 'Delete legal payment'} size="sm">
+        <div className="space-y-4">
+          {canSelfApprove && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={selfApprove} onChange={e => setSelfApprove(e.target.checked)} className="mt-0.5" />
+                <div>
+                  <span className="text-sm font-medium text-amber-900">Self-approve</span>
+                  <p className="text-xs text-amber-700 mt-0.5">Execute this action immediately without sending an approval request.</p>
+                </div>
+              </label>
+            </div>
+          )}
+          {!selfApprove && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
+              <select value={assignee} onChange={e => setAssignee(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+                <option value="">Select user...</option>
+                {employees.filter(e => e.id !== currentUserId).map(e => (
+                  <option key={e.id} value={e.id}>{e.full_name ?? e.email}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
+            <textarea rows={2} value={workflowNote} onChange={e => setWorkflowNote(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={closeWorkflow}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={() => void submitWorkflow()} disabled={submitting || (!selfApprove && !assignee)}
+              className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2 ${
+                workflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}>
+              {submitting ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : selfApprove ? (workflowType === 'delete' ? 'Delete now' : 'Approve now') : 'Submit request'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Notes modal */}
+      {notesModalOpen && notesContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setNotesModalOpen(false); setNotesContent(null) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900 truncate">Notes · {notesContent.title}</h2>
+              <button type="button" onClick={() => { setNotesModalOpen(false); setNotesContent(null) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 shrink-0"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{notesContent.content}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Attachments modal */}
+      {attachmentsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setAttachmentsModalOpen(false); setAttachmentsList([]) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900">Attachments</h2>
+              <button type="button" onClick={() => { setAttachmentsModalOpen(false); setAttachmentsList([]) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {attachmentsList.map((f, i) => (
+                <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">
+                  <span className="text-sm text-gray-700 truncate">{f.name}</span>
+                  <Eye size={14} className="text-gray-400" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
 }
+
 

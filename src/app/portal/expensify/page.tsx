@@ -114,6 +114,9 @@ export default function ExpensifyPage() {
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0])
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
+  const [editUploadFiles, setEditUploadFiles] = useState<File[]>([])
+  const [editUploadedFiles, setEditUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
+  const [editUploading, setEditUploading] = useState(false)
   const [uploading, setUploading] = useState(false)
 
   const [editExpense, setEditExpense] = useState<ExpenseRow | null>(null)
@@ -244,6 +247,25 @@ export default function ExpensifyPage() {
     setUploadFiles([])
   }
 
+  async function handleEditUpload(files: File[]) {
+    if (!files.length) return
+    setEditUploading(true)
+    const supabase = createClient()
+    const uploaded: { url: string; name: string; type: string }[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `expenses/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+        uploaded.push({ url: publicUrl, name: file.name, type: file.type })
+      }
+    }
+    setEditUploadedFiles(prev => [...prev, ...uploaded])
+    setEditUploading(false)
+    setEditUploadFiles([])
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!canCreateExpense || !effectiveCategory || !amount) return
@@ -305,9 +327,12 @@ export default function ExpensifyPage() {
       exchange_rate: parseFloat(editForm.exchange_rate) || 1,
       amount_ngn: editAmountNgn,
       expense_date: editForm.expense_date,
+      file_urls: editUploadedFiles,
     }).eq('id', editExpense.id)
     setSavingEdit(false)
     setEditExpense(null)
+    setEditUploadFiles([])
+    setEditUploadedFiles([])
     load()
   }
 
@@ -682,6 +707,8 @@ export default function ExpensifyPage() {
                           title="Edit"
                           onClick={() => {
                             setEditExpense(expense)
+                            setEditUploadFiles([])
+                            setEditUploadedFiles(Array.isArray(expense.file_urls) ? [...expense.file_urls] : [])
                             setEditForm({
                               description: expense.description,
                               notes: expense.notes ?? '',
@@ -929,14 +956,14 @@ export default function ExpensifyPage() {
       {/* Edit expense modal */}
       {editExpense && (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditExpense(null)} />
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setEditExpense(null); setEditUploadFiles([]); setEditUploadedFiles([]) }} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h2 className="text-base font-semibold text-gray-900">Edit expense</h2>
                 <p className="text-xs text-gray-400 mt-0.5 font-mono">{editExpense.expense_id}</p>
               </div>
-              <button onClick={() => setEditExpense(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
+              <button onClick={() => { setEditExpense(null); setEditUploadFiles([]); setEditUploadedFiles([]) }} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
                 <X size={18} />
               </button>
             </div>
@@ -1018,9 +1045,48 @@ export default function ExpensifyPage() {
                     className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Attachments</label>
+                  {editUploadedFiles.length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      {editUploadedFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2.5 bg-green-50 rounded-lg border border-green-200">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-gray-900 truncate">{f.name}</p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <a href={f.url} target="_blank" rel="noreferrer"
+                              className="p-1 rounded text-gray-400 hover:text-brand-600 transition-colors">
+                              <Eye size={13} />
+                            </a>
+                            <button type="button" onClick={() => setEditUploadedFiles(prev => prev.filter((_, j) => j !== i))}
+                              className="p-1 rounded text-gray-400 hover:text-red-500 transition-colors">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-400 hover:border-brand-300 hover:text-brand-600 transition-colors cursor-pointer">
+                      <Upload size={15} />
+                      <span>{editUploadFiles.length > 0 ? `${editUploadFiles.length} file${editUploadFiles.length > 1 ? 's' : ''} selected` : 'Click to attach receipts'}</span>
+                      <input type="file" multiple className="hidden"
+                        onChange={e => setEditUploadFiles(Array.from(e.target.files ?? []))} />
+                    </label>
+                    {editUploadFiles.length > 0 && (
+                      <button type="button" onClick={() => void handleEditUpload(editUploadFiles)} disabled={editUploading}
+                        className="px-4 py-3 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2 shrink-0">
+                        {editUploading ? <><Loader2 size={13} className="animate-spin" /> Uploading…</> : 'Upload'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
               </div>
               <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
-                <button type="button" onClick={() => setEditExpense(null)}
+                <button type="button" onClick={() => { setEditExpense(null); setEditUploadFiles([]); setEditUploadedFiles([]) }}
                   className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">
                   Cancel
                 </button>

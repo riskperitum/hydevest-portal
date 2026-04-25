@@ -55,7 +55,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function LegalPage() {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'cases' | 'documents' | 'payments'>('cases')
+  const [activeTab, setActiveTab] = useState<'cases' | 'documents' | 'payments' | 'requests'>('cases')
   const [cases, setCases]         = useState<LegalCase[]>([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
@@ -123,6 +123,7 @@ export default function LegalPage() {
     { key: 'cases',     label: 'Cases',           icon: Scale    },
     { key: 'documents', label: 'Documents',        icon: FileText },
     { key: 'payments',  label: 'Legal payments',   icon: DollarSign },
+    { key: 'requests',  label: 'Payment requests', icon: Clock },
   ]
 
   return (
@@ -280,6 +281,7 @@ export default function LegalPage() {
 
         {activeTab === 'documents' && <LegalDocumentsTab />}
         {activeTab === 'payments' && <LegalPaymentsTab />}
+        {activeTab === 'requests' && <PaymentRequestsTab />}
       </div>
     </div>
   )
@@ -927,6 +929,458 @@ function LegalPaymentsTab() {
             </div>
             <div className="space-y-2">
               {attachmentsList.map((f, i) => (
+                <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">
+                  <span className="text-sm text-gray-700 truncate">{f.name}</span>
+                  <Eye size={14} className="text-gray-400" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PaymentRequestsTab() {
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canManage = isSuperAdmin || can(permissions, isSuperAdmin, 'legal.manage_payments') || can(permissions, isSuperAdmin, 'legal.*')
+
+  const [requests, setRequests] = useState<any[]>([])
+  const [cases, setCases] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'settled' | 'rejected'>('all')
+
+  const [form, setForm] = useState({
+    case_id: '',
+    amount: '',
+    category: 'counsel_fee',
+    payee: '',
+    description: '',
+    notes: '',
+  })
+
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+
+  // Settle modal state
+  const [settleOpen, setSettleOpen] = useState(false)
+  const [settleTarget, setSettleTarget] = useState<any | null>(null)
+  const [settling, setSettling] = useState(false)
+
+  // Reject modal state
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectTarget, setRejectTarget] = useState<any | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+
+  // Notes/attachments modal
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [notesContent, setNotesContent] = useState<{ title: string; content: string } | null>(null)
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [attachList, setAttachList] = useState<{ url: string; name: string; type: string }[]>([])
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const supabase = createClient()
+    const [{ data: reqs }, { data: caseList }] = await Promise.all([
+      supabase.from('legal_payment_requests').select(`
+        *,
+        case:legal_cases(id, case_id, title),
+        creator:profiles!legal_payment_requests_created_by_fkey(full_name, email),
+        settler:profiles!legal_payment_requests_settled_by_fkey(full_name, email)
+      `).order('created_at', { ascending: false }),
+      supabase.from('legal_cases').select('id, case_id, title').order('created_at', { ascending: false }),
+    ])
+    setRequests(reqs ?? [])
+    setCases(caseList ?? [])
+    setLoading(false)
+  }
+
+  async function handleUpload(files: File[]) {
+    if (!files.length) return
+    setUploading(true)
+    const supabase = createClient()
+    const uploaded: { url: string; name: string; type: string }[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `legal-payment-requests/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+        uploaded.push({ url: publicUrl, name: file.name, type: file.type })
+      }
+    }
+    setUploadedFiles(prev => [...prev, ...uploaded])
+    setUploading(false)
+    setUploadFiles([])
+  }
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('legal_payment_requests').insert({
+      case_id: form.case_id || null,
+      amount: parseFloat(form.amount),
+      category: form.category,
+      payee: form.payee,
+      description: form.description || null,
+      notes: form.notes || null,
+      file_urls: uploadedFiles,
+      status: 'pending',
+      created_by: user?.id,
+    })
+    setSaving(false)
+    setAddOpen(false)
+    setForm({ case_id: '', amount: '', category: 'counsel_fee', payee: '', description: '', notes: '' })
+    setUploadedFiles([])
+    setUploadFiles([])
+    load()
+  }
+
+  async function handleSettle() {
+    if (!settleTarget) return
+    setSettling(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    let legalPaymentId: string | null = null
+    let legalCasePaymentId: string | null = null
+
+    if (settleTarget.case_id) {
+      // Create case payment
+      const seq = Date.now().toString().slice(-5)
+      const { data: cp } = await supabase.from('legal_case_payments').insert({
+        payment_id: `CPAY-${seq}`,
+        case_id: settleTarget.case_id,
+        amount: settleTarget.amount,
+        payment_date: new Date().toISOString().split('T')[0],
+        payment_type: settleTarget.category === 'counsel_fee' ? 'legal_fee' : settleTarget.category === 'filing_fee' ? 'court_fee' : 'other',
+        description: settleTarget.description ?? `Settled from request ${settleTarget.request_id}`,
+        payee: settleTarget.payee,
+        notes: settleTarget.notes,
+        file_urls: settleTarget.file_urls,
+        status: 'approved',
+        approved_at: new Date().toISOString(),
+        approved_by: user?.id,
+        created_by: user?.id,
+      }).select().single()
+      legalCasePaymentId = cp?.id ?? null
+    } else {
+      // Create main legal payment
+      const seq = Date.now().toString().slice(-5)
+      const { data: lp } = await supabase.from('legal_payments').insert({
+        payment_id: `LEG-${seq}`,
+        amount: settleTarget.amount,
+        payment_date: new Date().toISOString().split('T')[0],
+        category: settleTarget.category,
+        description: settleTarget.description ?? `Settled from request ${settleTarget.request_id}`,
+        payee: settleTarget.payee,
+        notes: settleTarget.notes,
+        file_urls: settleTarget.file_urls,
+        status: 'approved',
+        approved_at: new Date().toISOString(),
+        approved_by: user?.id,
+        created_by: user?.id,
+      }).select().single()
+      legalPaymentId = lp?.id ?? null
+    }
+
+    await supabase.from('legal_payment_requests').update({
+      status: 'settled',
+      settled_at: new Date().toISOString(),
+      settled_by: user?.id,
+      legal_payment_id: legalPaymentId,
+      legal_case_payment_id: legalCasePaymentId,
+    }).eq('id', settleTarget.id)
+
+    setSettling(false)
+    setSettleOpen(false)
+    setSettleTarget(null)
+    load()
+  }
+
+  async function handleReject() {
+    if (!rejectTarget) return
+    setRejecting(true)
+    const supabase = createClient()
+    await supabase.from('legal_payment_requests').update({
+      status: 'rejected',
+      rejection_reason: rejectReason,
+    }).eq('id', rejectTarget.id)
+    setRejecting(false)
+    setRejectOpen(false)
+    setRejectTarget(null)
+    setRejectReason('')
+    load()
+  }
+
+  const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const filtered = statusFilter === 'all' ? requests : requests.filter(r => r.status === statusFilter)
+  const totalPending = requests.filter(r => r.status === 'pending').reduce((s, r) => s + Number(r.amount), 0)
+  const totalSettled = requests.filter(r => r.status === 'settled').reduce((s, r) => s + Number(r.amount), 0)
+
+  return (
+    <div className="p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">Payment requests</h3>
+          <p className="text-xs text-gray-400 mt-0.5">Pending: {fmt(totalPending)} · Settled: {fmt(totalSettled)}</p>
+        </div>
+        {canManage && (
+          <button onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+            style={{ background: '#55249E' }}>
+            <Plus size={12} /> Request payment
+          </button>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        {(['all', 'pending', 'settled', 'rejected'] as const).map(s => (
+          <button key={s} type="button" onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+              statusFilter === s ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}>
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {addOpen && canManage && (
+        <form onSubmit={handleAdd} className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Linked case (optional)</label>
+              <select value={form.case_id} onChange={e => setForm(f => ({ ...f, case_id: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+                <option value="">No case (general request)</option>
+                {cases.map(c => <option key={c.id} value={c.id}>{c.case_id} — {c.title}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Amount <span className="text-red-400">*</span></label>
+              <input type="number" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                placeholder="0.00" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Category</label>
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+                {['retainer','filing_fee','counsel_fee','other'].map(c => (
+                  <option key={c} value={c} className="capitalize">{c.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Payee (counsel name) <span className="text-red-400">*</span></label>
+              <input required value={form.payee} onChange={e => setForm(f => ({ ...f, payee: e.target.value }))}
+                placeholder="Counsel name" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+            </div>
+            <div className="col-span-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Description</label>
+              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="What is this payment for?" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+            </div>
+            <div className="col-span-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Notes</label>
+              <textarea rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Any additional notes..." className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Attachments</label>
+            {uploadedFiles.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {uploadedFiles.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                    <span className="text-xs text-gray-700 truncate">{f.name}</span>
+                    <button type="button" onClick={() => setUploadedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-xs text-red-500 hover:text-red-700"><X size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input type="file" multiple className="hidden" onChange={e => setUploadFiles(Array.from(e.target.files ?? []))} />
+                <span className="block px-3 py-2 text-xs text-gray-500 border border-gray-200 border-dashed rounded-lg hover:bg-gray-50">
+                  {uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''} selected` : 'Click to attach files'}
+                </span>
+              </label>
+              {uploadFiles.length > 0 && (
+                <button type="button" onClick={() => handleUpload(uploadFiles)} disabled={uploading}
+                  className="px-3 py-2 text-xs font-semibold text-white rounded-lg disabled:opacity-50" style={{ background: '#55249E' }}>
+                  {uploading ? 'Uploading...' : 'Upload'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setAddOpen(false); setUploadedFiles([]); setUploadFiles([]) }}
+              className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving}
+              className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg disabled:opacity-50" style={{ background: '#55249E' }}>
+              {saving ? 'Saving…' : 'Submit request'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                {['Request ID','Case','Payee','Category','Amount','Notes','Files','Status','Date','Actions'].map(h => (
+                  <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-xs text-gray-400">Loading...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-xs text-gray-400">No payment requests</td></tr>
+              ) : filtered.map(r => (
+                <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{r.request_id}</span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {r.case ? (
+                      <a href={`/portal/legal/cases/${r.case.id}`} className="text-xs text-brand-600 hover:underline">{r.case.case_id}</a>
+                    ) : <span className="text-xs text-gray-400">General</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-700 font-medium">{r.payee}</td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600 capitalize">{r.category?.replace('_', ' ')}</td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs font-bold text-gray-900">{fmt(r.amount)}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {r.notes ? (
+                      <button type="button" onClick={() => { setNotesContent({ title: r.request_id, content: r.notes }); setNotesOpen(true) }}
+                        className="text-xs text-brand-600 hover:underline">View</button>
+                    ) : <span className="text-xs text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {Array.isArray(r.file_urls) && r.file_urls.length > 0 ? (
+                      <button type="button" onClick={() => { setAttachList(r.file_urls); setAttachOpen(true) }}
+                        className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
+                        <Paperclip size={11} /> {r.file_urls.length}
+                      </button>
+                    ) : <span className="text-xs text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      r.status === 'settled' ? 'bg-green-50 text-green-700' :
+                      r.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                      'bg-amber-50 text-amber-700'
+                    }`}>{r.status}</span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">
+                    {new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {r.status === 'pending' && canManage && (
+                      <div className="flex items-center gap-1">
+                        <button type="button"
+                          onClick={() => { setSettleTarget(r); setSettleOpen(true) }}
+                          className="p-1 rounded hover:bg-green-50 text-gray-400 hover:text-green-600"
+                          title="Settle payment"><CheckCircle2 size={13} /></button>
+                        <button type="button"
+                          onClick={() => { setRejectTarget(r); setRejectOpen(true) }}
+                          className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                          title="Reject"><X size={13} /></button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Settle modal */}
+      <Modal open={settleOpen} onClose={() => { setSettleOpen(false); setSettleTarget(null) }} title="Settle payment request" size="sm">
+        {settleTarget && (
+          <div className="space-y-4">
+            <div className="bg-brand-50 rounded-lg p-3">
+              <p className="text-xs text-gray-500">Request</p>
+              <p className="text-sm font-semibold text-gray-900">{settleTarget.request_id} · {settleTarget.payee}</p>
+              <p className="text-sm font-bold text-brand-700 mt-1">{fmt(settleTarget.amount)}</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              This will create a {settleTarget.case_id ? 'case payment' : 'legal payment'} record (auto-approved) and mark this request as settled. The payment will roll up to Expensify.
+            </p>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => { setSettleOpen(false); setSettleTarget(null) }}
+                className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={handleSettle} disabled={settling}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                {settling ? 'Settling…' : 'Settle now'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Reject modal */}
+      <Modal open={rejectOpen} onClose={() => { setRejectOpen(false); setRejectTarget(null); setRejectReason('') }} title="Reject payment request" size="sm">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Reason for rejection</label>
+            <textarea rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              placeholder="Why are you rejecting this request?"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={() => { setRejectOpen(false); setRejectTarget(null); setRejectReason('') }}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={handleReject} disabled={rejecting}
+              className="flex-1 px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
+              {rejecting ? 'Rejecting…' : 'Reject request'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Notes modal */}
+      {notesOpen && notesContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setNotesOpen(false); setNotesContent(null) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900">Notes · {notesContent.title}</h2>
+              <button type="button" onClick={() => { setNotesOpen(false); setNotesContent(null) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{notesContent.content}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Attachments modal */}
+      {attachOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setAttachOpen(false); setAttachList([]) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900">Attachments</h2>
+              <button type="button" onClick={() => { setAttachOpen(false); setAttachList([]) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {attachList.map((f, i) => (
                 <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
                   className="flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">
                   <span className="text-sm text-gray-700 truncate">{f.name}</span>

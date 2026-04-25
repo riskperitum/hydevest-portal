@@ -46,6 +46,8 @@ interface ContainerProfitRow {
   actual_profit_margin: number
   unearned_profit: number
   total_commissions: number
+  gross_sales_to_date: number
+  total_bad_debts: number
 
   // Status
   sales_status: 'not_started' | 'in_progress' | 'completed'
@@ -93,6 +95,7 @@ export default function ContainerProfitReportPage() {
       { data: recoveries },
       { data: palletDists },
       { data: commissions },
+      { data: badDebts },
     ] = await Promise.all([
       supabase.from('containers').select('id, container_id, tracking_number, trip_id, pieces_purchased, estimated_landing_cost, unit_price_usd, shipping_amount_usd'),
       supabase.from('presales').select('id, presale_id, container_id, sale_type, expected_sale_revenue, price_per_piece, warehouse_confirmed_pieces, total_number_of_pallets'),
@@ -100,6 +103,7 @@ export default function ContainerProfitReportPage() {
       supabase.from('recoveries').select('sales_order_id, amount_paid'),
       supabase.from('presale_pallet_distributions').select('presale_id, pallet_pieces, number_of_pallets, pallets_sold'),
       supabase.from('commissions').select('sales_order_id, commission_amount, status').in('status', ['approved', 'paid']),
+      supabase.from('bad_debts').select('container_id, sales_order_id, amount_ngn, status').eq('status', 'approved'),
     ])
 
     const tripIds = [...new Set((containers ?? []).map(c => c.trip_id).filter(Boolean))]
@@ -121,6 +125,12 @@ export default function ContainerProfitReportPage() {
     }, {} as Record<string, NonNullable<typeof recoveries>[number][]>)
     const commissionsByOrder = (commissions ?? []).reduce((acc, c) => {
       acc[c.sales_order_id] = (acc[c.sales_order_id] ?? 0) + Number(c.commission_amount)
+      return acc
+    }, {} as Record<string, number>)
+    const badDebtsByContainer = (badDebts ?? []).reduce((acc, b) => {
+      if (b.container_id) {
+        acc[b.container_id] = (acc[b.container_id] ?? 0) + Number(b.amount_ngn)
+      }
       return acc
     }, {} as Record<string, number>)
     const palletsByPresale = (palletDists ?? []).reduce((acc, pd) => {
@@ -173,7 +183,9 @@ export default function ContainerProfitReportPage() {
         const expectedProfitMargin = landingCost > 0 ? (expectedProfit / landingCost) * 100 : 0
 
         const totalCommissions = orders.reduce((s, o) => s + (commissionsByOrder[o.id] ?? 0), 0)
-        const actualProfit = salesToDate - landingCost - totalCommissions
+        const totalBadDebts = badDebtsByContainer[container.id] ?? 0
+        const adjustedSalesToDate = salesToDate - totalBadDebts
+        const actualProfit = adjustedSalesToDate - landingCost - totalCommissions
         const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
 
         // Unearned profit = value of unsold pieces at presale price minus proportional cost
@@ -217,7 +229,9 @@ export default function ContainerProfitReportPage() {
           warehouse_confirmed_pieces: whPieces,
           price_per_piece: pricePerPiece,
           expected_sale_revenue: expectedRevenue,
-          total_sales_to_date: salesToDate,
+          total_sales_to_date: adjustedSalesToDate,
+          gross_sales_to_date: salesToDate,
+          total_bad_debts: totalBadDebts,
           total_recovery_to_date: recoveryToDate,
           pieces_sold: piecesSold,
           pieces_remaining: piecesRemaining,
@@ -273,6 +287,7 @@ export default function ContainerProfitReportPage() {
   const totalActualProfit = filtered.reduce((s, r) => s + (r.sales_status === 'completed' ? r.actual_profit : 0), 0)
   const totalUnearnedProfit = filtered.reduce((s, r) => s + Math.max(r.unearned_profit, 0), 0)
   const totalCommissions = filtered.reduce((s, r) => s + r.total_commissions, 0)
+  const totalBadDebts = filtered.reduce((s, r) => s + r.total_bad_debts, 0)
   const completedCount = filtered.filter(r => r.sales_status === 'completed').length
   const portfolioMargin = totalLandingCost > 0 ? ((totalExpectedRevenue - totalLandingCost) / totalLandingCost) * 100 : 0
 
@@ -377,12 +392,13 @@ export default function ContainerProfitReportPage() {
       ) : canViewCosts ? (
         <>
           {/* Portfolio overview cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3">
             {[
               { label: 'Total landing cost', value: fmt(totalLandingCost), color: 'text-gray-900', icon: <Package size={14} className="text-gray-500" /> },
               { label: 'Expected revenue', value: fmt(totalExpectedRevenue), color: 'text-brand-700', icon: <Target size={14} className="text-brand-600" /> },
               { label: 'Expected profit', value: fmt(totalExpectedProfit), color: totalExpectedProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <TrendingUp size={14} className={totalExpectedProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
               { label: 'Total commissions', value: fmt(totalCommissions), color: 'text-purple-700', icon: <TrendingUp size={14} className="text-purple-600" /> },
+              { label: 'Total bad debts', value: fmt(totalBadDebts), color: 'text-red-700', icon: <TrendingDown size={14} className="text-red-600" /> },
               { label: 'Actual profit', value: completedCount > 0 ? fmt(totalActualProfit) : '—', color: totalActualProfit >= 0 ? 'text-green-700' : 'text-red-600', icon: <Zap size={14} className={totalActualProfit >= 0 ? 'text-green-600' : 'text-red-500'} /> },
               { label: 'Unearned profit', value: fmt(totalUnearnedProfit), color: 'text-amber-700', icon: <BarChart2 size={14} className="text-amber-600" /> },
               { label: 'Portfolio margin', value: fmtPct(portfolioMargin), color: portfolioMargin >= 0 ? 'text-green-700' : 'text-red-600', icon: <DollarSign size={14} className={portfolioMargin >= 0 ? 'text-green-600' : 'text-red-500'} /> },
@@ -590,6 +606,12 @@ export default function ContainerProfitReportPage() {
                         <div>
                           <p className="text-xs text-gray-400 text-[10px]">Commissions</p>
                           <p className="text-xs font-semibold text-purple-600 truncate text-[11px]">{fmt(row.total_commissions)}</p>
+                        </div>
+                      )}
+                      {row.total_bad_debts > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-400 text-[10px]">Bad debts</p>
+                          <p className="text-xs font-semibold text-red-600 truncate text-[11px]">{fmt(row.total_bad_debts)}</p>
                         </div>
                       )}
                       {!isCompleted && row.unearned_profit > 0 && (

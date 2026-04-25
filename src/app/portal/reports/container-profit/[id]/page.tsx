@@ -30,6 +30,7 @@ interface ProfitDetail {
   actual_profit_margin: number
   unearned_profit: number
   total_commissions: number
+  total_bad_debts: number
   sales_status: string
   profit_status: string
 }
@@ -98,6 +99,13 @@ export default function ContainerProfitDrilldownPage() {
 
     const totalCommissions = (commissions ?? []).reduce((s, c) => s + Number(c.commission_amount), 0)
 
+    const { data: badDebtsRows } = await supabase.from('bad_debts')
+      .select('amount_ngn')
+      .eq('container_id', containerId)
+      .eq('status', 'approved')
+
+    const totalBadDebts = (badDebtsRows ?? []).reduce((s, b) => s + Number(b.amount_ngn), 0)
+
     const palletsByOrder = (palletLines ?? []).reduce((acc, pl) => {
       if (!acc[pl.order_id]) acc[pl.order_id] = []
       acc[pl.order_id].push(pl)
@@ -109,6 +117,7 @@ export default function ContainerProfitDrilldownPage() {
     const pricePerPiece = presale.price_per_piece ? Number(presale.price_per_piece) : null
     const whPieces = presale.warehouse_confirmed_pieces ?? 0
     const salesToDate = (salesOrders ?? []).reduce((s, o) => s + Number(o.customer_payable), 0)
+    const adjustedSalesToDate = salesToDate - totalBadDebts
 
     // Pieces sold/remaining
     let piecesSold = 0
@@ -123,7 +132,7 @@ export default function ContainerProfitDrilldownPage() {
 
     const expectedProfit = expectedRevenue - landingCost
     const expectedProfitMargin = landingCost > 0 ? (expectedProfit / landingCost) * 100 : 0
-    const actualProfit = salesToDate - landingCost - totalCommissions
+    const actualProfit = adjustedSalesToDate - landingCost - totalCommissions
     const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
     const unearnedRevenue = piecesRemaining * (pricePerPiece ?? 0)
     const proportionalCost = whPieces > 0 ? (piecesRemaining / whPieces) * landingCost : 0
@@ -157,7 +166,7 @@ export default function ContainerProfitDrilldownPage() {
       warehouse_confirmed_pieces: whPieces,
       price_per_piece: pricePerPiece,
       expected_sale_revenue: expectedRevenue,
-      total_sales_to_date: salesToDate,
+      total_sales_to_date: adjustedSalesToDate,
       total_recovery_to_date: 0,
       pieces_sold: piecesSold,
       pieces_remaining: piecesRemaining,
@@ -166,6 +175,7 @@ export default function ContainerProfitDrilldownPage() {
       actual_profit: actualProfit,
       actual_profit_margin: actualProfitMargin,
       total_commissions: totalCommissions,
+      total_bad_debts: totalBadDebts,
       unearned_profit: unearnedProfit,
       sales_status: salesStatus,
       profit_status: profitStatus,
@@ -261,6 +271,7 @@ export default function ContainerProfitDrilldownPage() {
               { label: 'Expected revenue', value: fmt(detail.expected_sale_revenue), color: 'text-brand-700' },
               { label: isCompleted ? 'Actual sales' : 'Sales to date', value: detail.total_sales_to_date > 0 ? fmt(detail.total_sales_to_date) : '—', color: 'text-blue-700' },
               { label: 'Commissions', value: detail.total_commissions > 0 ? fmt(detail.total_commissions) : '—', color: 'text-purple-700' },
+              { label: 'Bad debts', value: detail.total_bad_debts > 0 ? fmt(detail.total_bad_debts) : '—', color: 'text-red-700' },
               { label: 'Unearned profit', value: detail.unearned_profit > 0 ? fmt(detail.unearned_profit) : '—', color: 'text-amber-700' },
             ].map(m => (
               <div key={m.label} className="bg-white/60 rounded-xl p-3">

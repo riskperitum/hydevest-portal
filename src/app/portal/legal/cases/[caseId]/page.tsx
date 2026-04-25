@@ -880,7 +880,6 @@ export default function LegalCasePage() {
                       placeholder="Details"
                       className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none" />
                   </div>
-                </div>
                   <div className="col-span-3">
                     <label className="block text-xs font-medium text-gray-600 mb-1.5">Notes</label>
                     <textarea rows={2} value={paymentForm.notes}

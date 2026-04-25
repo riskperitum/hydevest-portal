@@ -7,9 +7,11 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Save, Loader2, X, Edit2,
   CheckCircle2, Clock, MessageSquare, DollarSign,
-  User, Calendar, Activity, Lock, Unlock
+  User, Calendar, Activity, Lock, Unlock,
+  Paperclip, Eye, Trash2, Shield
 } from 'lucide-react'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
+import Modal from '@/components/ui/Modal'
 import { notifyTaskAssigned } from '@/lib/email/notify'
 
 interface LegalCase {
@@ -61,6 +63,11 @@ interface CasePayment {
   payment_type: string
   description: string | null
   payee: string | null
+  notes: string | null
+  file_urls: { url: string; name: string; type: string }[]
+  status: string
+  is_modified: boolean
+  approved_at: string | null
   created_at: string
 }
 
@@ -126,9 +133,29 @@ export default function LegalCasePage() {
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentForm, setPaymentForm] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
-    payment_type: 'settlement', description: '', payee: '',
+    payment_type: 'settlement', description: '', payee: '', notes: '',
   })
   const [savingPayment, setSavingPayment] = useState(false)
+
+  // File upload state for payments
+  const [paymentUploadFiles, setPaymentUploadFiles] = useState<File[]>([])
+  const [paymentUploadedFiles, setPaymentUploadedFiles] = useState<{ url: string; name: string; type: string }[]>([])
+  const [paymentUploading, setPaymentUploading] = useState(false)
+
+  // Workflow state for payments
+  const [paymentWorkflowOpen, setPaymentWorkflowOpen] = useState(false)
+  const [paymentWorkflowType, setPaymentWorkflowType] = useState<'approve' | 'delete' | null>(null)
+  const [paymentWorkflowTarget, setPaymentWorkflowTarget] = useState<CasePayment | null>(null)
+  const [paymentWorkflowNote, setPaymentWorkflowNote] = useState('')
+  const [paymentSelfApprove, setPaymentSelfApprove] = useState(false)
+  const [paymentAssignee, setPaymentAssignee] = useState('')
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false)
+
+  // Notes/attachments modals for payments
+  const [paymentNotesOpen, setPaymentNotesOpen] = useState(false)
+  const [paymentNotesContent, setPaymentNotesContent] = useState<{ title: string; content: string } | null>(null)
+  const [paymentAttachmentsOpen, setPaymentAttachmentsOpen] = useState(false)
+  const [paymentAttachmentsList, setPaymentAttachmentsList] = useState<{ url: string; name: string; type: string }[]>([])
 
   // Add customer to case
   const [addCustomerOpen, setAddCustomerOpen] = useState(false)
@@ -351,12 +378,112 @@ export default function LegalCasePage() {
       payment_type: paymentForm.payment_type,
       description:  paymentForm.description || null,
       payee:        paymentForm.payee || null,
+      notes:        paymentForm.notes || null,
+      file_urls:    paymentUploadedFiles,
+      status:       'pending_approval',
       created_by:   currentUser?.id,
     })
     await logActivity('Payment recorded', `${fmt(parseFloat(paymentForm.amount))} — ${paymentForm.payment_type}`)
     setSavingPayment(false)
     setPaymentOpen(false)
-    setPaymentForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], payment_type: 'settlement', description: '', payee: '' })
+    setPaymentForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], payment_type: 'settlement', description: '', payee: '', notes: '' })
+    setPaymentUploadedFiles([])
+    setPaymentUploadFiles([])
+    load()
+  }
+
+  async function handlePaymentUpload(files: File[]) {
+    if (!files.length) return
+    setPaymentUploading(true)
+    const supabase = createClient()
+    const uploaded: { url: string; name: string; type: string }[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `legal-case-payments/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
+        uploaded.push({ url: publicUrl, name: file.name, type: file.type })
+      }
+    }
+    setPaymentUploadedFiles(prev => [...prev, ...uploaded])
+    setPaymentUploading(false)
+    setPaymentUploadFiles([])
+  }
+
+  async function submitPaymentWorkflow() {
+    if (!paymentWorkflowTarget || !paymentWorkflowType) return
+    if (!paymentSelfApprove && !paymentAssignee) return
+
+    setPaymentSubmitting(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (paymentSelfApprove && (canManagePayments || isSuperAdmin)) {
+      if (paymentWorkflowType === 'approve') {
+        await supabase.from('legal_case_payments').update({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          approved_by: user?.id,
+        }).eq('id', paymentWorkflowTarget.id)
+      } else if (paymentWorkflowType === 'delete') {
+        await supabase.from('legal_case_payments').delete().eq('id', paymentWorkflowTarget.id)
+      }
+
+      await supabase.from('legal_case_payment_activity_log').insert({
+        legal_case_payment_id: paymentWorkflowTarget.id,
+        action: paymentWorkflowType === 'approve' ? 'Payment approved (self-approved)' : 'Payment deleted (self-approved)',
+        performed_by: user?.id,
+        new_value: paymentWorkflowNote || null,
+      })
+
+      await supabase.from('tasks').insert({
+        type: paymentWorkflowType === 'delete' ? 'delete_approval' : 'approval_request',
+        title: `Case payment ${paymentWorkflowType}: ${paymentWorkflowTarget.payment_id} (self-approved)`,
+        description: paymentWorkflowNote || '',
+        module: 'legal_case_payments',
+        record_id: paymentWorkflowTarget.id,
+        record_ref: paymentWorkflowTarget.payment_id,
+        requested_by: user?.id,
+        assigned_to: user?.id,
+        status: 'approved',
+        priority: paymentWorkflowType === 'delete' ? 'high' : 'normal',
+        review_note: 'Self-approved by ' + (user?.email ?? 'admin'),
+      })
+
+      await logActivity(paymentWorkflowType === 'approve' ? 'Payment approved' : 'Payment deleted', paymentWorkflowTarget.payment_id)
+    } else {
+      const { data: task } = await supabase.from('tasks').insert({
+        type: paymentWorkflowType === 'delete' ? 'delete_approval' : 'approval_request',
+        title: `Case payment ${paymentWorkflowType}: ${paymentWorkflowTarget.payment_id}`,
+        description: paymentWorkflowNote || '',
+        module: 'legal_case_payments',
+        record_id: paymentWorkflowTarget.id,
+        record_ref: paymentWorkflowTarget.payment_id,
+        requested_by: user?.id,
+        assigned_to: paymentAssignee,
+        priority: paymentWorkflowType === 'delete' ? 'high' : 'normal',
+      }).select().single()
+
+      await supabase.from('notifications').insert({
+        user_id: paymentAssignee,
+        type: `task_${paymentWorkflowType === 'delete' ? 'delete_approval' : 'approval_request'}`,
+        title: `New task: Case payment ${paymentWorkflowType}`,
+        message: paymentWorkflowTarget.payment_id,
+        task_id: task?.id,
+        record_id: paymentWorkflowTarget.id,
+        record_ref: paymentWorkflowTarget.payment_id,
+        module: 'legal_case_payments',
+      })
+    }
+
+    setPaymentSubmitting(false)
+    setPaymentWorkflowOpen(false)
+    setPaymentWorkflowType(null)
+    setPaymentWorkflowTarget(null)
+    setPaymentWorkflowNote('')
+    setPaymentSelfApprove(false)
+    setPaymentAssignee('')
     load()
   }
 
@@ -754,8 +881,46 @@ export default function LegalCasePage() {
                       className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none" />
                   </div>
                 </div>
+                  <div className="col-span-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Notes</label>
+                    <textarea rows={2} value={paymentForm.notes}
+                      onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="Any additional notes..."
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Attachments</label>
+                  {paymentUploadedFiles.length > 0 && (
+                    <div className="space-y-1 mb-2">
+                      {paymentUploadedFiles.map((f, i) => (
+                        <div key={i} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                          <span className="text-xs text-gray-700 truncate">{f.name}</span>
+                          <button type="button" onClick={() => setPaymentUploadedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                            className="text-xs text-red-500 hover:text-red-700"><X size={13} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 cursor-pointer">
+                      <input type="file" multiple className="hidden" onChange={e => setPaymentUploadFiles(Array.from(e.target.files ?? []))} />
+                      <span className="block px-3 py-2 text-xs text-gray-500 border border-gray-200 border-dashed rounded-lg hover:bg-gray-50">
+                        {paymentUploadFiles.length > 0 ? `${paymentUploadFiles.length} file${paymentUploadFiles.length > 1 ? 's' : ''} selected` : 'Click to attach files'}
+                      </span>
+                    </label>
+                    {paymentUploadFiles.length > 0 && (
+                      <button type="button" onClick={() => handlePaymentUpload(paymentUploadFiles)} disabled={paymentUploading}
+                        className="px-3 py-2 text-xs font-semibold text-white rounded-lg disabled:opacity-50" style={{ background: '#55249E' }}>
+                        {paymentUploading ? 'Uploading...' : 'Upload'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setPaymentOpen(false)}
+                  <button type="button" onClick={() => { setPaymentOpen(false); setPaymentUploadedFiles([]); setPaymentUploadFiles([]) }}
                     className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
                   <button type="submit" disabled={savingPayment}
                     className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg disabled:opacity-50"
@@ -772,7 +937,7 @@ export default function LegalCasePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100">
-                    {['Ref','Amount','Date','Type','Payee','Description'].map(h => (
+                    {['Ref','Amount','Date','Type','Payee','Description','Notes','Files','Status','Actions'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400">{h}</th>
                     ))}
                   </tr>
@@ -792,6 +957,46 @@ export default function LegalCasePage() {
                       <td className="px-3 py-3 text-xs text-gray-500 capitalize">{p.payment_type.replace('_', ' ')}</td>
                       <td className="px-3 py-3 text-xs text-gray-500">{p.payee ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-gray-500 max-w-[160px] truncate">{p.description ?? '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {p.notes ? (
+                          <button type="button" onClick={() => { setPaymentNotesContent({ title: p.payment_id, content: p.notes ?? '' }); setPaymentNotesOpen(true) }}
+                            className="text-xs text-brand-600 hover:text-brand-700 underline">View</button>
+                        ) : <span className="text-xs text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {Array.isArray(p.file_urls) && p.file_urls.length > 0 ? (
+                          <button type="button" onClick={() => { setPaymentAttachmentsList(p.file_urls); setPaymentAttachmentsOpen(true) }}
+                            className="inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 underline">
+                            <Paperclip size={11} /> {p.file_urls.length}
+                          </button>
+                        ) : <span className="text-xs text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          p.status === 'approved' ? 'bg-green-50 text-green-700' :
+                          p.status === 'paid' ? 'bg-blue-50 text-blue-700' :
+                          p.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                          'bg-amber-50 text-amber-700'
+                        }`}>
+                          {p.status?.replace('_', ' ') ?? 'pending approval'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {canManagePayments && p.status === 'pending_approval' && (
+                            <button type="button"
+                              onClick={() => { setPaymentWorkflowTarget(p); setPaymentWorkflowType('approve'); setPaymentWorkflowOpen(true) }}
+                              className="p-1 rounded hover:bg-green-50 text-gray-400 hover:text-green-600"
+                              title="Approve"><Shield size={13} /></button>
+                          )}
+                          {canManagePayments && (
+                            <button type="button"
+                              onClick={() => { setPaymentWorkflowTarget(p); setPaymentWorkflowType('delete'); setPaymentWorkflowOpen(true) }}
+                              className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                              title="Delete"><Trash2 size={13} /></button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -824,6 +1029,85 @@ export default function LegalCasePage() {
             )}
           </div>
         )}
+
+      <Modal open={paymentWorkflowOpen} onClose={() => { setPaymentWorkflowOpen(false); setPaymentWorkflowType(null); setPaymentSelfApprove(false); setPaymentAssignee('') }}
+        title={paymentWorkflowType === 'approve' ? 'Approve case payment' : 'Delete case payment'} size="sm">
+        <div className="space-y-4">
+          {(canManagePayments || isSuperAdmin) && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={paymentSelfApprove} onChange={e => setPaymentSelfApprove(e.target.checked)} className="mt-0.5" />
+                <div>
+                  <span className="text-sm font-medium text-amber-900">Self-approve</span>
+                  <p className="text-xs text-amber-700 mt-0.5">Execute immediately without sending an approval request.</p>
+                </div>
+              </label>
+            </div>
+          )}
+          {!paymentSelfApprove && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign to <span className="text-red-400">*</span></label>
+              <select value={paymentAssignee} onChange={e => setPaymentAssignee(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+                <option value="">Select user...</option>
+                {employees.filter(e => e.id !== currentUser?.id).map(e => (
+                  <option key={e.id} value={e.id}>{e.full_name ?? e.email}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
+            <textarea rows={2} value={paymentWorkflowNote} onChange={e => setPaymentWorkflowNote(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => { setPaymentWorkflowOpen(false); setPaymentWorkflowType(null); setPaymentSelfApprove(false) }}
+              className="flex-1 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={submitPaymentWorkflow} disabled={paymentSubmitting || (!paymentSelfApprove && !paymentAssignee)}
+              className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 ${
+                paymentWorkflowType === 'delete' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}>
+              {paymentSubmitting ? 'Submitting…' : paymentSelfApprove ? (paymentWorkflowType === 'delete' ? 'Delete now' : 'Approve now') : 'Submit request'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {paymentNotesOpen && paymentNotesContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setPaymentNotesOpen(false); setPaymentNotesContent(null) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900 truncate">Notes · {paymentNotesContent.title}</h2>
+              <button type="button" onClick={() => { setPaymentNotesOpen(false); setPaymentNotesContent(null) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{paymentNotesContent.content}</p>
+          </div>
+        </div>
+      )}
+
+      {paymentAttachmentsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setPaymentAttachmentsOpen(false); setPaymentAttachmentsList([]) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900">Attachments</h2>
+              <button type="button" onClick={() => { setPaymentAttachmentsOpen(false); setPaymentAttachmentsList([]) }}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {paymentAttachmentsList.map((f, i) => (
+                <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors">
+                  <span className="text-sm text-gray-700 truncate">{f.name}</span>
+                  <Eye size={14} className="text-gray-400" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   )

@@ -117,7 +117,7 @@ export default function ContainerProfitDrilldownPage() {
     const pricePerPiece = presale.price_per_piece ? Number(presale.price_per_piece) : null
     const whPieces = presale.warehouse_confirmed_pieces ?? 0
     const salesToDate = (salesOrders ?? []).reduce((s, o) => s + Number(o.customer_payable), 0)
-    const adjustedSalesToDate = salesToDate - totalBadDebts
+    // Bad debts only affect profit, not sales (the sale was made, customer just didn't pay)
 
     // Pieces sold/remaining
     let piecesSold = 0
@@ -132,7 +132,7 @@ export default function ContainerProfitDrilldownPage() {
 
     const expectedProfit = expectedRevenue - landingCost
     const expectedProfitMargin = landingCost > 0 ? (expectedProfit / landingCost) * 100 : 0
-    const actualProfit = adjustedSalesToDate - landingCost - totalCommissions
+    const actualProfit = salesToDate - landingCost - totalCommissions - totalBadDebts
     const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
     const unearnedRevenue = piecesRemaining * (pricePerPiece ?? 0)
     const proportionalCost = whPieces > 0 ? (piecesRemaining / whPieces) * landingCost : 0
@@ -166,7 +166,7 @@ export default function ContainerProfitDrilldownPage() {
       warehouse_confirmed_pieces: whPieces,
       price_per_piece: pricePerPiece,
       expected_sale_revenue: expectedRevenue,
-      total_sales_to_date: adjustedSalesToDate,
+      total_sales_to_date: salesToDate,
       total_recovery_to_date: 0,
       pieces_sold: piecesSold,
       pieces_remaining: piecesRemaining,

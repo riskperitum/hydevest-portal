@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, RefreshCw, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, RefreshCw, CheckCircle2, Trash2, Undo2, Loader2 } from 'lucide-react'
+import { usePermissions, can } from '@/lib/permissions/hooks'
+import Modal from '@/components/ui/Modal'
 
 interface BadDebt {
   id: string
@@ -35,6 +37,15 @@ export default function BadDebtsPage() {
   const [debts, setDebts]         = useState<BadDebt[]>([])
   const [loading, setLoading]     = useState(true)
   const [statusFilter, setStatus] = useState('')
+
+  const { permissions, isSuperAdmin } = usePermissions()
+  const canManage = isSuperAdmin || can(permissions, isSuperAdmin, 'bad_debts.manage') || can(permissions, isSuperAdmin, 'admin.*')
+
+  const [actionOpen, setActionOpen] = useState(false)
+  const [actionType, setActionType] = useState<'reverse' | 'delete' | null>(null)
+  const [actionTarget, setActionTarget] = useState<any | null>(null)
+  const [actionReason, setActionReason] = useState('')
+  const [submittingAction, setSubmittingAction] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,6 +85,31 @@ export default function BadDebtsPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  async function handleAction() {
+    if (!actionTarget || !actionType) return
+    if (!actionReason.trim()) return
+    setSubmittingAction(true)
+    const supabase = createClient()
+
+    if (actionType === 'reverse') {
+      // Set status back to pending or rejected
+      await supabase.from('bad_debts').update({
+        status: 'rejected',
+        approved_at: null,
+        approved_by: null,
+      }).eq('id', actionTarget.id)
+    } else if (actionType === 'delete') {
+      await supabase.from('bad_debts').delete().eq('id', actionTarget.id)
+    }
+
+    setSubmittingAction(false)
+    setActionOpen(false)
+    setActionType(null)
+    setActionTarget(null)
+    setActionReason('')
+    load()
+  }
 
   const filtered = debts.filter(d => statusFilter === '' || d.status === statusFilter)
 
@@ -199,8 +235,21 @@ export default function BadDebtsPage() {
                       <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-400">
                         {new Date(d.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
-                      <td className="px-3 py-3">
-                        <ChevronRight size={14} className="text-gray-300" />
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {canManage && (
+                          <div className="flex items-center gap-1">
+                            {d.status === 'approved' && (
+                              <button type="button"
+                                onClick={(e) => { e.stopPropagation(); setActionTarget(d); setActionType('reverse'); setActionOpen(true) }}
+                                className="p-1 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600"
+                                title="Reverse"><Undo2 size={13} /></button>
+                            )}
+                            <button type="button"
+                              onClick={(e) => { e.stopPropagation(); setActionTarget(d); setActionType('delete'); setActionOpen(true) }}
+                              className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                              title="Delete"><Trash2 size={13} /></button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )
@@ -221,6 +270,53 @@ export default function BadDebtsPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={actionOpen}
+        onClose={() => { if (!submittingAction) { setActionOpen(false); setActionType(null); setActionTarget(null); setActionReason('') } }}
+        title={actionType === 'reverse' ? 'Reverse bad debt approval' : actionType === 'delete' ? 'Delete bad debt' : 'Confirm action'}
+        size="sm"
+      >
+        <div className="space-y-4">
+          {actionTarget && (
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600">
+              <span className="font-mono font-semibold text-gray-900">{actionTarget.bad_debt_id}</span>
+              {' · '}
+              {fmt(actionTarget.amount_ngn)}
+            </div>
+          )}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Reason <span className="text-red-400">*</span></label>
+            <textarea
+              rows={3}
+              value={actionReason}
+              onChange={e => setActionReason(e.target.value)}
+              placeholder={actionType === 'delete' ? 'Why are you deleting this record?' : 'Why are you reversing this approval?'}
+              className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              disabled={submittingAction}
+              onClick={() => { setActionOpen(false); setActionType(null); setActionTarget(null); setActionReason('') }}
+              className="flex-1 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={submittingAction || !actionReason.trim()}
+              onClick={() => void handleAction()}
+              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+                actionType === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-600 hover:bg-orange-700'
+              }`}
+            >
+              {submittingAction ? <Loader2 size={16} className="mx-auto animate-spin" /> : actionType === 'delete' ? 'Delete' : 'Reverse'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

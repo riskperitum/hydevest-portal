@@ -46,7 +46,6 @@ interface ContainerProfitRow {
   actual_profit_margin: number
   unearned_profit: number
   total_commissions: number
-  gross_sales_to_date: number
   total_bad_debts: number
 
   // Status
@@ -184,8 +183,7 @@ export default function ContainerProfitReportPage() {
 
         const totalCommissions = orders.reduce((s, o) => s + (commissionsByOrder[o.id] ?? 0), 0)
         const totalBadDebts = badDebtsByContainer[container.id] ?? 0
-        const adjustedSalesToDate = salesToDate - totalBadDebts
-        const actualProfit = adjustedSalesToDate - landingCost - totalCommissions
+        const actualProfit = salesToDate - landingCost - totalCommissions - totalBadDebts
         const actualProfitMargin = landingCost > 0 ? (actualProfit / landingCost) * 100 : 0
 
         // Unearned profit = value of unsold pieces at presale price minus proportional cost
@@ -229,8 +227,7 @@ export default function ContainerProfitReportPage() {
           warehouse_confirmed_pieces: whPieces,
           price_per_piece: pricePerPiece,
           expected_sale_revenue: expectedRevenue,
-          total_sales_to_date: adjustedSalesToDate,
-          gross_sales_to_date: salesToDate,
+          total_sales_to_date: salesToDate,
           total_bad_debts: totalBadDebts,
           total_recovery_to_date: recoveryToDate,
           pieces_sold: piecesSold,

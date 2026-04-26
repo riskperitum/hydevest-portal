@@ -96,7 +96,7 @@ export default function ContainerProfitReportPage() {
       { data: commissions },
       { data: badDebts },
     ] = await Promise.all([
-      supabase.from('containers').select('id, container_id, tracking_number, trip_id, pieces_purchased, estimated_landing_cost, unit_price_usd, shipping_amount_usd'),
+      supabase.from('containers').select('id, container_id, tracking_number, trip_id, pieces_purchased, estimated_landing_cost, effective_landing_cost, unit_price_usd, shipping_amount_usd'),
       supabase.from('presales').select('id, presale_id, container_id, sale_type, expected_sale_revenue, price_per_piece, warehouse_confirmed_pieces, total_number_of_pallets'),
       supabase.from('sales_orders').select('id, container_id, presale_id, customer_payable, sale_type'),
       supabase.from('recoveries').select('sales_order_id, amount_paid'),
@@ -146,7 +146,7 @@ export default function ContainerProfitReportPage() {
         const pallets = palletsByPresale[presale.id] ?? []
         const trip = tripMap[container.trip_id]
 
-        const landingCost = Number(container.estimated_landing_cost ?? 0)
+        const landingCost = Number(container.effective_landing_cost ?? container.estimated_landing_cost ?? 0)
         const expectedRevenue = Number(presale.expected_sale_revenue ?? 0)
         const pricePerPiece = presale.price_per_piece ? Number(presale.price_per_piece) : null
         const whPieces = presale.warehouse_confirmed_pieces ?? 0

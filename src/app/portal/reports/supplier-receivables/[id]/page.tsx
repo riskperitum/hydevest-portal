@@ -344,6 +344,67 @@ function SupplierReceivablesDrilldownInner() {
     })
   }, [load])
 
+  async function recalculateTripLandingCost(targetTripId: string) {
+    const supabase = createClient()
+    const [{ data: tripContainers }, { data: tripExpenses }] = await Promise.all([
+      supabase.from('containers').select('id, pieces_purchased, unit_price_usd, shipping_amount_usd').eq('trip_id', targetTripId),
+      supabase.from('trip_expenses').select('amount, amount_ngn, currency, category').eq('trip_id', targetTripId),
+    ])
+
+    const containerExpensesNGN = (tripExpenses ?? [])
+      .filter(e => e.category === 'container')
+      .reduce((s, e) => s + Number(e.amount_ngn), 0)
+    const containersTotalUSD = (tripContainers ?? []).reduce((s, c) => {
+      const purchaseAmt = (c.unit_price_usd && c.pieces_purchased)
+        ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+        : 0
+      return s + purchaseAmt + Number(c.shipping_amount_usd ?? 0)
+    }, 0)
+    const waer = containersTotalUSD > 0 ? containerExpensesNGN / containersTotalUSD : 0
+
+    const generalExpensesNGN = (tripExpenses ?? [])
+      .filter(e => e.category === 'general')
+      .reduce((s, e) => s + Number(e.amount_ngn), 0)
+    const generalPerContainer = (tripContainers ?? []).length > 0
+      ? generalExpensesNGN / tripContainers!.length
+      : 0
+
+    // Fetch presales for warehouse_confirmed_pieces
+    const containerIds = (tripContainers ?? []).map(c => c.id)
+    const { data: presales } = containerIds.length > 0
+      ? await supabase.from('presales').select('container_id, warehouse_confirmed_pieces').in('container_id', containerIds)
+      : { data: [] }
+    const presaleByContainer = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+
+    for (const con of (tripContainers ?? [])) {
+      const piecesPurchased = Number(con.pieces_purchased ?? 0)
+      const unitPriceUSD = Number(con.unit_price_usd ?? 0)
+      const shippingUSD = Number(con.shipping_amount_usd ?? 0)
+      const purchaseAmt = unitPriceUSD * piecesPurchased
+      const containerUSD = purchaseAmt + shippingUSD
+      const containerNGN = waer > 0 ? containerUSD * waer : 0
+      const landingCost = containerNGN + generalPerContainer
+
+      const presale = presaleByContainer[con.id]
+      const confirmedPieces = Number((presale as any)?.warehouse_confirmed_pieces ?? 0)
+      let effectiveLandingCost: number | null = null
+      if (confirmedPieces > 0 && piecesPurchased > 0) {
+        const effectivePurchaseAmt = unitPriceUSD * confirmedPieces
+        const effectiveShippingUSD = shippingUSD * (confirmedPieces / piecesPurchased)
+        const effectiveContainerUSD = effectivePurchaseAmt + effectiveShippingUSD
+        const effectiveContainerNGN = waer > 0 ? effectiveContainerUSD * waer : 0
+        effectiveLandingCost = effectiveContainerNGN + generalPerContainer
+      }
+
+      if (landingCost !== 0) {
+        await supabase.from('containers').update({
+          estimated_landing_cost: Math.round(landingCost * 100) / 100,
+          effective_landing_cost: effectiveLandingCost !== null ? Math.round(effectiveLandingCost * 100) / 100 : null,
+        }).eq('id', con.id)
+      }
+    }
+  }
+
   async function logActivity(receivableIds: string[], action: string, details?: string, amountUsd?: number) {
     const supabase = createClient()
     for (const id of receivableIds) {
@@ -458,6 +519,23 @@ function SupplierReceivablesDrilldownInner() {
             }).eq('id', alloc.id)
         }
 
+        // Create counter-entry in origin trip (negative) so origin landing cost reduces
+        await supabase.from('trip_expenses').insert({
+          trip_id:       tripId,
+          category:      'container',
+          currency:      'USD',
+          amount:        -amount,
+          exchange_rate: originWAERFinal,
+          amount_ngn:    -amountNGN,
+          description:   `Supplier receivable transferred out — to trip ${targetTripData.trip_id} (WAER: ₦${originWAERFinal.toFixed(2)}/$)`,
+          expense_date:  new Date().toISOString().split('T')[0],
+          created_by:    currentUser?.id,
+        })
+
+        // Recalculate landing costs for both trips
+        await recalculateTripLandingCost(tripId)
+        await recalculateTripLandingCost(targetTripData.id)
+
         const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
         const receivableContainers = containers.filter(c => c.receivable_id)
         for (const container of receivableContainers) {
@@ -540,6 +618,23 @@ function SupplierReceivablesDrilldownInner() {
       if (expense) {
         await supabase.from('supplier_receivable_allocations').update({ trip_expense_id: expense.id }).eq('id', allocId)
       }
+
+      // Create counter-entry in origin trip (negative) so origin landing cost reduces
+      await supabase.from('trip_expenses').insert({
+        trip_id:       tripId,
+        category:      'container',
+        currency:      'USD',
+        amount:        -Number(alloc.amount_usd),
+        exchange_rate: originWAER,
+        amount_ngn:    -amountNGN,
+        description:   `Supplier receivable transferred out — to trip ${targetTrip.trip_id} (WAER: ₦${originWAER.toFixed(2)}/$)`,
+        expense_date:  new Date().toISOString().split('T')[0],
+        created_by:    currentUser?.id,
+      })
+
+      // Recalculate landing costs for both trips
+      await recalculateTripLandingCost(tripId)
+      await recalculateTripLandingCost(targetTrip.id)
     }
 
     // Update all container receivables for this trip proportionally

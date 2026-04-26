@@ -326,19 +326,42 @@ export default function TripDetailPage() {
       ? generalExpensesNGN / currentContainers.length
       : 0
 
+    // Fetch presales to get warehouse_confirmed_pieces for each container
+    const containerIds = currentContainers.map(c => c.id)
+    const { data: presales } = containerIds.length > 0
+      ? await supabase.from('presales').select('container_id, warehouse_confirmed_pieces').in('container_id', containerIds)
+      : { data: [] }
+    const presaleByContainer = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+
     // Calculate and save landing cost for each container
     for (const con of currentContainers) {
-      const purchaseAmt = (con.unit_price_usd && con.pieces_purchased)
-        ? Number(con.unit_price_usd) * Number(con.pieces_purchased)
-        : 0
-      const containerUSD = purchaseAmt + Number(con.shipping_amount_usd ?? 0)
+      const piecesPurchased = Number(con.pieces_purchased ?? 0)
+      const unitPriceUSD = Number(con.unit_price_usd ?? 0)
+      const shippingUSD = Number(con.shipping_amount_usd ?? 0)
+      const purchaseAmt = unitPriceUSD * piecesPurchased
+      const containerUSD = purchaseAmt + shippingUSD
       const containerNGN = waer > 0 ? containerUSD * waer : 0
       const landingCost = containerNGN + generalPerContainer
+
+      // Effective landing cost — based on warehouse_confirmed_pieces
+      const presale = presaleByContainer[con.id]
+      const confirmedPieces = Number(presale?.warehouse_confirmed_pieces ?? 0)
+      let effectiveLandingCost: number | null = null
+      if (confirmedPieces > 0 && piecesPurchased > 0) {
+        const effectivePurchaseAmt = unitPriceUSD * confirmedPieces
+        const effectiveShippingUSD = shippingUSD * (confirmedPieces / piecesPurchased)
+        const effectiveContainerUSD = effectivePurchaseAmt + effectiveShippingUSD
+        const effectiveContainerNGN = waer > 0 ? effectiveContainerUSD * waer : 0
+        effectiveLandingCost = effectiveContainerNGN + generalPerContainer
+      }
 
       if (landingCost > 0) {
         await supabase
           .from('containers')
-          .update({ estimated_landing_cost: Math.round(landingCost * 100) / 100 })
+          .update({
+            estimated_landing_cost: Math.round(landingCost * 100) / 100,
+            effective_landing_cost: effectiveLandingCost !== null ? Math.round(effectiveLandingCost * 100) / 100 : null,
+          })
           .eq('id', con.id)
       }
     }

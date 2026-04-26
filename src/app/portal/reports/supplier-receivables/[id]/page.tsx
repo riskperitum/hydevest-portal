@@ -9,7 +9,7 @@ import {
   ArrowLeft, Loader2, ArrowRightLeft, XCircle,
   CheckCircle2, AlertTriangle, Plus, Trash2,
   MessageSquare, CornerDownRight, Send, AtSign,
-  Activity, Pencil
+  Activity, Pencil, RotateCcw
 } from 'lucide-react'
 import Link from 'next/link'
 import React from 'react'
@@ -56,6 +56,7 @@ interface AllocationRow {
   created_at: string
   requested_by_name: string | null
   approved_by_name: string | null
+  trip_expense_id: string | null
 }
 
 interface WriteoffRow {
@@ -227,7 +228,7 @@ function SupplierReceivablesDrilldownInner() {
     const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, allProfiles, { data: allTrips }] = await Promise.all([
       receivableIds.length > 0
         ? supabase.from('supplier_receivable_allocations').select(`
-            id, amount_usd, percentage, status, notes, created_at, target_container_id,
+            id, amount_usd, percentage, status, notes, created_at, target_container_id, trip_expense_id,
             target_trip:trips!supplier_receivable_allocations_target_trip_id_fkey(id, trip_id, title),
             requester:profiles!supplier_receivable_allocations_requested_by_fkey(full_name, email),
             approver:profiles!supplier_receivable_allocations_approved_by_fkey(full_name, email)
@@ -302,6 +303,7 @@ function SupplierReceivablesDrilldownInner() {
       created_at: a.created_at,
       requested_by_name: (a.requester as any)?.full_name ?? (a.requester as any)?.email ?? null,
       approved_by_name: (a.approver as any)?.full_name ?? (a.approver as any)?.email ?? null,
+      trip_expense_id: (a as { trip_expense_id?: string | null }).trip_expense_id ?? null,
     })))
 
     setWriteoffs((woffs ?? []).map(w => ({
@@ -677,6 +679,128 @@ function SupplierReceivablesDrilldownInner() {
     load()
   }
 
+  async function reverseAllocation(allocId: string) {
+    if (!confirm('Reverse this allocation? This will undo the trip expense entries and restore the receivable.')) return
+    const supabase = createClient()
+    const alloc = allocations.find(a => a.id === allocId)
+    if (!alloc) return
+
+    // Delete the target trip expense if it exists
+    if (alloc.trip_expense_id) {
+      await supabase.from('trip_expenses').delete().eq('id', alloc.trip_expense_id)
+    }
+
+    // Find and delete the counter-entry in origin trip (negative trip_expense)
+    const { data: targetTrip } = await supabase
+      .from('trips').select('trip_id').eq('trip_id', alloc.target_trip_id).single()
+
+    const { data: counterExpenses } = await supabase
+      .from('trip_expenses')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('category', 'container')
+      .like('description', `Supplier receivable transferred out — to trip ${targetTrip?.trip_id}%`)
+      .lt('amount', 0)
+
+    if (counterExpenses && counterExpenses.length > 0) {
+      // Delete the most recent counter-entry matching this allocation amount
+      const { data: matchingCounter } = await supabase
+        .from('trip_expenses')
+        .select('id, amount')
+        .eq('trip_id', tripId)
+        .like('description', `%transferred out — to trip ${targetTrip?.trip_id}%`)
+        .eq('amount', -Number(alloc.amount_usd))
+        .order('created_at', { ascending: false })
+        .limit(1)
+      if (matchingCounter && matchingCounter.length > 0) {
+        await supabase.from('trip_expenses').delete().eq('id', matchingCounter[0].id)
+      }
+    }
+
+    // Restore receivable applied amount
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
+    for (const container of receivableContainers) {
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
+        .eq('id', container.receivable_id).single()
+      if (!rec) continue
+      const proportion = totalRemaining + Number(alloc.amount_usd) > 0
+        ? container.remaining_usd / (totalRemaining + Number(alloc.amount_usd))
+        : 1 / Math.max(receivableContainers.length, 1)
+      const containerAmount = Number(alloc.amount_usd) * proportion
+      const newApplied = Math.max(0, Number(rec.total_applied_usd) - containerAmount)
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
+      const newStatus = newRemaining >= effectiveVal ? 'open' : newApplied > 0 ? 'partially_applied' : 'open'
+      await supabase.from('supplier_receivables').update({
+        total_applied_usd: newApplied,
+        status: newStatus,
+      }).eq('id', container.receivable_id)
+    }
+
+    // Delete the allocation record
+    await supabase.from('supplier_receivable_allocations').delete().eq('id', allocId)
+
+    // Recalculate landing costs
+    if (targetTrip) {
+      const { data: targetTripData } = await supabase.from('trips').select('id').eq('trip_id', alloc.target_trip_id).single()
+      if (targetTripData) {
+        await recalculateTripLandingCost(targetTripData.id)
+      }
+    }
+    await recalculateTripLandingCost(tripId)
+
+    await logActivity(
+      receivableContainers.map(c => c.receivable_id).filter(Boolean),
+      'Reallocation reversed',
+      `Reversed ${fmtUSD(alloc.amount_usd)} from trip ${alloc.target_trip_id}`,
+      alloc.amount_usd
+    )
+    load()
+  }
+
+  async function reverseWriteoff(writeoffId: string) {
+    if (!confirm('Reverse this write-off? This will restore the receivable.')) return
+    const supabase = createClient()
+    const writeoff = writeoffs.find(w => w.id === writeoffId)
+    if (!writeoff) return
+
+    // Restore each receivable
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    const totalWrittenOff = tripReceivable?.total_written_off_usd ?? 0
+    for (const container of receivableContainers) {
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
+        .eq('id', container.receivable_id).single()
+      if (!rec) continue
+      const proportion = totalWrittenOff > 0
+        ? container.remaining_usd / totalWrittenOff
+        : 1 / Math.max(receivableContainers.length, 1)
+      const containerAmount = Number(writeoff.amount_usd) * proportion
+      const newWrittenOff = Math.max(0, Number(rec.total_written_off_usd) - containerAmount)
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const newApplied = Number(rec.total_applied_usd)
+      const newRemaining = effectiveVal - newApplied - newWrittenOff
+      const newStatus = newRemaining >= effectiveVal ? 'open' : newApplied > 0 ? 'partially_applied' : 'open'
+      await supabase.from('supplier_receivables').update({
+        total_written_off_usd: newWrittenOff,
+        status: newStatus,
+      }).eq('id', container.receivable_id)
+    }
+
+    // Delete the writeoff record
+    await supabase.from('supplier_receivable_writeoffs').delete().eq('id', writeoffId)
+
+    await logActivity(
+      receivableContainers.map(c => c.receivable_id).filter(Boolean),
+      'Write-off reversed',
+      `Reversed write-off of ${fmtUSD(writeoff.amount_usd)}`,
+      writeoff.amount_usd
+    )
+    load()
+  }
+
   async function submitWriteoff(e: React.FormEvent) {
     e.preventDefault()
     if (!writeoffForm.amount_usd || !writeoffForm.assignee) return
@@ -954,11 +1078,12 @@ function SupplierReceivablesDrilldownInner() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'Total missing pieces', value: tripReceivable.total_missing_pieces.toLocaleString(), color: 'text-red-600', sub: `across ${tripReceivable.container_count} container${tripReceivable.container_count !== 1 ? 's' : ''}` },
           { label: 'Gross value (USD)', value: fmtUSD(tripReceivable.total_gross_value_usd), color: 'text-gray-900', sub: 'Original claim' },
           { label: 'Applied (USD)', value: tripReceivable.total_applied_usd > 0 ? fmtUSD(tripReceivable.total_applied_usd) : '—', color: 'text-green-700', sub: 'To other trips' },
+          { label: 'Written off (USD)', value: tripReceivable.total_written_off_usd > 0 ? fmtUSD(tripReceivable.total_written_off_usd) : '—', color: 'text-gray-700', sub: 'No longer collectible' },
           { label: 'Remaining (USD)', value: tripReceivable.total_remaining_usd > 0 ? fmtUSD(tripReceivable.total_remaining_usd) : '—', color: tripReceivable.total_remaining_usd > 0 ? 'text-red-600' : 'text-green-600', sub: 'To be applied' },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
@@ -1109,12 +1234,20 @@ function SupplierReceivablesDrilldownInner() {
                         <td className="px-3 py-3 text-xs text-gray-400 max-w-[150px] truncate">{a.notes ?? '—'}</td>
                         <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">{timeAgo(a.created_at)}</td>
                         <td className="px-3 py-3 whitespace-nowrap">
-                          {a.status === 'pending' && (
-                            <button onClick={() => approveAllocation(a.id)}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                              <CheckCircle2 size={11} /> Approve
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {a.status === 'pending' && (
+                              <button onClick={() => approveAllocation(a.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                <CheckCircle2 size={11} /> Approve
+                              </button>
+                            )}
+                            {a.status === 'approved' && (
+                              <button onClick={() => reverseAllocation(a.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-50 transition-colors">
+                                <RotateCcw size={11} /> Reverse
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
@@ -1137,7 +1270,7 @@ function SupplierReceivablesDrilldownInner() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['Amount (USD)','Reason','Written off by','Date'].map(h => (
+                    {['Amount (USD)','Reason','Written off by','Date',''].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -1150,6 +1283,12 @@ function SupplierReceivablesDrilldownInner() {
                       <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{w.written_off_by_name ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
                         {new Date(w.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <button onClick={() => reverseWriteoff(w.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-50 transition-colors">
+                          <RotateCcw size={11} /> Reverse
+                        </button>
                       </td>
                     </tr>
                   ))}

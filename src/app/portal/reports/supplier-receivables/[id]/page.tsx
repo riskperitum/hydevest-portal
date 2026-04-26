@@ -369,10 +369,10 @@ function SupplierReceivablesDrilldownInner() {
       ? generalExpensesNGN / tripContainers!.length
       : 0
 
-    // Fetch presales for warehouse_confirmed_pieces
+    // Fetch presales for supplier_loaded_pieces
     const containerIds = (tripContainers ?? []).map(c => c.id)
     const { data: presales } = containerIds.length > 0
-      ? await supabase.from('presales').select('container_id, warehouse_confirmed_pieces').in('container_id', containerIds)
+      ? await supabase.from('presales').select('container_id, supplier_loaded_pieces').in('container_id', containerIds)
       : { data: [] }
     const presaleByContainer = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
 
@@ -386,11 +386,11 @@ function SupplierReceivablesDrilldownInner() {
       const landingCost = containerNGN + generalPerContainer
 
       const presale = presaleByContainer[con.id]
-      const confirmedPieces = Number((presale as any)?.warehouse_confirmed_pieces ?? 0)
+      const loadedPieces = Number((presale as any)?.supplier_loaded_pieces ?? 0)
       let effectiveLandingCost: number | null = null
-      if (confirmedPieces > 0 && piecesPurchased > 0) {
-        const effectivePurchaseAmt = unitPriceUSD * confirmedPieces
-        const effectiveShippingUSD = shippingUSD * (confirmedPieces / piecesPurchased)
+      if (loadedPieces > 0 && piecesPurchased > 0) {
+        const effectivePurchaseAmt = unitPriceUSD * loadedPieces
+        const effectiveShippingUSD = shippingUSD * (loadedPieces / piecesPurchased)
         const effectiveContainerUSD = effectivePurchaseAmt + effectiveShippingUSD
         const effectiveContainerNGN = waer > 0 ? effectiveContainerUSD * waer : 0
         effectiveLandingCost = effectiveContainerNGN + generalPerContainer

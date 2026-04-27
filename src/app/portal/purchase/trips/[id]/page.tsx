@@ -88,10 +88,11 @@ const STATUS_OPTIONS = [
 const blankExpense = { category: 'general', amount: '', currency: 'NGN', exchange_rate: '1', description: '', expense_date: new Date().toISOString().split('T')[0] }
 const blankContainer = { container_number: '', tracking_number: '' }
 
-function ExpenseRow({ exp, onDelete, onSave, fmt }: {
+function ExpenseRow({ exp, onDelete, onSave, onShowDescription, fmt }: {
   exp: TripExpense
   onDelete: (id: string) => void
   onSave: (id: string, updates: { category: string; amount: string; currency: string; exchange_rate: string; description: string; expense_date: string }) => Promise<void>
+  onShowDescription: (text: string) => void
   fmt: (n: number) => string
 }) {
   const [editing, setEditing] = useState(false)
@@ -198,7 +199,16 @@ function ExpenseRow({ exp, onDelete, onSave, fmt }: {
       <td className="px-3 py-3 text-gray-500">{exp.currency}</td>
       <td className="px-3 py-3 text-gray-500">{exp.exchange_rate}</td>
       <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">{fmt(exp.amount_ngn)}</td>
-      <td className="px-3 py-3 text-gray-500 max-w-[180px] truncate">{exp.description ?? '—'}</td>
+      <td className="px-3 py-3 max-w-[180px]">
+        {exp.description ? (
+          <button type="button"
+            onClick={() => { onShowDescription(exp.description ?? '') }}
+            className="text-xs text-brand-600 hover:text-brand-700 underline truncate block w-full text-left"
+            title={exp.description}>
+            {exp.description}
+          </button>
+        ) : <span className="text-xs text-gray-400">—</span>}
+      </td>
       <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{new Date(exp.expense_date).toLocaleDateString()}</td>
       <td className="px-3 py-3 text-gray-500 whitespace-nowrap">{fullDisplayName(exp.created_by_profile)}</td>
       <td className="px-3 py-3">
@@ -239,6 +249,13 @@ export default function TripDetailPage() {
   const [containers, setContainers] = useState<Container[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('containers')
+  const [descModalOpen, setDescModalOpen] = useState(false)
+  const [descModalContent, setDescModalContent] = useState<string>('')
+  const [supplierSettlements, setSupplierSettlements] = useState<any[]>([])
+  const [supplierOriginalUSD, setSupplierOriginalUSD] = useState(0)
+  const [supplierEffectiveUSD, setSupplierEffectiveUSD] = useState(0)
+  const [supplierPaidUSD, setSupplierPaidUSD] = useState(0)
+  const [supplierSelfAppliedUSD, setSupplierSelfAppliedUSD] = useState(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [clearingAgents, setClearingAgents] = useState<ClearingAgent[]>([])
   const [expenseOpen, setExpenseOpen] = useState(false)
@@ -572,6 +589,76 @@ export default function TripDetailPage() {
     setDocsLoading(false)
   }, [tripId])
 
+  const loadSupplierSettlements = useCallback(async () => {
+    const supabase = createClient()
+
+    // Compute original payable USD
+    const { data: tripContainers } = await supabase
+      .from('containers')
+      .select('id, container_id, pieces_purchased, unit_price_usd, shipping_amount_usd')
+      .eq('trip_id', tripId)
+    const originalUSD = (tripContainers ?? []).reduce((s, c) => {
+      const purchase = (c.unit_price_usd && c.pieces_purchased)
+        ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+        : 0
+      return s + purchase + Number(c.shipping_amount_usd ?? 0)
+    }, 0)
+
+    // Compute effective payable USD (using supplier_loaded_pieces)
+    const containerIds = (tripContainers ?? []).map(c => c.id)
+    const { data: presales } = containerIds.length > 0
+      ? await supabase.from('presales').select('container_id, supplier_loaded_pieces').in('container_id', containerIds)
+      : { data: [] }
+    const presaleByContainer = Object.fromEntries((presales ?? []).map(p => [p.container_id, p]))
+    const effectiveUSD = (tripContainers ?? []).reduce((s, c) => {
+      const piecesPurchased = Number(c.pieces_purchased ?? 0)
+      const unitPriceUSD = Number(c.unit_price_usd ?? 0)
+      const shippingUSD = Number(c.shipping_amount_usd ?? 0)
+      const presale = presaleByContainer[c.id]
+      const loadedPieces = Number((presale as any)?.supplier_loaded_pieces ?? 0)
+      if (loadedPieces > 0 && piecesPurchased > 0) {
+        const effPurchase = unitPriceUSD * loadedPieces
+        const effShipping = shippingUSD * (loadedPieces / piecesPurchased)
+        return s + effPurchase + effShipping
+      }
+      return s + (unitPriceUSD * piecesPurchased) + shippingUSD
+    }, 0)
+
+    // Sum container category USD trip_expenses
+    const { data: containerExpenses } = await supabase
+      .from('trip_expenses')
+      .select('amount')
+      .eq('trip_id', tripId)
+      .eq('category', 'container')
+      .eq('currency', 'USD')
+    const totalPaidUSD = (containerExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+
+    // Get receivables for this trip and their self-applications
+    const { data: receivables } = await supabase
+      .from('supplier_receivables')
+      .select('id')
+      .eq('trip_id', tripId)
+    const receivableIds = (receivables ?? []).map(r => r.id)
+    const { data: settlements } = receivableIds.length > 0
+      ? await supabase.from('supplier_receivable_allocations')
+          .select(`
+            id, amount_usd, notes, created_at, status,
+            receivable:supplier_receivables(container:containers(container_id))
+          `)
+          .eq('is_self_application', true)
+          .eq('status', 'approved')
+          .in('receivable_id', receivableIds)
+          .order('created_at', { ascending: false })
+      : { data: [] }
+    const totalSelfApplied = (settlements ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+
+    setSupplierOriginalUSD(originalUSD)
+    setSupplierEffectiveUSD(effectiveUSD)
+    setSupplierPaidUSD(totalPaidUSD)
+    setSupplierSelfAppliedUSD(totalSelfApplied)
+    setSupplierSettlements(settlements ?? [])
+  }, [tripId])
+
   const loadReviewTask = useCallback(async () => {
     if (!taskId) return
     const supabase = createClient()
@@ -671,7 +758,8 @@ export default function TripDetailPage() {
 
   useEffect(() => {
     if (activeTab === 'documents') void loadDocuments()
-  }, [activeTab, loadDocuments])
+    if (activeTab === 'supplier') void loadSupplierSettlements()
+  }, [activeTab, loadDocuments, loadSupplierSettlements])
 
   async function updateField(field: string, value: string) {
     const supabase = createClient()
@@ -1668,6 +1756,7 @@ export default function TripDetailPage() {
               { key: 'expenses', label: 'Trip Expense', count: expenses.length },
               { key: 'containers', label: 'Containers', count: containers.length },
               { key: 'documents', label: 'Trip Document', count: tripDocuments.length },
+              { key: 'supplier', label: 'Supplier Settlements', count: supplierSettlements.length },
               ...(canViewActivity ? [{ key: 'activity' as const, label: 'Activity log', count: activityLogs.length }] : []),
             ].map(tab => (
               <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)}
@@ -1727,6 +1816,7 @@ export default function TripDetailPage() {
                         key={exp.id}
                         exp={exp}
                         onDelete={deleteExpense}
+                        onShowDescription={(text) => { setDescModalContent(text); setDescModalOpen(true) }}
                         onSave={async (id, updates) => {
                           const supabase = createClient()
                           const amount = parseFloat(updates.amount)
@@ -2086,6 +2176,86 @@ export default function TripDetailPage() {
             </div>
           )}
 
+          {displayedTab === 'supplier' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">Supplier settlements</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Original payable, adjusted via missing pieces, and any self-applied receivables</p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white rounded-xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 mb-1">Original payable (USD)</p>
+                  <p className="text-base font-bold text-gray-900">${supplierOriginalUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Based on pieces purchased</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 mb-1">Effective payable (USD)</p>
+                  <p className="text-base font-bold text-amber-700">${supplierEffectiveUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Adjusted to supplier loaded pieces</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 mb-1">Paid (USD)</p>
+                  <p className="text-base font-bold text-green-700">${supplierPaidUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">USD container expenses</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 mb-1">Settled via receivables</p>
+                  <p className="text-base font-bold text-purple-700">${supplierSelfAppliedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Self-applied missing pieces</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-700">Outstanding to supplier (USD)</p>
+                  <p className="text-xl font-bold text-red-600">
+                    ${Math.max(0, supplierEffectiveUSD - supplierPaidUSD - supplierSelfAppliedUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Effective payable − Paid − Settled</p>
+              </div>
+
+              {/* Settlements table */}
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <h4 className="text-sm font-semibold text-gray-700">Self-applied receivables</h4>
+                </div>
+                {supplierSettlements.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-8 text-center">No self-applied settlements yet</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        {['Date','From container','Amount (USD)','Notes'].map(h => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {supplierSettlements.map((s: any) => (
+                        <tr key={s.id} className="hover:bg-gray-50/50">
+                          <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">
+                            {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">
+                              {(s.receivable as any)?.container?.container_id ?? '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">
+                            ${Number(s.amount_usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-3 py-3 text-xs text-gray-500 max-w-[300px] truncate">{s.notes ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
           {canViewActivity && activeTab === 'activity' && (
             <div className="space-y-1">
               {activityLogs.length === 0 ? (
@@ -2324,6 +2494,10 @@ export default function TripDetailPage() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={descModalOpen} onClose={() => setDescModalOpen(false)} title="Description" size="md">
+        <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{descModalContent}</p>
       </Modal>
     </div>
     </PermissionGate>

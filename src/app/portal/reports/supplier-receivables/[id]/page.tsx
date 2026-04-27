@@ -57,6 +57,7 @@ interface AllocationRow {
   requested_by_name: string | null
   approved_by_name: string | null
   trip_expense_id: string | null
+  is_self_application: boolean
 }
 
 interface WriteoffRow {
@@ -166,6 +167,13 @@ function SupplierReceivablesDrilldownInner() {
   // Reallocation modal
   const [reallocateOpen, setReallocateOpen] = useState(searchParams.get('action') === 'reallocate')
   const [allocForm, setAllocForm] = useState({ target_trip_id: '', amount_usd: '', percentage: '', notes: '', assignee: '' })
+  const [outstandingUSD, setOutstandingUSD] = useState(0)
+  const [originalPayableUSD, setOriginalPayableUSD] = useState(0)
+  const [paidContainerUSD, setPaidContainerUSD] = useState(0)
+  const [selfAppliedUSD, setSelfAppliedUSD] = useState(0)
+  const [selfApplyOpen, setSelfApplyOpen] = useState(false)
+  const [selfApplyForm, setSelfApplyForm] = useState({ amount_usd: '', notes: '' })
+  const [savingSelfApply, setSavingSelfApply] = useState(false)
   const [savingAlloc, setSavingAlloc] = useState(false)
 
   // Write-off modal
@@ -228,7 +236,7 @@ function SupplierReceivablesDrilldownInner() {
     const [{ data: allocs }, { data: woffs }, { data: acts }, { data: noteData }, allProfiles, { data: allTrips }] = await Promise.all([
       receivableIds.length > 0
         ? supabase.from('supplier_receivable_allocations').select(`
-            id, amount_usd, percentage, status, notes, created_at, target_container_id, trip_expense_id,
+            id, amount_usd, percentage, status, notes, created_at, target_container_id, trip_expense_id, is_self_application,
             target_trip:trips!supplier_receivable_allocations_target_trip_id_fkey(id, trip_id, title),
             requester:profiles!supplier_receivable_allocations_requested_by_fkey(full_name, email),
             approver:profiles!supplier_receivable_allocations_approved_by_fkey(full_name, email)
@@ -304,6 +312,7 @@ function SupplierReceivablesDrilldownInner() {
       requested_by_name: (a.requester as any)?.full_name ?? (a.requester as any)?.email ?? null,
       approved_by_name: (a.approver as any)?.full_name ?? (a.approver as any)?.email ?? null,
       trip_expense_id: (a as { trip_expense_id?: string | null }).trip_expense_id ?? null,
+      is_self_application: Boolean((a as { is_self_application?: boolean | null }).is_self_application),
     })))
 
     setWriteoffs((woffs ?? []).map(w => ({
@@ -330,6 +339,44 @@ function SupplierReceivablesDrilldownInner() {
       const parent = topLevel.find(n => n.id === reply.parent_id)
       if (parent) parent.replies!.push(reply)
     })
+
+    // Compute outstanding USD payable for this trip
+    const totalPurchaseUSD = (allTripContainers ?? []).reduce((s, c) => {
+      const purchase = (c.unit_price_usd && c.pieces_purchased)
+        ? Number(c.unit_price_usd) * Number(c.pieces_purchased)
+        : 0
+      return s + purchase
+    }, 0)
+    // Add shipping
+    const { data: containersWithShipping } = await supabase
+      .from('containers')
+      .select('shipping_amount_usd').eq('trip_id', tripId)
+    const totalShippingUSD = (containersWithShipping ?? []).reduce((s, c) => s + Number(c.shipping_amount_usd ?? 0), 0)
+    const totalPayableUSD = totalPurchaseUSD + totalShippingUSD
+
+    // Sum container category USD trip_expenses
+    const { data: containerExpenses } = await supabase
+      .from('trip_expenses')
+      .select('amount, currency, category')
+      .eq('trip_id', tripId)
+      .eq('category', 'container')
+      .eq('currency', 'USD')
+    const totalPaidUSD = (containerExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+
+    // Sum self-applications for this trip
+    const { data: selfApps } = await supabase
+      .from('supplier_receivable_allocations')
+      .select('amount_usd')
+      .eq('is_self_application', true)
+      .eq('status', 'approved')
+      .in('receivable_id', receivableIds.length > 0 ? receivableIds : ['00000000-0000-0000-0000-000000000000'])
+    const totalSelfAppliedUSD = (selfApps ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+
+    setOriginalPayableUSD(totalPayableUSD)
+    setPaidContainerUSD(totalPaidUSD)
+    setSelfAppliedUSD(totalSelfAppliedUSD)
+    setOutstandingUSD(Math.max(0, totalPayableUSD - totalPaidUSD - totalSelfAppliedUSD))
+
     setNotes(topLevel)
     setProfiles(allProfiles ?? [])
     setOtherTrips(allTrips ?? [])
@@ -417,6 +464,91 @@ function SupplierReceivablesDrilldownInner() {
         performed_by: currentUser?.id,
       })
     }
+  }
+
+  async function submitSelfApply(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selfApplyForm.amount_usd) return
+    const amount = parseFloat(selfApplyForm.amount_usd)
+    if (amount <= 0 || amount > outstandingUSD) {
+      alert(`Amount must be between $0.01 and $${outstandingUSD.toFixed(2)} (current outstanding)`)
+      return
+    }
+    if (amount > (tripReceivable?.total_remaining_usd ?? 0)) {
+      alert(`Cannot apply more than the remaining receivable ($${(tripReceivable?.total_remaining_usd ?? 0).toFixed(2)})`)
+      return
+    }
+    setSavingSelfApply(true)
+    const supabase = createClient()
+
+    const firstReceivable = containers.find(c =>
+      c.receivable_id &&
+      c.status !== 'fully_applied' &&
+      c.status !== 'written_off' &&
+      c.status !== 'no_receivable'
+    )
+    if (!firstReceivable) {
+      setSavingSelfApply(false)
+      return
+    }
+
+    // Insert self-application allocation row
+    await supabase.from('supplier_receivable_allocations').insert({
+      receivable_id: firstReceivable.receivable_id,
+      target_trip_id: tripId,
+      amount_usd: amount,
+      status: 'approved',
+      is_self_application: true,
+      notes: selfApplyForm.notes || null,
+      requested_by: currentUser?.id,
+      approved_by: currentUser?.id,
+      approved_at: new Date().toISOString(),
+    })
+
+    // Recompute totals from scratch for each receivable in this trip
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    for (const cc of receivableContainers) {
+      const recId = cc.receivable_id
+      if (!recId) continue
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
+      if (!rec) continue
+      const { data: remainingAllocs } = await supabase
+        .from('supplier_receivable_allocations')
+        .select('amount_usd').eq('receivable_id', recId).eq('status', 'approved')
+      const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+      const { data: writeoffsData } = await supabase
+        .from('supplier_receivable_writeoffs')
+        .select('amount_usd').eq('receivable_id', recId)
+      const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const totalUsed = totalApplied + totalWrittenOff
+      let newStatus: string
+      if (totalUsed >= effectiveVal - 0.01) {
+        newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+      } else if (totalUsed > 0) {
+        newStatus = 'partially_applied'
+      } else {
+        newStatus = 'open'
+      }
+      await supabase.from('supplier_receivables').update({
+        total_applied_usd: Math.round(totalApplied * 100) / 100,
+        total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
+        status: newStatus,
+      }).eq('id', recId)
+    }
+
+    await logActivity(
+      [firstReceivable.receivable_id].filter(Boolean) as string[],
+      'Self-applied to same trip',
+      `${fmtUSD(amount)} applied to outstanding supplier payable`,
+      amount
+    )
+
+    setSavingSelfApply(false)
+    setSelfApplyOpen(false)
+    setSelfApplyForm({ amount_usd: '', notes: '' })
+    load()
   }
 
   async function submitReallocation(e: React.FormEvent) {
@@ -697,6 +829,8 @@ function SupplierReceivablesDrilldownInner() {
     const alloc = allocations.find(a => a.id === allocId)
     if (!alloc) return
 
+    const isSelfApp = alloc.is_self_application === true
+
     // 1. Find the target trip db ID
     const { data: targetTrip } = await supabase
       .from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()
@@ -707,23 +841,25 @@ function SupplierReceivablesDrilldownInner() {
     // 2. Delete the allocation row FIRST (FK constraint on trip_expense_id requires this)
     await supabase.from('supplier_receivable_allocations').delete().eq('id', allocId)
 
-    // 3. Now delete the target trip expense
-    if (targetExpenseId) {
-      await supabase.from('trip_expenses').delete().eq('id', targetExpenseId)
-    }
+    if (!isSelfApp) {
+      // 3. Now delete the target trip expense
+      if (targetExpenseId) {
+        await supabase.from('trip_expenses').delete().eq('id', targetExpenseId)
+      }
 
-    // 4. Delete the matching origin counter-entry
-    if (targetTrip) {
-      const { data: counterCandidates } = await supabase
-        .from('trip_expenses')
-        .select('id, amount, description')
-        .eq('trip_id', tripId)
-        .eq('amount', -Number(alloc.amount_usd))
-        .like('description', `%transferred out — to trip ${targetTrip.trip_id}%`)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      if (counterCandidates && counterCandidates.length > 0) {
-        await supabase.from('trip_expenses').delete().eq('id', counterCandidates[0].id)
+      // 4. Delete the matching origin counter-entry
+      if (targetTrip) {
+        const { data: counterCandidates } = await supabase
+          .from('trip_expenses')
+          .select('id, amount, description')
+          .eq('trip_id', tripId)
+          .eq('amount', -Number(alloc.amount_usd))
+          .like('description', `%transferred out — to trip ${targetTrip.trip_id}%`)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        if (counterCandidates && counterCandidates.length > 0) {
+          await supabase.from('trip_expenses').delete().eq('id', counterCandidates[0].id)
+        }
       }
     }
 
@@ -1115,7 +1251,13 @@ function SupplierReceivablesDrilldownInner() {
             <p className="text-xs text-gray-400">{tripReceivable.supplier_name ?? '—'} · {tripReceivable.container_count} container{tripReceivable.container_count !== 1 ? 's' : ''}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {canAct && outstandingUSD > 0 && (
+            <button onClick={() => setSelfApplyOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors">
+              <ArrowRightLeft size={14} /> Apply to same trip
+            </button>
+          )}
           {canAct && (
             <button onClick={() => setReallocateOpen(true)}
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
@@ -1130,6 +1272,23 @@ function SupplierReceivablesDrilldownInner() {
           )}
         </div>
       </div>
+
+      {/* Outstanding payable banner */}
+      {outstandingUSD > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-900">Trip has outstanding USD payable to supplier</p>
+            <p className="text-xs text-amber-700 mt-1">
+              Original payable: <span className="font-semibold">${originalPayableUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {' · '}Paid: <span className="font-semibold">${paidContainerUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {selfAppliedUSD > 0 && <> · Settled via receivables: <span className="font-semibold">${selfAppliedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>}
+              {' · '}Outstanding: <span className="font-bold text-amber-900">${outstandingUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </p>
+            <p className="text-xs text-amber-600 mt-1">Use "Apply to same trip" to reduce the supplier payable using available receivables.</p>
+          </div>
+        </div>
+      )}
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -1529,6 +1688,56 @@ function SupplierReceivablesDrilldownInner() {
                 <button type="submit" disabled={savingAlloc || !allocForm.target_trip_id || !allocForm.amount_usd || (!canSelfApprove && !allocForm.assignee)}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingAlloc ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><ArrowRightLeft size={14} /> Submit for approval</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Self-apply (same trip) modal */}
+      {selfApplyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelfApplyOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Apply to same trip</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Reduce outstanding USD payable</p>
+              </div>
+              <button onClick={() => setSelfApplyOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">✕</button>
+            </div>
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-100 text-xs text-amber-900 space-y-1">
+              <p>Outstanding payable: <span className="font-semibold">${outstandingUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+              <p>Available receivable: <span className="font-semibold">${(tripReceivable?.total_remaining_usd ?? 0).toFixed(2)}</span></p>
+              <p className="text-amber-700">Max applicable: <span className="font-semibold">${Math.min(outstandingUSD, tripReceivable?.total_remaining_usd ?? 0).toFixed(2)}</span></p>
+            </div>
+            <form onSubmit={submitSelfApply} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (USD) <span className="text-red-400">*</span></label>
+                <AmountInput required value={selfApplyForm.amount_usd}
+                  onChange={v => {
+                    const parsed = parseFloat(v) || 0
+                    const maxVal = Math.min(outstandingUSD, tripReceivable?.total_remaining_usd ?? 0)
+                    const capped = parsed > maxVal ? maxVal.toFixed(2) : v
+                    setSelfApplyForm(f => ({ ...f, amount_usd: capped }))
+                  }}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+                <textarea rows={2} value={selfApplyForm.notes}
+                  onChange={e => setSelfApplyForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                  placeholder="e.g. Settled supplier balance from missing pieces..." />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setSelfApplyOpen(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={savingSelfApply || !selfApplyForm.amount_usd}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {savingSelfApply ? <><Loader2 size={14} className="animate-spin" /> Applying…</> : <><ArrowRightLeft size={14} /> Apply</>}
                 </button>
               </div>
             </form>

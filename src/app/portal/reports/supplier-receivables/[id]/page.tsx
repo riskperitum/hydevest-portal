@@ -538,25 +538,36 @@ function SupplierReceivablesDrilldownInner() {
         await recalculateTripLandingCost(tripId)
         await recalculateTripLandingCost(targetTripData.id)
 
-        const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
         const receivableContainers = containers.filter(c => c.receivable_id)
-        for (const container of receivableContainers) {
+        for (const cc of receivableContainers) {
+          const recId = cc.receivable_id
+          if (!recId) continue
           const { data: rec } = await supabase.from('supplier_receivables')
-            .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
-            .eq('id', container.receivable_id).single()
+            .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
           if (!rec) continue
-          const proportion = totalRemaining > 0
-            ? container.remaining_usd / totalRemaining
-            : 1 / Math.max(receivableContainers.length, 1)
-          const containerAmount = amount * proportion
-          const newApplied = Number(rec.total_applied_usd) + containerAmount
+          const { data: remainingAllocs } = await supabase
+            .from('supplier_receivable_allocations')
+            .select('amount_usd').eq('receivable_id', recId).eq('status', 'approved')
+          const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+          const { data: writeoffsData } = await supabase
+            .from('supplier_receivable_writeoffs')
+            .select('amount_usd').eq('receivable_id', recId)
+          const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
           const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
-          const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
-          const newStatus = newRemaining <= 0 ? 'fully_applied' : newApplied > 0 ? 'partially_applied' : 'open'
+          const totalUsed = totalApplied + totalWrittenOff
+          let newStatus: string
+          if (totalUsed >= effectiveVal - 0.01) {
+            newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+          } else if (totalUsed > 0) {
+            newStatus = 'partially_applied'
+          } else {
+            newStatus = 'open'
+          }
           await supabase.from('supplier_receivables').update({
-            total_applied_usd: newApplied,
+            total_applied_usd: Math.round(totalApplied * 100) / 100,
+            total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
             status: newStatus,
-          }).eq('id', container.receivable_id)
+          }).eq('id', recId)
         }
       }
 
@@ -639,35 +650,36 @@ function SupplierReceivablesDrilldownInner() {
       await recalculateTripLandingCost(targetTrip.id)
     }
 
-    // Update all container receivables for this trip proportionally
-    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
     const receivableContainers = containers.filter(c => c.receivable_id)
-    for (const container of receivableContainers) {
-      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
-      const containerAmount = alloc.amount_usd * proportion
-      const newApplied = Number(container.remaining_usd) - containerAmount
-      await supabase.from('supplier_receivables')
-        .update({
-          total_applied_usd: supabase.rpc as any,
-        }).eq('id', container.receivable_id)
-    }
-
-    // Simpler approach — just update total_applied on each receivable
-    for (const container of receivableContainers) {
+    for (const cc of receivableContainers) {
+      const recId = cc.receivable_id
+      if (!recId) continue
       const { data: rec } = await supabase.from('supplier_receivables')
-        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
-        .eq('id', container.receivable_id).single()
+        .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
       if (!rec) continue
-      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
-      const containerAmount = alloc.amount_usd * proportion
-      const newApplied = Number(rec.total_applied_usd) + containerAmount
+      const { data: remainingAllocs } = await supabase
+        .from('supplier_receivable_allocations')
+        .select('amount_usd').eq('receivable_id', recId).eq('status', 'approved')
+      const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+      const { data: writeoffsData } = await supabase
+        .from('supplier_receivable_writeoffs')
+        .select('amount_usd').eq('receivable_id', recId)
+      const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
       const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
-      const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
-      const newStatus = newRemaining <= 0 ? 'fully_applied' : newApplied > 0 ? 'partially_applied' : 'open'
+      const totalUsed = totalApplied + totalWrittenOff
+      let newStatus: string
+      if (totalUsed >= effectiveVal - 0.01) {
+        newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+      } else if (totalUsed > 0) {
+        newStatus = 'partially_applied'
+      } else {
+        newStatus = 'open'
+      }
       await supabase.from('supplier_receivables').update({
-        total_applied_usd: newApplied,
+        total_applied_usd: Math.round(totalApplied * 100) / 100,
+        total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
         status: newStatus,
-      }).eq('id', container.receivable_id)
+      }).eq('id', recId)
     }
 
     await logActivity(
@@ -685,74 +697,83 @@ function SupplierReceivablesDrilldownInner() {
     const alloc = allocations.find(a => a.id === allocId)
     if (!alloc) return
 
-    // Delete the target trip expense if it exists
+    // 1. Delete the target trip expense
     if (alloc.trip_expense_id) {
       await supabase.from('trip_expenses').delete().eq('id', alloc.trip_expense_id)
     }
 
-    // Find and delete the counter-entry in origin trip (negative trip_expense)
+    // 2. Find the target trip db ID
     const { data: targetTrip } = await supabase
-      .from('trips').select('trip_id').eq('trip_id', alloc.target_trip_id).single()
+      .from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()
 
-    const { data: counterExpenses } = await supabase
-      .from('trip_expenses')
-      .select('id')
-      .eq('trip_id', tripId)
-      .eq('category', 'container')
-      .like('description', `Supplier receivable transferred out — to trip ${targetTrip?.trip_id}%`)
-      .lt('amount', 0)
-
-    if (counterExpenses && counterExpenses.length > 0) {
-      // Delete the most recent counter-entry matching this allocation amount
-      const { data: matchingCounter } = await supabase
+    // 3. Delete the matching origin counter-entry
+    if (targetTrip) {
+      const { data: counterCandidates } = await supabase
         .from('trip_expenses')
-        .select('id, amount')
+        .select('id, amount, description')
         .eq('trip_id', tripId)
-        .like('description', `%transferred out — to trip ${targetTrip?.trip_id}%`)
         .eq('amount', -Number(alloc.amount_usd))
+        .like('description', `%transferred out — to trip ${targetTrip.trip_id}%`)
         .order('created_at', { ascending: false })
         .limit(1)
-      if (matchingCounter && matchingCounter.length > 0) {
-        await supabase.from('trip_expenses').delete().eq('id', matchingCounter[0].id)
+      if (counterCandidates && counterCandidates.length > 0) {
+        await supabase.from('trip_expenses').delete().eq('id', counterCandidates[0].id)
       }
     }
 
-    // Restore receivable applied amount
-    const receivableContainers = containers.filter(c => c.receivable_id)
-    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
-    for (const container of receivableContainers) {
-      const { data: rec } = await supabase.from('supplier_receivables')
-        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
-        .eq('id', container.receivable_id).single()
-      if (!rec) continue
-      const proportion = totalRemaining + Number(alloc.amount_usd) > 0
-        ? container.remaining_usd / (totalRemaining + Number(alloc.amount_usd))
-        : 1 / Math.max(receivableContainers.length, 1)
-      const containerAmount = Number(alloc.amount_usd) * proportion
-      const newApplied = Math.max(0, Number(rec.total_applied_usd) - containerAmount)
-      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
-      const newRemaining = effectiveVal - newApplied - Number(rec.total_written_off_usd)
-      const newStatus = newRemaining >= effectiveVal ? 'open' : newApplied > 0 ? 'partially_applied' : 'open'
-      await supabase.from('supplier_receivables').update({
-        total_applied_usd: newApplied,
-        status: newStatus,
-      }).eq('id', container.receivable_id)
-    }
-
-    // Delete the allocation record
+    // 4. Delete the allocation row
     await supabase.from('supplier_receivable_allocations').delete().eq('id', allocId)
 
-    // Recalculate landing costs
-    if (targetTrip) {
-      const { data: targetTripData } = await supabase.from('trips').select('id').eq('trip_id', alloc.target_trip_id).single()
-      if (targetTripData) {
-        await recalculateTripLandingCost(targetTripData.id)
+    // 5. Recompute total_applied_usd and total_written_off_usd from scratch for each receivable in this trip
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    for (const cc of receivableContainers) {
+      const recId = cc.receivable_id
+      if (!recId) continue
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
+      if (!rec) continue
+
+      // Sum all remaining approved allocations linked to this trip's receivables
+      const { data: remainingAllocs } = await supabase
+        .from('supplier_receivable_allocations')
+        .select('amount_usd, status')
+        .eq('receivable_id', recId)
+        .in('status', ['approved'])
+      const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+
+      // Sum all writeoffs for this receivable
+      const { data: writeoffsData } = await supabase
+        .from('supplier_receivable_writeoffs')
+        .select('amount_usd')
+        .eq('receivable_id', recId)
+      const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
+
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const totalUsed = totalApplied + totalWrittenOff
+      let newStatus: string
+      if (totalUsed >= effectiveVal - 0.01) {
+        newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+      } else if (totalUsed > 0) {
+        newStatus = 'partially_applied'
+      } else {
+        newStatus = 'open'
       }
+
+      await supabase.from('supplier_receivables').update({
+        total_applied_usd: Math.round(totalApplied * 100) / 100,
+        total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
+        status: newStatus,
+      }).eq('id', recId)
+    }
+
+    // 6. Recalculate landing costs for both trips
+    if (targetTrip) {
+      await recalculateTripLandingCost(targetTrip.id)
     }
     await recalculateTripLandingCost(tripId)
 
     await logActivity(
-      receivableContainers.map(c => c.receivable_id).filter(Boolean),
+      receivableContainers.map(c => c.receivable_id).filter(Boolean) as string[],
       'Reallocation reversed',
       `Reversed ${fmtUSD(alloc.amount_usd)} from trip ${alloc.target_trip_id}`,
       alloc.amount_usd
@@ -766,34 +787,51 @@ function SupplierReceivablesDrilldownInner() {
     const writeoff = writeoffs.find(w => w.id === writeoffId)
     if (!writeoff) return
 
-    // Restore each receivable
-    const receivableContainers = containers.filter(c => c.receivable_id)
-    const totalWrittenOff = tripReceivable?.total_written_off_usd ?? 0
-    for (const container of receivableContainers) {
-      const { data: rec } = await supabase.from('supplier_receivables')
-        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
-        .eq('id', container.receivable_id).single()
-      if (!rec) continue
-      const proportion = totalWrittenOff > 0
-        ? container.remaining_usd / totalWrittenOff
-        : 1 / Math.max(receivableContainers.length, 1)
-      const containerAmount = Number(writeoff.amount_usd) * proportion
-      const newWrittenOff = Math.max(0, Number(rec.total_written_off_usd) - containerAmount)
-      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
-      const newApplied = Number(rec.total_applied_usd)
-      const newRemaining = effectiveVal - newApplied - newWrittenOff
-      const newStatus = newRemaining >= effectiveVal ? 'open' : newApplied > 0 ? 'partially_applied' : 'open'
-      await supabase.from('supplier_receivables').update({
-        total_written_off_usd: newWrittenOff,
-        status: newStatus,
-      }).eq('id', container.receivable_id)
-    }
-
-    // Delete the writeoff record
+    // Delete the writeoff row
     await supabase.from('supplier_receivable_writeoffs').delete().eq('id', writeoffId)
 
+    // Recompute totals from scratch for each receivable in this trip
+    const receivableContainers = containers.filter(c => c.receivable_id)
+    for (const cc of receivableContainers) {
+      const recId = cc.receivable_id
+      if (!recId) continue
+      const { data: rec } = await supabase.from('supplier_receivables')
+        .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
+      if (!rec) continue
+
+      const { data: remainingAllocs } = await supabase
+        .from('supplier_receivable_allocations')
+        .select('amount_usd, status')
+        .eq('receivable_id', recId)
+        .in('status', ['approved'])
+      const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+
+      const { data: writeoffsData } = await supabase
+        .from('supplier_receivable_writeoffs')
+        .select('amount_usd')
+        .eq('receivable_id', recId)
+      const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
+
+      const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
+      const totalUsed = totalApplied + totalWrittenOff
+      let newStatus: string
+      if (totalUsed >= effectiveVal - 0.01) {
+        newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+      } else if (totalUsed > 0) {
+        newStatus = 'partially_applied'
+      } else {
+        newStatus = 'open'
+      }
+
+      await supabase.from('supplier_receivables').update({
+        total_applied_usd: Math.round(totalApplied * 100) / 100,
+        total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
+        status: newStatus,
+      }).eq('id', recId)
+    }
+
     await logActivity(
-      receivableContainers.map(c => c.receivable_id).filter(Boolean),
+      receivableContainers.map(c => c.receivable_id).filter(Boolean) as string[],
       'Write-off reversed',
       `Reversed write-off of ${fmtUSD(writeoff.amount_usd)}`,
       writeoff.amount_usd
@@ -839,24 +877,37 @@ function SupplierReceivablesDrilldownInner() {
       module: 'supplier_receivables',
     })
 
-    // Update receivables proportionally
-    const totalRemaining = tripReceivable?.total_remaining_usd ?? 0
+    // Recompute totals from scratch for each receivable
     const receivableContainers = containers.filter(c => c.receivable_id)
-    for (const container of receivableContainers) {
+    for (const cc of receivableContainers) {
+      const recId = cc.receivable_id
+      if (!recId) continue
       const { data: rec } = await supabase.from('supplier_receivables')
-        .select('total_applied_usd, gross_value_usd, agreed_value_usd, total_written_off_usd')
-        .eq('id', container.receivable_id).single()
+        .select('gross_value_usd, agreed_value_usd').eq('id', recId).single()
       if (!rec) continue
-      const proportion = totalRemaining > 0 ? container.remaining_usd / totalRemaining : 1 / containers.length
-      const containerAmount = amount * proportion
-      const newWrittenOff = Number(rec.total_written_off_usd) + containerAmount
+      const { data: remainingAllocs } = await supabase
+        .from('supplier_receivable_allocations')
+        .select('amount_usd').eq('receivable_id', recId).eq('status', 'approved')
+      const totalApplied = (remainingAllocs ?? []).reduce((s, a) => s + Number(a.amount_usd), 0)
+      const { data: writeoffsData } = await supabase
+        .from('supplier_receivable_writeoffs')
+        .select('amount_usd').eq('receivable_id', recId)
+      const totalWrittenOff = (writeoffsData ?? []).reduce((s, w) => s + Number(w.amount_usd), 0)
       const effectiveVal = rec.agreed_value_usd ? Number(rec.agreed_value_usd) : Number(rec.gross_value_usd)
-      const newRemaining = effectiveVal - Number(rec.total_applied_usd) - newWrittenOff
-      const newStatus = newRemaining <= 0 ? 'written_off' : 'partially_applied'
+      const totalUsed = totalApplied + totalWrittenOff
+      let newStatus: string
+      if (totalUsed >= effectiveVal - 0.01) {
+        newStatus = totalWrittenOff >= totalApplied ? 'written_off' : 'fully_applied'
+      } else if (totalUsed > 0) {
+        newStatus = 'partially_applied'
+      } else {
+        newStatus = 'open'
+      }
       await supabase.from('supplier_receivables').update({
-        total_written_off_usd: newWrittenOff,
+        total_applied_usd: Math.round(totalApplied * 100) / 100,
+        total_written_off_usd: Math.round(totalWrittenOff * 100) / 100,
         status: newStatus,
-      }).eq('id', container.receivable_id)
+      }).eq('id', recId)
     }
 
     await logActivity(

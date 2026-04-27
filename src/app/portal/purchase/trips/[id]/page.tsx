@@ -752,9 +752,10 @@ export default function TripDetailPage() {
     loadDropdowns()
     loadActivity()
     loadReviewTask()
+    void loadSupplierSettlements()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user))
-  }, [load, loadDropdowns, loadActivity, loadReviewTask])
+  }, [load, loadDropdowns, loadActivity, loadReviewTask, loadSupplierSettlements])
 
   useEffect(() => {
     if (activeTab === 'documents') void loadDocuments()
@@ -1134,10 +1135,10 @@ export default function TripDetailPage() {
     .filter(e => e.category === 'container' && e.currency === 'USD')
     .reduce((s, e) => s + Number(e.amount ?? 0), 0)
 
-  // Outstanding payable to supplier
-  const supplierOutstandingUSD = Math.max(0, totalContainerCostUSD - totalPaidToSupplierUSD)
+  // Outstanding payable to supplier = original payable − USD paid − self-applied receivables
+  const supplierOutstandingUSD = Math.max(0, totalContainerCostUSD - totalPaidToSupplierUSD - supplierSelfAppliedUSD)
   const supplierPaidPct = totalContainerCostUSD > 0
-    ? Math.min(100, (totalPaidToSupplierUSD / totalContainerCostUSD) * 100)
+    ? Math.min(100, ((totalPaidToSupplierUSD + supplierSelfAppliedUSD) / totalContainerCostUSD) * 100)
     : 0
 
   const metrics = [
@@ -1524,6 +1525,11 @@ export default function TripDetailPage() {
                   ${totalPaidToSupplierUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </span>
+              <span className="text-purple-600">
+                Settled: <span className="font-semibold">
+                  ${supplierSelfAppliedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
               <span className={supplierOutstandingUSD > 0 ? 'text-red-600' : 'text-green-600'}>
                 Outstanding: <span className="font-bold text-base">
                   ${supplierOutstandingUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1542,7 +1548,7 @@ export default function TripDetailPage() {
             />
           </div>
           <div className="flex items-center justify-between mt-1.5">
-            <p className="text-xs text-gray-400">{supplierPaidPct.toFixed(1)}% paid</p>
+            <p className="text-xs text-gray-400">{supplierPaidPct.toFixed(1)}% covered (paid + settled)</p>
             {supplierOutstandingUSD <= 0 && (
               <p className="text-xs font-medium text-green-600">✓ Fully paid</p>
             )}
@@ -2210,10 +2216,10 @@ export default function TripDetailPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-gray-700">Outstanding to supplier (USD)</p>
                   <p className="text-xl font-bold text-red-600">
-                    ${Math.max(0, supplierEffectiveUSD - supplierPaidUSD - supplierSelfAppliedUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${Math.max(0, supplierOriginalUSD - supplierPaidUSD - supplierSelfAppliedUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Effective payable − Paid − Settled</p>
+                <p className="text-xs text-gray-400 mt-1">Original payable − Paid − Settled</p>
               </div>
 
               {/* Settlements table */}

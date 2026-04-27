@@ -697,16 +697,22 @@ function SupplierReceivablesDrilldownInner() {
     const alloc = allocations.find(a => a.id === allocId)
     if (!alloc) return
 
-    // 1. Delete the target trip expense
-    if (alloc.trip_expense_id) {
-      await supabase.from('trip_expenses').delete().eq('id', alloc.trip_expense_id)
-    }
-
-    // 2. Find the target trip db ID
+    // 1. Find the target trip db ID
     const { data: targetTrip } = await supabase
       .from('trips').select('id, trip_id').eq('trip_id', alloc.target_trip_id).single()
 
-    // 3. Delete the matching origin counter-entry
+    // Capture trip_expense_id before we delete the allocation
+    const targetExpenseId = alloc.trip_expense_id
+
+    // 2. Delete the allocation row FIRST (FK constraint on trip_expense_id requires this)
+    await supabase.from('supplier_receivable_allocations').delete().eq('id', allocId)
+
+    // 3. Now delete the target trip expense
+    if (targetExpenseId) {
+      await supabase.from('trip_expenses').delete().eq('id', targetExpenseId)
+    }
+
+    // 4. Delete the matching origin counter-entry
     if (targetTrip) {
       const { data: counterCandidates } = await supabase
         .from('trip_expenses')
@@ -720,9 +726,6 @@ function SupplierReceivablesDrilldownInner() {
         await supabase.from('trip_expenses').delete().eq('id', counterCandidates[0].id)
       }
     }
-
-    // 4. Delete the allocation row
-    await supabase.from('supplier_receivable_allocations').delete().eq('id', allocId)
 
     // 5. Recompute total_applied_usd and total_written_off_usd from scratch for each receivable in this trip
     const receivableContainers = containers.filter(c => c.receivable_id)

@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, Search, Filter, Download, Eye, Package,
-  Clock, CheckCircle2, DollarSign, AlertCircle, ShoppingCart
+  Plus, Search, Download, Eye, Package, ChevronDown, ChevronRight,
+  DollarSign, AlertCircle, ShoppingCart, LayoutGrid, List
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePermissions, can } from '@/lib/permissions/hooks'
@@ -63,6 +63,11 @@ const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFr
 export default function OutlierPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'record' | 'sale'>('record')
+  const [recordView, setRecordView] = useState<'grouped' | 'transactional'>('grouped')
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [statusFilter, setStatusFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [records, setRecords] = useState<OutlierRecord[]>([])
   const [sales, setSales] = useState<OutlierSale[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,12 +124,83 @@ export default function OutlierPage() {
     return acc
   }, {} as Record<string, { container: OutlierRecord['container']; records: OutlierRecord[] }>)
 
-  const filteredGroupedRecords = Object.entries(groupedRecords)
-    .filter(([key, group]) => {
-      if (search && !key.toLowerCase().includes(search.toLowerCase()) && !group.records.some(r => r.record_id.toLowerCase().includes(search.toLowerCase()))) return false
-      if (typeFilter && !group.records.some(r => r.type === typeFilter)) return false
-      return true
+  // Filter individual records first
+  const matchesFilters = (r: OutlierRecord) => {
+    if (search) {
+      const s = search.toLowerCase()
+      const matchSearch = r.record_id.toLowerCase().includes(s) ||
+        (r.container?.container_id ?? '').toLowerCase().includes(s) ||
+        (r.container?.tracking_number ?? '').toLowerCase().includes(s) ||
+        (r.notes ?? '').toLowerCase().includes(s)
+      if (!matchSearch) return false
+    }
+    if (typeFilter && r.type !== typeFilter) return false
+    if (statusFilter && r.status !== statusFilter) return false
+    if (dateFrom && new Date(r.created_at) < new Date(dateFrom)) return false
+    if (dateTo && new Date(r.created_at) > new Date(dateTo + 'T23:59:59')) return false
+    return true
+  }
+  const filteredRecordsList = records.filter(matchesFilters)
+  const groupedEntries = Object.entries(groupedRecords) as Array<[string, { container: OutlierRecord['container']; records: OutlierRecord[] }]>
+  const filteredGroupedRecords = groupedEntries
+    .map(([key, group]) => ({ key, group, records: group.records.filter(matchesFilters) }))
+    .filter(g => g.records.length > 0)
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
     })
+  }
+
+  function exportRecords() {
+    const rows = filteredRecordsList.map(r => [
+      r.record_id,
+      r.container?.container_id ?? '',
+      r.container?.tracking_number ?? '',
+      r.type,
+      r.quantity,
+      r.notes ?? '',
+      r.status,
+      new Date(r.created_at).toLocaleDateString('en-GB'),
+    ])
+    const csv = [['Record ID','Container','Tracking','Type','Quantity','Notes','Status','Date'], ...rows]
+      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `outlier-records-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportSales() {
+    const rows = filteredSales.map(s => [
+      s.sale_id,
+      s.customer?.customer_id ?? '',
+      s.customer?.name ?? '',
+      s.type,
+      s.quantity_sold,
+      s.pricing_mode,
+      s.price_per_piece ?? '',
+      s.total_price,
+      s.notes ?? '',
+      s.status,
+      new Date(s.created_at).toLocaleDateString('en-GB'),
+    ])
+    const csv = [['Sale ID','Customer ID','Customer','Type','Quantity','Mode','Price/piece','Total','Notes','Status','Date'], ...rows]
+      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `outlier-sales-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const filteredSales = sales.filter(s => {
     if (search && !s.sale_id.toLowerCase().includes(search.toLowerCase()) && !(s.customer?.name ?? '').toLowerCase().includes(search.toLowerCase())) return false
@@ -209,24 +285,58 @@ export default function OutlierPage() {
           </div>
 
           {/* Filters */}
-          <div className="p-4 border-b border-gray-100 flex items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder={activeTab === 'record' ? 'Search container, record ID...' : 'Search sale ID, customer...'}
-                className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
+          <div className="p-4 border-b border-gray-100 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[220px]">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={activeTab === 'record' ? 'Search container, record ID, notes...' : 'Search sale ID, customer...'}
+                  className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <select
+                value={typeFilter}
+                onChange={e => setTypeFilter(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+              >
+                <option value="">All types</option>
+                {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+              >
+                <option value="">All statuses</option>
+                <option value="approved">Approved</option>
+                <option value="pending_approval">Pending</option>
+                <option value="rejected">Rejected</option>
+                <option value="modified_pending">Modified pending</option>
+              </select>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="From" />
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="To" />
+              <button type="button" onClick={activeTab === 'record' ? exportRecords : exportSales}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50">
+                <Download size={13} /> Export CSV
+              </button>
             </div>
-            <select
-              value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-            >
-              <option value="">All types</option>
-              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            {activeTab === 'record' && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">View:</span>
+                <button type="button" onClick={() => setRecordView('grouped')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${recordView === 'grouped' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  <LayoutGrid size={12} /> By container
+                </button>
+                <button type="button" onClick={() => setRecordView('transactional')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${recordView === 'transactional' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  <List size={12} /> Transactional
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Record tab */}
@@ -234,71 +344,124 @@ export default function OutlierPage() {
             <div className="overflow-x-auto">
               {loading ? (
                 <div className="p-8 text-center text-sm text-gray-400">Loading...</div>
-              ) : filteredGroupedRecords.length === 0 ? (
+              ) : filteredRecordsList.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-3">
                   <Package size={28} className="text-gray-200" />
-                  <p className="text-sm text-gray-400">No outlier records yet</p>
+                  <p className="text-sm text-gray-400">No outlier records found</p>
                 </div>
-              ) : (
+              ) : recordView === 'grouped' ? (
                 <div className="divide-y divide-gray-100">
-                  {filteredGroupedRecords.map(([key, group]) => {
-                    const visibleRecords = typeFilter ? group.records.filter(r => r.type === typeFilter) : group.records
+                  {filteredGroupedRecords.map(({ key, group, records: groupRecords }) => {
+                    const isCollapsed = collapsedGroups.has(key)
+                    const totalQty = groupRecords.reduce((s, r) => s + r.quantity, 0)
                     return (
                       <div key={key}>
-                        <div className="px-5 py-3 bg-gray-50 flex items-center justify-between">
-                          <div>
+                        <button type="button" onClick={() => toggleGroup(key)}
+                          className="w-full px-5 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left transition-colors">
+                          <div className="flex items-center gap-2">
+                            {isCollapsed ? <ChevronRight size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
                             <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">
                               {group.container?.container_id ?? key}
                             </span>
                             {group.container?.tracking_number && (
-                              <span className="text-xs text-gray-500 ml-2">{group.container.tracking_number}</span>
+                              <span className="text-xs text-gray-500">{group.container.tracking_number}</span>
                             )}
                           </div>
-                          <p className="text-xs text-gray-400">{visibleRecords.length} record{visibleRecords.length !== 1 ? 's' : ''}</p>
-                        </div>
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-100">
-                              {['Record ID','Type','Quantity','Notes','Status','Date',''].map(h => (
-                                <th key={h} className="px-5 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visibleRecords.map(r => {
-                              const sCfg = STATUS_CONFIG[r.status] ?? STATUS_CONFIG.pending_approval
-                              return (
-                                <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                                  <td className="px-5 py-3 whitespace-nowrap">
-                                    <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{r.record_id}</span>
-                                  </td>
-                                  <td className="px-5 py-3 whitespace-nowrap">
-                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${TYPE_COLORS[r.type]}`}>{r.type}</span>
-                                  </td>
-                                  <td className="px-5 py-3 font-bold text-gray-900 whitespace-nowrap">{r.quantity.toLocaleString()}</td>
-                                  <td className="px-5 py-3 text-xs text-gray-500 max-w-[180px] truncate">{r.notes ?? '—'}</td>
-                                  <td className="px-5 py-3 whitespace-nowrap">
-                                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${sCfg.color}`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${sCfg.dot}`} />
-                                      {sCfg.label}
-                                    </span>
-                                  </td>
-                                  <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
-                                    {new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                  </td>
-                                  <td className="px-5 py-3 whitespace-nowrap">
-                                    <button onClick={() => router.push(`/portal/inventory/outlier/record/${r.id}`)}
-                                      className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
+                          <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <span>{groupRecords.length} record{groupRecords.length !== 1 ? 's' : ''}</span>
+                            <span className="font-semibold">{totalQty.toLocaleString()} pcs</span>
+                          </div>
+                        </button>
+                        {!isCollapsed && (
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-gray-100">
+                                {['Record ID','Type','Quantity','Notes','Status','Date',''].map(h => (
+                                  <th key={h} className="px-5 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {groupRecords.map(r => {
+                                const sCfg = STATUS_CONFIG[r.status] ?? STATUS_CONFIG.pending_approval
+                                return (
+                                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                    <td className="px-5 py-3 whitespace-nowrap">
+                                      <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{r.record_id}</span>
+                                    </td>
+                                    <td className="px-5 py-3 whitespace-nowrap">
+                                      <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${TYPE_COLORS[r.type]}`}>{r.type}</span>
+                                    </td>
+                                    <td className="px-5 py-3 font-bold text-gray-900 whitespace-nowrap">{r.quantity.toLocaleString()}</td>
+                                    <td className="px-5 py-3 text-xs text-gray-500 max-w-[180px] truncate">{r.notes ?? '—'}</td>
+                                    <td className="px-5 py-3 whitespace-nowrap">
+                                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${sCfg.color}`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${sCfg.dot}`} />
+                                        {sCfg.label}
+                                      </span>
+                                    </td>
+                                    <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
+                                      {new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </td>
+                                    <td className="px-5 py-3 whitespace-nowrap">
+                                      <button onClick={() => router.push(`/portal/inventory/outlier/record/${r.id}`)}
+                                        className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        )}
                       </div>
                     )
                   })}
                 </div>
+              ) : (
+                /* Transactional view */
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['Record ID','Container','Tracking','Type','Quantity','Notes','Status','Date',''].map(h => (
+                        <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRecordsList.map(r => {
+                      const sCfg = STATUS_CONFIG[r.status] ?? STATUS_CONFIG.pending_approval
+                      return (
+                        <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{r.record_id}</span>
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{r.container?.container_id ?? '—'}</span>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{r.container?.tracking_number ?? '—'}</td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${TYPE_COLORS[r.type]}`}>{r.type}</span>
+                          </td>
+                          <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{r.quantity.toLocaleString()}</td>
+                          <td className="px-3 py-3 text-xs text-gray-500 max-w-[180px] truncate">{r.notes ?? '—'}</td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${sCfg.color}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${sCfg.dot}`} />
+                              {sCfg.label}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
+                            {new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <button onClick={() => router.push(`/portal/inventory/outlier/record/${r.id}`)}
+                              className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
           )}

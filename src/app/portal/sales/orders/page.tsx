@@ -8,6 +8,7 @@ import {
   Plus, Search, Eye, Package, ChevronDown, ChevronUp,
   TrendingUp, Clock, CheckCircle2,
   Download, AlertTriangle, Shield, Loader2,
+  LayoutGrid, List,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import { usePermissions, can } from '@/lib/permissions/hooks'
@@ -64,6 +65,11 @@ export default function SalesOrdersPage() {
   const [groups, setGroups]     = useState<ContainerGroup[]>([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
+  const [viewMode, setViewMode] = useState<'grouped' | 'transactional'>('grouped')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const { permissions, isSuperAdmin } = usePermissions()
@@ -316,18 +322,36 @@ export default function SalesOrdersPage() {
     })
   }
 
-  const filteredGroups = groups.filter(g => {
-    if (search === '') return true
-    const s = search.toLowerCase()
-    return (
-      g.container_id.toLowerCase().includes(s) ||
-      (g.tracking_number ?? '').toLowerCase().includes(s) ||
-      g.orders.some(o =>
+  const matchesOrderFilters = (o: SalesOrder, container: { container_id: string; tracking_number: string | null }) => {
+    if (search) {
+      const s = search.toLowerCase()
+      const matchSearch = container.container_id.toLowerCase().includes(s) ||
+        (container.tracking_number ?? '').toLowerCase().includes(s) ||
         o.order_id.toLowerCase().includes(s) ||
-        (o.customer?.name ?? '').toLowerCase().includes(s),
-      )
-    )
-  })
+        (o.customer?.name ?? '').toLowerCase().includes(s) ||
+        (o.customer?.customer_id ?? '').toLowerCase().includes(s)
+      if (!matchSearch) return false
+    }
+    if (statusFilter && o.approval_status !== statusFilter) return false
+    if (paymentFilter && o.payment_status !== paymentFilter) return false
+    if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false
+    if (dateTo && new Date(o.created_at) > new Date(dateTo + 'T23:59:59')) return false
+    return true
+  }
+
+  const filteredGroups = groups
+    .map(g => ({
+      ...g,
+      orders: g.orders.filter(o => matchesOrderFilters(o, { container_id: g.container_id, tracking_number: g.tracking_number })),
+    }))
+    .filter(g => g.orders.length > 0)
+
+  // Flat list for transactional view
+  const flatOrders = groups.flatMap(g =>
+    g.orders
+      .filter(o => matchesOrderFilters(o, { container_id: g.container_id, tracking_number: g.tracking_number }))
+      .map(o => ({ ...o, _container: { container_id: g.container_id, tracking_number: g.tracking_number } }))
+  )
 
   const totalRevenue     = groups.reduce((s, g) => s + g.total_revenue, 0)
   const totalOutstanding = groups.reduce((s, g) => s + g.total_outstanding, 0)
@@ -366,22 +390,55 @@ export default function SalesOrdersPage() {
         ))}
       </div>
 
-      {/* Search + Export */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search container, tracking, customer..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+      {/* Filters + view + Export */}
+      <div className="bg-white rounded-xl border border-gray-100 p-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search container, tracking, customer..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+            <option value="">All approvals</option>
+            <option value="approved">Approved</option>
+            <option value="pending_approval">Pending</option>
+            <option value="rejected">Rejected</option>
+            <option value="modified_pending">Modified pending</option>
+          </select>
+          <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+            <option value="">All payments</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+            <option value="outstanding">Outstanding</option>
+          </select>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+          <button onClick={exportToCSV} disabled={groups.length === 0}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 disabled:opacity-40 whitespace-nowrap"
+            style={{ background: '#55249E' }}>
+            <Download size={14} /> Export CSV
+          </button>
         </div>
-        <button onClick={exportToCSV} disabled={groups.length === 0}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 disabled:opacity-40 whitespace-nowrap ml-auto"
-          style={{ background: '#55249E' }}>
-          <Download size={14} /> Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">View:</span>
+          <button type="button" onClick={() => setViewMode('grouped')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${viewMode === 'grouped' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            <LayoutGrid size={12} /> By container
+          </button>
+          <button type="button" onClick={() => setViewMode('transactional')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${viewMode === 'transactional' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            <List size={12} /> Transactional
+          </button>
+        </div>
       </div>
 
       {/* Grouped containers */}
+      {viewMode === 'grouped' && (
       <div className="space-y-3">
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
@@ -613,6 +670,80 @@ export default function SalesOrdersPage() {
           )
         })}
       </div>
+      )}
+
+      {/* Transactional view */}
+      {viewMode === 'transactional' && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          {loading ? (
+            <div className="p-8 text-center text-sm text-gray-400">Loading...</div>
+          ) : flatOrders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Package size={28} className="text-gray-200" />
+              <p className="text-sm text-gray-400">No sales orders found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    {['Order ID','Container','Customer','Sale Type','Payable','Paid','Outstanding','Payment','Approval','Date',''].map(h => (
+                      <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {flatOrders.map((o: any) => {
+                    const out = Number(o.outstanding_balance ?? 0)
+                    return (
+                      <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50/50 cursor-pointer"
+                        onClick={() => router.push(`/portal/sales/orders/${o.id}`)}>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{o.order_id}</span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{o._container.container_id}</span>
+                          {o._container.tracking_number && <span className="text-xs text-gray-500 ml-2">{o._container.tracking_number}</span>}
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-700">
+                          {o.customer?.name ?? '—'}
+                          <span className="text-gray-400 ml-1">{o.customer?.customer_id ?? ''}</span>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-500 capitalize whitespace-nowrap">{o.sale_type?.replace('_', ' ')}</td>
+                        <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{fmt(Number(o.customer_payable))}</td>
+                        <td className="px-3 py-3 font-medium text-green-700 whitespace-nowrap">{fmt(Number(o.amount_paid ?? 0))}</td>
+                        <td className={`px-3 py-3 font-bold whitespace-nowrap ${out > 0 ? 'text-red-600' : 'text-gray-400'}`}>{out > 0 ? fmt(out) : '—'}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
+                            o.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
+                            o.payment_status === 'partial' ? 'bg-amber-50 text-amber-700' :
+                            'bg-red-50 text-red-600'
+                          }`}>{o.payment_status?.replace('_', ' ')}</span>
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
+                            o.approval_status === 'approved' ? 'bg-blue-50 text-blue-700' :
+                            o.approval_status === 'pending_approval' ? 'bg-amber-50 text-amber-700' :
+                            o.approval_status === 'rejected' ? 'bg-red-50 text-red-600' :
+                            'bg-purple-50 text-purple-700'
+                          }`}>{o.approval_status?.replace('_', ' ')}</span>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
+                          {new Date(o.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => router.push(`/portal/sales/orders/${o.id}`)}
+                            className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <Modal
         open={workflowOpen}

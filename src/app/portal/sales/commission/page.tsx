@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
   Plus, Search, Filter, Download, Eye, TrendingUp,
-  Clock, CheckCircle2, DollarSign, AlertCircle
+  Clock, CheckCircle2, DollarSign, AlertCircle,
+  LayoutGrid, List, ChevronRight, ChevronDown
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePermissions, can } from '@/lib/permissions/hooks'
@@ -48,6 +49,9 @@ export default function CommissionPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [viewMode, setViewMode] = useState<'transactional' | 'grouped'>('transactional')
+  const [collapsedContainers, setCollapsedContainers] = useState<Set<string>>(new Set())
+  const [hasInitializedCollapse, setHasInitializedCollapse] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -83,6 +87,27 @@ export default function CommissionPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!hasInitializedCollapse && rows.length > 0) {
+      const allKeys = new Set<string>()
+      for (const r of rows) {
+        const key = r.sales_order?.container?.container_id ?? 'unknown'
+        allKeys.add(key)
+      }
+      setCollapsedContainers(allKeys)
+      setHasInitializedCollapse(true)
+    }
+  }, [rows, hasInitializedCollapse])
+
+  function toggleContainer(key: string) {
+    setCollapsedContainers(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const filtered = rows.filter(r => {
     const matchSearch = search === '' ||
@@ -192,6 +217,18 @@ export default function CommissionPage() {
             </button>
           </div>
 
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs text-gray-400">View:</span>
+            <button type="button" onClick={() => setViewMode('transactional')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${viewMode === 'transactional' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <List size={12} /> Transactional
+            </button>
+            <button type="button" onClick={() => setViewMode('grouped')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${viewMode === 'grouped' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <LayoutGrid size={12} /> By container
+            </button>
+          </div>
+
           {showFilters && (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-3 border-t border-gray-100">
               <div>
@@ -227,7 +264,8 @@ export default function CommissionPage() {
           )}
         </div>
 
-        {/* Table */}
+        {/* Transactional table */}
+        {viewMode === 'transactional' && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[900px]">
@@ -317,6 +355,106 @@ export default function CommissionPage() {
             </table>
           </div>
         </div>
+        )}
+
+        {/* Grouped by container */}
+        {viewMode === 'grouped' && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden divide-y divide-gray-100">
+            {loading ? (
+              <div className="p-8 text-center text-sm text-gray-400">Loading...</div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <DollarSign size={28} className="text-gray-200" />
+                <p className="text-sm text-gray-400">No commission records found</p>
+              </div>
+            ) : (() => {
+              const grouped = filtered.reduce((acc, r) => {
+                const key = r.sales_order?.container?.container_id ?? 'unknown'
+                if (!acc[key]) acc[key] = { container: r.sales_order?.container ?? null, rows: [] as CommissionRow[] }
+                acc[key].rows.push(r)
+                return acc
+              }, {} as Record<string, { container: NonNullable<CommissionRow['sales_order']>['container'] | null; rows: CommissionRow[] }>)
+
+              return Object.entries(grouped).map(([key, group]) => {
+                const isCollapsed = collapsedContainers.has(key)
+                const totalAmount = group.rows.reduce((s, r) => s + Number(r.commission_amount), 0)
+                const paidCount = group.rows.filter(r => r.status === 'paid').length
+                const pendingCount = group.rows.filter(r => r.status === 'pending_approval' || r.status === 'modified_pending').length
+
+                return (
+                  <div key={key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleContainer(key)}
+                      className="w-full px-5 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isCollapsed ? <ChevronRight size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{group.container?.container_id ?? key}</span>
+                        {group.container?.tracking_number && (
+                          <span className="text-xs text-gray-500">{group.container.tracking_number}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span>{group.rows.length} commission{group.rows.length !== 1 ? 's' : ''}</span>
+                        {pendingCount > 0 && <span className="text-amber-600 font-medium">{pendingCount} pending</span>}
+                        {paidCount > 0 && <span className="text-green-600 font-medium">{paidCount} paid</span>}
+                        <span className="font-bold text-brand-700">{fmt(totalAmount)}</span>
+                      </div>
+                    </button>
+                    {!isCollapsed && (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            {['Commission ID','Order ID','Customer','Referrer','Type','Amount','Status','Date',''].map(h => (
+                              <th key={h} className="px-5 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.rows.map(r => {
+                            const statusCfg = STATUS_CONFIG[r.status] ?? STATUS_CONFIG.pending_approval
+                            return (
+                              <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                <td className="px-5 py-3 whitespace-nowrap">
+                                  <span className="text-xs font-mono bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{r.commission_id}</span>
+                                </td>
+                                <td className="px-5 py-3 whitespace-nowrap">
+                                  <Link href={`/portal/sales/orders/${r.sales_order_id}`} className="text-xs font-medium text-brand-600 hover:underline">
+                                    {r.sales_order?.order_id ?? '—'}
+                                  </Link>
+                                </td>
+                                <td className="px-5 py-3 whitespace-nowrap text-xs text-gray-700">{r.sales_order?.customer?.name ?? '—'}</td>
+                                <td className="px-5 py-3 whitespace-nowrap text-xs text-gray-700 font-medium">{r.referrer_name}</td>
+                                <td className="px-5 py-3 whitespace-nowrap">
+                                  <span className={`text-xs px-2 py-0.5 rounded font-medium capitalize ${r.calculation_type === 'auto' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{r.calculation_type}</span>
+                                </td>
+                                <td className="px-5 py-3 whitespace-nowrap text-xs font-bold text-brand-700">{fmt(r.commission_amount)}</td>
+                                <td className="px-5 py-3 whitespace-nowrap">
+                                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${statusCfg.color}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot}`} />
+                                    {statusCfg.label}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3 whitespace-nowrap text-xs text-gray-400">
+                                  {new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td className="px-5 py-3">
+                                  <button type="button" onClick={() => router.push(`/portal/sales/commission/${r.id}`)}
+                                    className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )
+              })
+            })()}
+          </div>
+        )}
       </div>
     </PermissionGate>
   )

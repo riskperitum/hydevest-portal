@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Plus, Search, Download, Eye, Package, ChevronDown, ChevronRight,
   DollarSign, AlertCircle, ShoppingCart, LayoutGrid, List
@@ -62,9 +62,12 @@ const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFr
 
 export default function OutlierPage() {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'record' | 'sale'>('record')
+  const searchParams = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'sale' ? 'sale' : 'record'
+  const [activeTab, setActiveTab] = useState<'record' | 'sale'>(initialTab)
   const [recordView, setRecordView] = useState<'grouped' | 'transactional'>('grouped')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [hasInitializedCollapse, setHasInitializedCollapse] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -101,6 +104,17 @@ export default function OutlierPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!hasInitializedCollapse && records.length > 0) {
+      const allKeys = new Set<string>()
+      for (const r of records) {
+        allKeys.add(r.container?.container_id ?? 'unknown')
+      }
+      setCollapsedGroups(allKeys)
+      setHasInitializedCollapse(true)
+    }
+  }, [records, hasInitializedCollapse])
 
   // Compute available stock by type (approved records minus approved sales)
   const stockByType: Record<string, number> = {}
@@ -250,7 +264,7 @@ export default function OutlierPage() {
             <p className="text-lg font-bold text-purple-700">{totalSold.toLocaleString()}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-center gap-2 mb-1"><DollarSign size={15} className="text-green-600" /><p className="text-xs text-gray-500">Total revenue</p></div>
+            <div className="flex items-center gap-2 mb-1"><span className="text-green-600 font-bold text-base leading-none">₦</span><p className="text-xs text-gray-500">Total revenue</p></div>
             <p className="text-lg font-bold text-green-700">{fmt(totalRevenue)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">

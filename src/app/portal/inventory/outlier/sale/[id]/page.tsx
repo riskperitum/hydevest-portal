@@ -247,7 +247,7 @@ export default function OutlierSaleDetailPage() {
       <div className="space-y-5 max-w-4xl">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <button onClick={() => router.back()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+            <button onClick={() => router.push('/portal/inventory/outlier?tab=sale')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
               <ArrowLeft size={16} />
             </button>
             <div>

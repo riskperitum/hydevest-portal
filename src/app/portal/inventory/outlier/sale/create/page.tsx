@@ -7,6 +7,7 @@ import { ArrowLeft, Save, Loader2, Search, DollarSign, Calculator } from 'lucide
 import { usePermissions, can } from '@/lib/permissions/hooks'
 import PermissionGate from '@/components/ui/PermissionGate'
 import { getAdminProfiles } from '@/lib/utils/getAdminProfiles'
+import Modal from '@/components/ui/Modal'
 
 interface Customer {
   id: string
@@ -39,6 +40,13 @@ export default function CreateOutlierSalePage() {
   const [pricePerPiece, setPricePerPiece] = useState('')
   const [grossAmount, setGrossAmount] = useState('')
   const [notes, setNotes] = useState('')
+  const [amountPaid, setAmountPaid] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('')
+
+  // New customer modal
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', email: '', address: '' })
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
 
   const [selfApprove, setSelfApprove] = useState(false)
   const [assignee, setAssignee] = useState('')
@@ -85,6 +93,36 @@ export default function CreateOutlierSalePage() {
     : Number(grossAmount || 0)
 
   const availableStock = type ? (stockByType[type] ?? 0) : 0
+
+  async function createCustomer() {
+    if (!newCustomerForm.name.trim()) {
+      setError('Customer name is required')
+      return
+    }
+    setCreatingCustomer(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { data: newCust, error: custErr } = await supabase.from('customers').insert({
+      name: newCustomerForm.name.trim(),
+      phone: newCustomerForm.phone.trim() || null,
+      email: newCustomerForm.email.trim() || null,
+      address: newCustomerForm.address.trim() || null,
+      created_by: user?.id,
+    }).select('id, customer_id, name, phone').single()
+
+    if (custErr || !newCust) {
+      setError(custErr?.message ?? 'Failed to create customer')
+      setCreatingCustomer(false)
+      return
+    }
+
+    setCustomers(prev => [newCust as Customer, ...prev])
+    setSelectedCustomer(newCust as Customer)
+    setNewCustomerOpen(false)
+    setNewCustomerForm({ name: '', phone: '', email: '', address: '' })
+    setCreatingCustomer(false)
+  }
 
   async function submit() {
     if (!selectedCustomer) {
@@ -134,6 +172,25 @@ export default function CreateOutlierSalePage() {
       approved_by: approvedBy,
       created_by: user?.id,
     }).select().single()
+
+    // Record initial payment if any
+    const initialPayment = Number(amountPaid || 0)
+    if (sale && initialPayment > 0) {
+      const paymentStatus = (selfApprove && canSelfApprove) ? 'approved' : 'pending_approval'
+      const paymentApprovedAt = (selfApprove && canSelfApprove) ? new Date().toISOString() : null
+      const paymentApprovedBy = (selfApprove && canSelfApprove) ? user?.id : null
+
+      await supabase.from('outlier_sale_payments').insert({
+        outlier_sale_id: sale.id,
+        amount_paid: initialPayment,
+        payment_method: paymentMethod || null,
+        notes: 'Initial payment at point of sale',
+        status: paymentStatus,
+        approved_at: paymentApprovedAt,
+        approved_by: paymentApprovedBy,
+        created_by: user?.id,
+      })
+    }
 
     if (insertError || !sale) {
       setError(insertError?.message ?? 'Failed to create sale')
@@ -217,7 +274,10 @@ export default function CreateOutlierSalePage() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">1. Select customer</h2>
-            {selectedCustomer && (
+            {!selectedCustomer ? (
+              <button type="button" onClick={() => { setNewCustomerOpen(true); setError('') }}
+                className="text-xs text-brand-600 hover:text-brand-700 font-medium">Add new customer</button>
+            ) : (
               <button type="button" onClick={() => setSelectedCustomer(null)}
                 className="text-xs text-red-500 hover:text-red-700 font-medium">Change customer</button>
             )}
@@ -328,6 +388,19 @@ export default function CreateOutlierSalePage() {
               </>
             )}
 
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Amount paid now (₦)</label>
+                <input type="number" step="0.01" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
+                  placeholder="0.00" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Payment method</label>
+                <input value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
+                  placeholder="Cash / Transfer / POS..." className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Notes</label>
               <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)}
@@ -381,6 +454,41 @@ export default function CreateOutlierSalePage() {
             </div>
           </>
         )}
+
+        <Modal open={newCustomerOpen} onClose={() => setNewCustomerOpen(false)} title="Add new customer" size="md">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Name <span className="text-red-400">*</span></label>
+              <input value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Phone</label>
+                <input value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Email</label>
+                <input value={newCustomerForm.email} onChange={e => setNewCustomerForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Address</label>
+              <textarea rows={2} value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setNewCustomerOpen(false)}
+                className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={createCustomer} disabled={creatingCustomer}
+                className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 inline-flex items-center gap-2">
+                {creatingCustomer ? <><Loader2 size={14} className="animate-spin" /> Creating...</> : 'Create customer'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </PermissionGate>
   )

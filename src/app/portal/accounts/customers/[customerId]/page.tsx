@@ -82,7 +82,8 @@ export default function CustomerProfilePage() {
   const [badDebts, setBadDebts]   = useState<BadDebt[]>([])
   const [legalCases, setLegalCases] = useState<LegalCase[]>([])
   const [loading, setLoading]     = useState(true)
-  const [activeTab, setActiveTab] = useState<'orders' | 'bad_debts' | 'legal'>('orders')
+  const [activeTab, setActiveTab] = useState<'orders' | 'bad_debts' | 'legal' | 'outlier'>('orders')
+  const [outlierSales, setOutlierSales] = useState<any[]>([])
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -92,6 +93,7 @@ export default function CustomerProfilePage() {
       { data: ordersData },
       { data: badDebtData },
       { data: legalData },
+      { data: outlierData },
     ] = await Promise.all([
       supabase.from('customers').select('*').eq('id', customerId).single(),
       supabase.from('sales_orders').select(`
@@ -106,12 +108,17 @@ export default function CustomerProfilePage() {
           id, case_id, title, status, case_type, opened_date
         )
       `).eq('customer_id', customerId),
+      supabase.from('outlier_sales').select(`
+        id, sale_id, type, quantity_sold, pricing_mode, price_per_piece,
+        total_price, amount_paid, outstanding, payment_status, status, created_at
+      `).eq('customer_id', customerId).order('created_at', { ascending: false }),
     ])
 
     setCustomer(customerData)
     setOrders((ordersData ?? []) as any)
     setBadDebts(badDebtData ?? [])
     setLegalCases((legalData ?? []).map(l => (l.case as any)))
+    setOutlierSales(outlierData ?? [])
     setLoading(false)
   }, [customerId])
 
@@ -132,7 +139,14 @@ export default function CustomerProfilePage() {
   const totalPaid        = orders.reduce((s, o) => s + Number(o.amount_paid), 0)
   const totalOutstanding = orders.reduce((s, o) => s + Number(o.outstanding_balance), 0)
   const totalBadDebt     = badDebts.filter(b => b.status === 'approved').reduce((s, b) => s + Number(b.amount_ngn), 0)
-  const recoveryPct      = totalRevenue > 0 ? (totalPaid / totalRevenue) * 100 : 0
+  const outlierApproved  = outlierSales.filter(s => s.status === 'approved')
+  const outlierRevenue   = outlierApproved.reduce((s: number, sa: any) => s + Number(sa.total_price), 0)
+  const outlierPaid      = outlierApproved.reduce((s: number, sa: any) => s + Number(sa.amount_paid ?? 0), 0)
+  const outlierOutstanding = outlierApproved.reduce((s: number, sa: any) => s + Number(sa.outstanding ?? 0), 0)
+  const grandRevenue     = totalRevenue + outlierRevenue
+  const grandPaid        = totalPaid + outlierPaid
+  const grandOutstanding = totalOutstanding + outlierOutstanding
+  const recoveryPct      = grandRevenue > 0 ? (grandPaid / grandRevenue) * 100 : 0
   const activeCases      = legalCases.filter(c => !['closed', 'settled', 'won', 'lost'].includes(c?.status ?? '')).length
 
   return (
@@ -175,9 +189,9 @@ export default function CustomerProfilePage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label: 'Total revenue',    value: fmt(totalRevenue),     color: 'text-gray-800',  bg: 'bg-gray-50'   },
-          { label: 'Total paid',       value: fmt(totalPaid),        color: 'text-green-700', bg: 'bg-green-50'  },
-          { label: 'Outstanding',      value: fmt(totalOutstanding), color: totalOutstanding > 0 ? 'text-amber-700' : 'text-green-700', bg: totalOutstanding > 0 ? 'bg-amber-50' : 'bg-green-50' },
+          { label: 'Total revenue',    value: fmt(grandRevenue),     color: 'text-gray-800',  bg: 'bg-gray-50'   },
+          { label: 'Total paid',       value: fmt(grandPaid),        color: 'text-green-700', bg: 'bg-green-50'  },
+          { label: 'Outstanding',      value: fmt(grandOutstanding), color: grandOutstanding > 0 ? 'text-amber-700' : 'text-green-700', bg: grandOutstanding > 0 ? 'bg-amber-50' : 'bg-green-50' },
           { label: 'Bad debts',        value: fmt(totalBadDebt),     color: totalBadDebt > 0 ? 'text-red-700' : 'text-gray-500', bg: totalBadDebt > 0 ? 'bg-red-50' : 'bg-gray-50' },
           { label: 'Active cases',     value: activeCases.toString(), color: activeCases > 0 ? 'text-purple-700' : 'text-gray-500', bg: activeCases > 0 ? 'bg-purple-50' : 'bg-gray-50' },
         ].map(m => (
@@ -202,8 +216,8 @@ export default function CustomerProfilePage() {
             style={{ width: `${Math.min(recoveryPct, 100)}%` }} />
         </div>
         <div className="flex justify-between mt-1.5 text-xs text-gray-400">
-          <span>Paid: {fmt(totalPaid)}</span>
-          <span>Outstanding: {fmt(totalOutstanding)}</span>
+          <span>Paid: {fmt(grandPaid)}</span>
+          <span>Outstanding: {fmt(grandOutstanding)}</span>
         </div>
       </div>
 
@@ -235,9 +249,10 @@ export default function CustomerProfilePage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex border-b border-gray-100 overflow-x-auto">
           {[
-            { key: 'orders',    label: 'Sales orders', count: orders.length      },
-            { key: 'bad_debts', label: 'Bad debts',    count: badDebts.length    },
-            { key: 'legal',     label: 'Legal cases',  count: legalCases.length  },
+            { key: 'orders',    label: 'Sales orders',  count: orders.length       },
+            { key: 'outlier',   label: 'Outlier sales', count: outlierSales.length },
+            { key: 'bad_debts', label: 'Bad debts',     count: badDebts.length     },
+            { key: 'legal',     label: 'Legal cases',   count: legalCases.length   },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
               className={`flex items-center gap-1.5 px-5 py-3.5 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap
@@ -402,6 +417,61 @@ export default function CustomerProfilePage() {
                         </td>
                         <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
                           {new Date(c.opened_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td className="px-3 py-3">
+                          <ChevronRight size={14} className="text-gray-300" />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* OUTLIER SALES TAB */}
+        {activeTab === 'outlier' && (
+          <div className="p-5">
+            {outlierSales.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-2">
+                <p className="text-sm text-gray-400">No outlier sales</p>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    {['Sale ID','Type','Qty','Total','Paid','Outstanding','Status','Date',''].map(h => (
+                      <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-gray-400">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {outlierSales.map((s: any) => {
+                    const out = Number(s.outstanding ?? 0)
+                    const typeColors: Record<string, string> = {
+                      ISINLE:    'bg-blue-50 text-blue-700 border-blue-200',
+                      BAYA:      'bg-purple-50 text-purple-700 border-purple-200',
+                      BLEACHING: 'bg-amber-50 text-amber-700 border-amber-200',
+                    }
+                    return (
+                      <tr key={s.id} className="hover:bg-gray-50/50 cursor-pointer"
+                        onClick={() => router.push(`/portal/inventory/outlier/sale/${s.id}`)}>
+                        <td className="px-3 py-3">
+                          <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{s.sale_id}</span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${typeColors[s.type] ?? ''}`}>{s.type}</span>
+                        </td>
+                        <td className="px-3 py-3 font-bold text-gray-900">{Number(s.quantity_sold).toLocaleString()}</td>
+                        <td className="px-3 py-3 font-bold text-gray-900">{fmt(Number(s.total_price))}</td>
+                        <td className="px-3 py-3 font-medium text-green-700">{fmt(Number(s.amount_paid ?? 0))}</td>
+                        <td className={`px-3 py-3 font-bold ${out > 0 ? 'text-red-600' : 'text-gray-400'}`}>{out > 0 ? fmt(out) : '—'}</td>
+                        <td className="px-3 py-3">
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 capitalize">{s.status?.replace('_', ' ')}</span>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-400 whitespace-nowrap">
+                          {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </td>
                         <td className="px-3 py-3">
                           <ChevronRight size={14} className="text-gray-300" />

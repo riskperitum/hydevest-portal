@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Edit2, Trash2, Loader2, Shield } from 'lucide-react'
@@ -18,6 +18,9 @@ interface OutlierSale {
   pricing_mode: string
   price_per_piece: number | null
   total_price: number
+  amount_paid: number
+  outstanding: number
+  payment_status: string
   notes: string | null
   status: string
   is_modified: boolean
@@ -25,6 +28,20 @@ interface OutlierSale {
   approved_by: string | null
   created_at: string
   customer: { name: string; customer_id: string; phone: string | null } | null
+  created_by_profile: { full_name: string | null; email: string } | null
+  approved_by_profile: { full_name: string | null; email: string } | null
+}
+
+interface PaymentRow {
+  id: string
+  payment_id: string
+  amount_paid: number
+  payment_date: string
+  payment_method: string | null
+  notes: string | null
+  status: string
+  is_modified: boolean
+  created_at: string
   created_by_profile: { full_name: string | null; email: string } | null
   approved_by_profile: { full_name: string | null; email: string } | null
 }
@@ -62,8 +79,14 @@ export default function OutlierSaleDetailPage() {
   const id = params.id as string
 
   const [sale, setSale] = useState<OutlierSale | null>(null)
+  const [payments, setPayments] = useState<PaymentRow[]>([])
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({ amount: '', method: '', notes: '', date: new Date().toISOString().split('T')[0] })
+  const [paymentSelfApprove, setPaymentSelfApprove] = useState(false)
+  const [paymentAssignee, setPaymentAssignee] = useState('')
+  const [savingPayment, setSavingPayment] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({ type: '', quantity_sold: '', pricing_mode: 'gross', price_per_piece: '', total_price: '', notes: '' })
@@ -113,6 +136,18 @@ export default function OutlierSaleDetailPage() {
       })
     }
 
+    const { data: paymentData } = await supabase.from('outlier_sale_payments').select(`
+      *,
+      created_by_profile:profiles!outlier_sale_payments_created_by_fkey(full_name, email),
+      approved_by_profile:profiles!outlier_sale_payments_approved_by_fkey(full_name, email)
+    `).eq('outlier_sale_id', id).order('created_at', { ascending: false })
+
+    setPayments((paymentData ?? []).map(p => ({
+      ...p,
+      created_by_profile: one(p.created_by_profile),
+      approved_by_profile: one(p.approved_by_profile),
+    })) as PaymentRow[])
+
     const { data: logs } = await supabase.from('outlier_sale_activity_log').select(`
       *, performed_by_profile:profiles!outlier_sale_activity_log_performed_by_fkey(full_name, email)
     `).eq('outlier_sale_id', id).order('created_at', { ascending: false })
@@ -139,6 +174,86 @@ export default function OutlierSaleDetailPage() {
     await supabase.from('outlier_sale_activity_log').insert({
       outlier_sale_id: id, action, new_value: newValue, performed_by: user?.id,
     })
+  }
+
+  async function submitPayment(e: React.FormEvent) {
+    e.preventDefault()
+    if (!sale) return
+    const amount = Number(paymentForm.amount || 0)
+    if (amount <= 0) {
+      alert('Amount must be > 0')
+      return
+    }
+    if (amount > sale.outstanding) {
+      alert(`Cannot pay more than outstanding (${fmt(sale.outstanding)})`)
+      return
+    }
+    if (!paymentSelfApprove && !paymentAssignee) {
+      alert('Select an approver or self-approve')
+      return
+    }
+
+    setSavingPayment(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const status = (paymentSelfApprove && canSelfApprove) ? 'approved' : 'pending_approval'
+    const approvedAt = (paymentSelfApprove && canSelfApprove) ? new Date().toISOString() : null
+    const approvedBy = (paymentSelfApprove && canSelfApprove) ? user?.id : null
+
+    const { data: payment } = await supabase.from('outlier_sale_payments').insert({
+      outlier_sale_id: sale.id,
+      amount_paid: amount,
+      payment_date: paymentForm.date,
+      payment_method: paymentForm.method.trim() || null,
+      notes: paymentForm.notes.trim() || null,
+      status,
+      approved_at: approvedAt,
+      approved_by: approvedBy,
+      created_by: user?.id,
+    }).select().single()
+
+    if (payment) {
+      await supabase.from('tasks').insert({
+        type: 'approval_request',
+        title: `Outlier payment approval: ${payment.payment_id}${paymentSelfApprove ? ' (self-approved)' : ''}`,
+        description: `${fmt(amount)} for sale ${sale.sale_id}`,
+        module: 'outlier_sale_payments',
+        record_id: payment.id,
+        record_ref: payment.payment_id,
+        requested_by: user?.id,
+        assigned_to: paymentSelfApprove ? user?.id : paymentAssignee,
+        status: paymentSelfApprove ? 'approved' : 'pending',
+        priority: 'normal',
+        review_note: paymentSelfApprove ? 'Self-approved by ' + (user?.email ?? 'admin') : null,
+      })
+
+      if (!paymentSelfApprove) {
+        await supabase.from('notifications').insert({
+          user_id: paymentAssignee,
+          type: 'task_approval_request',
+          title: 'New task: Outlier payment approval',
+          message: `${payment.payment_id} — ${fmt(amount)}`,
+          record_id: payment.id,
+          record_ref: payment.payment_id,
+          module: 'outlier_sale_payments',
+        })
+      }
+
+      await supabase.from('outlier_sale_activity_log').insert({
+        outlier_sale_id: sale.id,
+        action: paymentSelfApprove ? 'Payment recorded (self-approved)' : 'Payment recorded — pending approval',
+        new_value: fmt(amount),
+        performed_by: user?.id,
+      })
+    }
+
+    setPaymentOpen(false)
+    setPaymentForm({ amount: '', method: '', notes: '', date: new Date().toISOString().split('T')[0] })
+    setPaymentSelfApprove(false)
+    setPaymentAssignee('')
+    setSavingPayment(false)
+    load()
   }
 
   async function submitWorkflow() {
@@ -331,6 +446,65 @@ export default function OutlierSaleDetailPage() {
           )}
         </div>
 
+        {/* Payments section */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Payments</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Customer payment records for this sale</p>
+            </div>
+            {sale.outstanding > 0 && sale.status === 'approved' && (
+              <button type="button" onClick={() => setPaymentOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+                Record payment
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border border-gray-100 p-3">
+              <p className="text-xs text-gray-400">Total price</p>
+              <p className="text-base font-bold text-gray-900">{fmt(sale.total_price)}</p>
+            </div>
+            <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+              <p className="text-xs text-green-700">Amount paid</p>
+              <p className="text-base font-bold text-green-700">{fmt(sale.amount_paid ?? 0)}</p>
+            </div>
+            <div className={`rounded-lg border p-3 ${sale.outstanding > 0 ? 'border-red-100 bg-red-50' : 'border-gray-100'}`}>
+              <p className={`text-xs ${sale.outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>Outstanding</p>
+              <p className={`text-base font-bold ${sale.outstanding > 0 ? 'text-red-600' : 'text-gray-700'}`}>{fmt(sale.outstanding ?? 0)}</p>
+            </div>
+          </div>
+          {payments.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  {['Payment ID','Date','Amount','Method','Status','Notes'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map(p => (
+                  <tr key={p.id} className="border-b border-gray-50">
+                    <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{p.payment_id}</span></td>
+                    <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{new Date(p.payment_date).toLocaleDateString('en-GB')}</td>
+                    <td className="px-3 py-2 font-bold text-gray-900 whitespace-nowrap">{fmt(p.amount_paid)}</td>
+                    <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{p.payment_method ?? '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${(STATUS_CONFIG[p.status] ?? STATUS_CONFIG.pending_approval).color}`}>
+                        {(STATUS_CONFIG[p.status] ?? STATUS_CONFIG.pending_approval).label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500 max-w-[200px] truncate">{p.notes ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-4">No payments recorded yet</p>
+          )}
+        </div>
+
         {/* Metadata */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Sale info</h3>
@@ -370,6 +544,75 @@ export default function OutlierSaleDetailPage() {
             </div>
           </div>
         )}
+
+        {/* Payment Modal */}
+        <Modal open={paymentOpen} onClose={() => setPaymentOpen(false)} title="Record customer payment" size="md">
+          <form onSubmit={submitPayment} className="space-y-4">
+            <div className="p-3 bg-gray-50 rounded-lg text-xs space-y-1">
+              <div className="flex justify-between"><span className="text-gray-500">Sale</span><span className="font-mono">{sale?.sale_id}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-bold text-red-600">{fmt(sale?.outstanding ?? 0)}</span></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Amount (₦) <span className="text-red-400">*</span></label>
+                <input type="number" step="0.01" required value={paymentForm.amount}
+                  onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Payment date <span className="text-red-400">*</span></label>
+                <input type="date" required value={paymentForm.date}
+                  onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Payment method</label>
+              <input value={paymentForm.method}
+                onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value }))}
+                placeholder="e.g. Bank transfer, Cash..."
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Notes</label>
+              <textarea rows={2} value={paymentForm.notes}
+                onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+            </div>
+            {canSelfApprove && (
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={paymentSelfApprove}
+                    onChange={e => setPaymentSelfApprove(e.target.checked)} className="mt-0.5" />
+                  <div>
+                    <span className="text-sm font-medium text-amber-900">Self-approve this payment</span>
+                    <p className="text-xs text-amber-700 mt-0.5">Apply payment immediately.</p>
+                  </div>
+                </label>
+              </div>
+            )}
+            {!paymentSelfApprove && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Assign approval to <span className="text-red-400">*</span></label>
+                <select value={paymentAssignee} onChange={e => setPaymentAssignee(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
+                  <option value="">Select approver...</option>
+                  {employees.filter(e => e.id !== currentUserId).map(e => (
+                    <option key={e.id} value={e.id}>{e.full_name ?? e.email}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setPaymentOpen(false)}
+                className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button type="submit" disabled={savingPayment || !paymentForm.amount}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+                {savingPayment ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : (paymentSelfApprove ? 'Save & approve' : 'Submit for approval')}
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Edit Modal */}
         <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit sale" size="md">

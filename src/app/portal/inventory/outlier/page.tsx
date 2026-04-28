@@ -36,6 +36,9 @@ interface OutlierSale {
   pricing_mode: string
   price_per_piece: number | null
   total_price: number
+  amount_paid: number
+  outstanding: number
+  payment_status: string
   notes: string | null
   status: string
   is_modified: boolean
@@ -66,7 +69,9 @@ export default function OutlierPage() {
   const initialTab = searchParams.get('tab') === 'sale' ? 'sale' : 'record'
   const [activeTab, setActiveTab] = useState<'record' | 'sale'>(initialTab)
   const [recordView, setRecordView] = useState<'grouped' | 'transactional'>('grouped')
+  const [salesView, setSalesView] = useState<'grouped' | 'transactional'>('transactional')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [collapsedCustomers, setCollapsedCustomers] = useState<Set<string>>(new Set())
   const [hasInitializedCollapse, setHasInitializedCollapse] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -129,6 +134,7 @@ export default function OutlierPage() {
   const totalRecorded = records.filter(r => r.status === 'approved').reduce((s, r) => s + r.quantity, 0)
   const totalSold = sales.filter(s => s.status === 'approved').reduce((s, sa) => s + sa.quantity_sold, 0)
   const totalRevenue = sales.filter(s => s.status === 'approved').reduce((s, sa) => s + Number(sa.total_price), 0)
+  const totalOutstanding = sales.filter(s => s.status === 'approved').reduce((s, sa) => s + Number(sa.outstanding ?? 0), 0)
 
   // Group records by container for the Record tab
   const groupedRecords = records.reduce((acc, r) => {
@@ -162,6 +168,15 @@ export default function OutlierPage() {
 
   function toggleGroup(key: string) {
     setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function toggleCustomer(key: string) {
+    setCollapsedCustomers(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -254,7 +269,7 @@ export default function OutlierPage() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-center gap-2 mb-1"><Package size={15} className="text-blue-600" /><p className="text-xs text-gray-500">Total recorded</p></div>
             <p className="text-lg font-bold text-blue-700">{totalRecorded.toLocaleString()}</p>
@@ -270,6 +285,10 @@ export default function OutlierPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-center gap-2 mb-1"><AlertCircle size={15} className="text-amber-600" /><p className="text-xs text-gray-500">Total in stock</p></div>
             <p className="text-lg font-bold text-amber-700">{(totalRecorded - totalSold).toLocaleString()}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-1"><span className="text-red-600 font-bold text-base leading-none">₦</span><p className="text-xs text-gray-500">Outstanding</p></div>
+            <p className="text-lg font-bold text-red-600">{fmt(totalOutstanding)}</p>
           </div>
         </div>
 
@@ -347,6 +366,19 @@ export default function OutlierPage() {
                 </button>
                 <button type="button" onClick={() => setRecordView('transactional')}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${recordView === 'transactional' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  <List size={12} /> Transactional
+                </button>
+              </div>
+            )}
+            {activeTab === 'sale' && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">View:</span>
+                <button type="button" onClick={() => setSalesView('grouped')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${salesView === 'grouped' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  <LayoutGrid size={12} /> By customer
+                </button>
+                <button type="button" onClick={() => setSalesView('transactional')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border ${salesView === 'transactional' ? 'bg-brand-50 border-brand-300 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                   <List size={12} /> Transactional
                 </button>
               </div>
@@ -488,13 +520,13 @@ export default function OutlierPage() {
               ) : filteredSales.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-3">
                   <ShoppingCart size={28} className="text-gray-200" />
-                  <p className="text-sm text-gray-400">No outlier sales yet</p>
+                  <p className="text-sm text-gray-400">No outlier sales found</p>
                 </div>
-              ) : (
+              ) : salesView === 'transactional' ? (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      {['Sale ID','Customer','Type','Quantity','Mode','Total Price','Status','Date',''].map(h => (
+                      {['Sale ID','Customer','Type','Qty','Mode','Total','Paid','Outstanding','Status','Date',''].map(h => (
                         <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -502,6 +534,7 @@ export default function OutlierPage() {
                   <tbody>
                     {filteredSales.map(s => {
                       const sCfg = STATUS_CONFIG[s.status] ?? STATUS_CONFIG.pending_approval
+                      const out = Number(s.outstanding ?? 0)
                       return (
                         <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                           <td className="px-3 py-3 whitespace-nowrap">
@@ -516,7 +549,9 @@ export default function OutlierPage() {
                           </td>
                           <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{s.quantity_sold.toLocaleString()}</td>
                           <td className="px-3 py-3 text-xs text-gray-500 capitalize whitespace-nowrap">{s.pricing_mode === 'per_piece' ? `Per piece (${fmt(s.price_per_piece ?? 0)})` : 'Gross'}</td>
-                          <td className="px-3 py-3 font-bold text-green-700 whitespace-nowrap">{fmt(s.total_price)}</td>
+                          <td className="px-3 py-3 font-bold text-gray-900 whitespace-nowrap">{fmt(s.total_price)}</td>
+                          <td className="px-3 py-3 font-medium text-green-700 whitespace-nowrap">{fmt(s.amount_paid ?? 0)}</td>
+                          <td className={`px-3 py-3 font-bold whitespace-nowrap ${out > 0 ? 'text-red-600' : 'text-gray-400'}`}>{out > 0 ? fmt(out) : '—'}</td>
                           <td className="px-3 py-3 whitespace-nowrap">
                             <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${sCfg.color}`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${sCfg.dot}`} />
@@ -535,6 +570,86 @@ export default function OutlierPage() {
                     })}
                   </tbody>
                 </table>
+              ) : (
+                /* Grouped by customer */
+                <div className="divide-y divide-gray-100">
+                  {(() => {
+                    const grouped = filteredSales.reduce((acc, s) => {
+                      const key = s.customer?.customer_id ?? 'unknown'
+                      if (!acc[key]) acc[key] = { customer: s.customer, sales: [] as OutlierSale[] }
+                      acc[key].sales.push(s)
+                      return acc
+                    }, {} as Record<string, { customer: OutlierSale['customer']; sales: OutlierSale[] }>)
+                    return Object.entries(grouped).map(([key, group]) => {
+                      const isCollapsed = collapsedCustomers.has(key)
+                      const totalAmount = group.sales.reduce((s, sa) => s + Number(sa.total_price), 0)
+                      const totalOut = group.sales.reduce((s, sa) => s + Number(sa.outstanding ?? 0), 0)
+                      const totalQty = group.sales.reduce((s, sa) => s + Number(sa.quantity_sold), 0)
+                      return (
+                        <div key={key}>
+                          <button type="button" onClick={() => toggleCustomer(key)}
+                            className="w-full px-5 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left transition-colors">
+                            <div className="flex items-center gap-2">
+                              {isCollapsed ? <ChevronRight size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                              <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded font-medium">{group.customer?.customer_id ?? '—'}</span>
+                              <span className="text-sm font-medium text-gray-900">{group.customer?.name ?? '—'}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className="text-gray-500">{group.sales.length} sale{group.sales.length !== 1 ? 's' : ''}</span>
+                              <span className="text-gray-700 font-semibold">{totalQty.toLocaleString()} pcs</span>
+                              <span className="text-gray-700 font-semibold">{fmt(totalAmount)}</span>
+                              {totalOut > 0 && <span className="text-red-600 font-bold">{fmt(totalOut)} owing</span>}
+                            </div>
+                          </button>
+                          {!isCollapsed && (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-gray-100">
+                                  {['Sale ID','Type','Qty','Total','Paid','Outstanding','Status','Date',''].map(h => (
+                                    <th key={h} className="px-5 py-2.5 text-left text-xs font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.sales.map(s => {
+                                  const sCfg = STATUS_CONFIG[s.status] ?? STATUS_CONFIG.pending_approval
+                                  const out = Number(s.outstanding ?? 0)
+                                  return (
+                                    <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                      <td className="px-5 py-3 whitespace-nowrap">
+                                        <span className="font-mono text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">{s.sale_id}</span>
+                                      </td>
+                                      <td className="px-5 py-3 whitespace-nowrap">
+                                        <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${TYPE_COLORS[s.type]}`}>{s.type}</span>
+                                      </td>
+                                      <td className="px-5 py-3 font-bold text-gray-900 whitespace-nowrap">{s.quantity_sold.toLocaleString()}</td>
+                                      <td className="px-5 py-3 font-bold text-gray-900 whitespace-nowrap">{fmt(s.total_price)}</td>
+                                      <td className="px-5 py-3 font-medium text-green-700 whitespace-nowrap">{fmt(s.amount_paid ?? 0)}</td>
+                                      <td className={`px-5 py-3 font-bold whitespace-nowrap ${out > 0 ? 'text-red-600' : 'text-gray-400'}`}>{out > 0 ? fmt(out) : '—'}</td>
+                                      <td className="px-5 py-3 whitespace-nowrap">
+                                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${sCfg.color}`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full ${sCfg.dot}`} />
+                                          {sCfg.label}
+                                        </span>
+                                      </td>
+                                      <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
+                                        {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                      </td>
+                                      <td className="px-5 py-3 whitespace-nowrap">
+                                        <button onClick={() => router.push(`/portal/inventory/outlier/sale/${s.id}`)}
+                                          className="text-gray-400 hover:text-brand-600"><Eye size={14} /></button>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
               )}
             </div>
           )}

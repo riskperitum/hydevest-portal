@@ -19,6 +19,9 @@ interface CustomerRow {
   active_cases: number
   split_pallets: number
   box_containers: number
+  outlier_sales: number
+  outlier_revenue: number
+  outlier_outstanding: number
 }
 
 const fmt = (n: number) => `₦${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -46,12 +49,14 @@ export default function CustomerProfilesPage() {
       { data: badDebtData },
       { data: legalData },
       { data: palletData },
+      { data: outlierData },
     ] = await Promise.all([
       supabase.from('customers').select('id, customer_id, name, phone, address, is_active').order('name'),
       supabase.from('sales_orders').select('id, customer_id, sale_type, container_id, customer_payable, outstanding_balance, payment_status, container:containers(container_id, tracking_number)'),
       supabase.from('bad_debts').select('customer_id, amount_ngn, status'),
       supabase.from('legal_case_customers').select('customer_id, case:legal_cases!legal_case_customers_case_id_fkey(id, status)'),
       supabase.from('sales_order_pallets').select('order_id, pallets_sold'),
+      supabase.from('outlier_sales').select('customer_id, total_price, amount_paid, outstanding, status').eq('status', 'approved'),
     ])
 
     const ordersMap: Record<string, { count: number; revenue: number; outstanding: number }> = {}
@@ -90,6 +95,14 @@ export default function CustomerProfilesPage() {
       }
     }
 
+    const outlierMap: Record<string, { count: number; revenue: number; outstanding: number }> = {}
+    for (const s of (outlierData ?? [])) {
+      if (!outlierMap[s.customer_id]) outlierMap[s.customer_id] = { count: 0, revenue: 0, outstanding: 0 }
+      outlierMap[s.customer_id].count++
+      outlierMap[s.customer_id].revenue     += Number(s.total_price)
+      outlierMap[s.customer_id].outstanding += Number(s.outstanding ?? 0)
+    }
+
     const caseMap: Record<string, number> = {}
     for (const l of (legalData ?? [])) {
       const status = (l.case as any)?.status ?? ''
@@ -112,6 +125,9 @@ export default function CustomerProfilesPage() {
       active_cases:      caseMap[c.id]                ?? 0,
       split_pallets:     splitPalletsMap[c.id]        ?? 0,
       box_containers:    boxContainersMap[c.id]?.size ?? 0,
+      outlier_sales:        outlierMap[c.id]?.count       ?? 0,
+      outlier_revenue:      outlierMap[c.id]?.revenue     ?? 0,
+      outlier_outstanding:  outlierMap[c.id]?.outstanding ?? 0,
     })))
 
     setLoading(false)
@@ -152,7 +168,7 @@ export default function CustomerProfilesPage() {
     })
 
   function exportToCSV() {
-    const headers = ['Customer','Customer ID','Phone','Orders','Split Pallets','Box Containers','Revenue','Outstanding','Bad Debt','Active Cases','Status']
+    const headers = ['Customer','Customer ID','Phone','Orders','Split Pallets','Box Containers','Outlier Sales','Outlier Revenue','Outlier Outstanding','Revenue','Outstanding','Bad Debt','Active Cases','Status']
     const rows = filtered.map(c => [
       c.name,
       c.customer_id,
@@ -160,6 +176,9 @@ export default function CustomerProfilesPage() {
       c.total_orders,
       c.split_pallets,
       c.box_containers,
+      c.outlier_sales,
+      c.outlier_revenue,
+      c.outlier_outstanding,
       c.total_revenue,
       c.total_outstanding,
       c.total_bad_debt,

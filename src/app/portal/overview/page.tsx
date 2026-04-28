@@ -152,13 +152,14 @@ export default function OverviewPage() {
         id, customer_payable, created_at,
         customer:customers!sales_orders_customer_id_fkey(name),
         container:containers!sales_orders_container_id_fkey(container_id)
-      `)).order('created_at', { ascending: false }).limit(5),
+      `)).order('created_at', { ascending: false }).limit(10),
       dateFilter(supabase.from('recoveries').select(`
         id, amount_paid, payment_date, created_at,
         sales_order:sales_orders!recoveries_sales_order_id_fkey(
+          order_id,
           customer:customers!sales_orders_customer_id_fkey(name)
         )
-      `)).order('created_at', { ascending: false }).limit(5),
+      `)).order('created_at', { ascending: false }).limit(10),
       supabase.from('tasks').select(`
         id, task_id, title, module, priority, created_at,
         requested_by_profile:profiles!tasks_requested_by_fkey(full_name)
@@ -195,6 +196,7 @@ export default function OverviewPage() {
     const debtors = Object.values(debtorMap)
       .filter(d => d.outstanding > 0)
       .sort((a, b) => b.outstanding - a.outstanding)
+      .slice(0, 10)
 
     // Container data for chart
     const contData = (containers ?? []).map((c: any) => {
@@ -493,11 +495,11 @@ export default function OverviewPage() {
           </div>
         </div>
 
-        {/* Pending tasks */}
+        {/* Recent recoveries */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">Pending tasks</h3>
-            <button onClick={() => router.push('/portal/tasks')} className="text-xs text-brand-600 hover:underline">All →</button>
+            <h3 className="text-sm font-semibold text-gray-700">Recent recoveries</h3>
+            <button onClick={() => router.push('/portal/recoveries')} className="text-xs text-brand-600 hover:underline">All →</button>
           </div>
           <div className="divide-y divide-gray-50">
             {loading ? (
@@ -507,28 +509,22 @@ export default function OverviewPage() {
                   <div className="h-3 bg-gray-100 rounded w-16" />
                 </div>
               ))
-            ) : pendingTaskList.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 gap-2">
-                <CheckCircle2 size={20} className="text-green-300" />
-                <p className="text-xs text-gray-400">All clear!</p>
-              </div>
-            ) : pendingTaskList.map(task => (
-              <button key={task.id}
-                onClick={() => router.push('/portal/tasks')}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-gray-800 truncate">{task.title}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded capitalize ${PRIORITY_COLOR[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {task.priority}
-                      </span>
-                      <span className="text-xs text-gray-400">{MODULE_LABEL[task.module] ?? task.module}</span>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-400 shrink-0">{timeAgo(task.created_at)}</span>
+            ) : recentRecoveries.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-400">No recoveries yet</div>
+            ) : recentRecoveries.map((rec: any) => (
+              <div key={rec.id} className="px-4 py-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">
+                    {(rec.sales_order as any)?.customer?.name ?? '—'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {(rec.sales_order as any)?.order_id ?? '—'} · {timeAgo(rec.created_at)}
+                  </p>
                 </div>
-              </button>
+                <span className="text-xs font-semibold text-green-700 shrink-0">
+                  {fmt(Number(rec.amount_paid))}
+                </span>
+              </div>
             ))}
           </div>
         </div>

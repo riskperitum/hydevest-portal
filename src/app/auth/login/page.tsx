@@ -16,6 +16,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null)
 
   const urlError = searchParams.get('error')
+  const urlMsg = searchParams.get('msg')
   const nextPath = searchParams.get('next')
   const safeNext =
     nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')
@@ -27,12 +28,22 @@ function LoginForm() {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      setError(error.message)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error || !data.user) {
+      setError(error?.message ?? 'Login failed')
       setLoading(false)
       return
     }
+
+    // Register this session as the active one (overrides any other active sessions)
+    const sessionToken = `${data.user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    sessionStorage.setItem('session_token', sessionToken)
+    await supabase.from('user_sessions').upsert({
+      user_id: data.user.id,
+      session_token: sessionToken,
+      last_active: new Date().toISOString(),
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+    })
     router.push(safeNext)
     router.refresh()
   }
@@ -51,6 +62,9 @@ function LoginForm() {
           <form onSubmit={handleLogin} className="space-y-4">
             {urlError && (
               <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">{urlError}</div>
+            )}
+            {urlMsg && !urlError && (
+              <div className="p-3 rounded-lg bg-amber-50 text-amber-700 text-sm">{urlMsg}</div>
             )}
             {error && (
               <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">{error}</div>

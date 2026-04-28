@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 import PortalShell from '@/components/layout/PortalShell'
+import SessionGuard from '@/components/auth/SessionGuard'
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -57,6 +58,7 @@ export default async function PortalLayout({ children }: { children: React.React
             </PortalShell>
           </div>
         </main>
+        <SessionGuard userId={user.id} />
       </div>
     </div>
   )

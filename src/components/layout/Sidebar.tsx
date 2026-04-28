@@ -65,9 +65,11 @@ const NAV: NavItem[] = [
   },
   {
     label: 'Inventory',
-    href: '/portal/inventory',
     icon: Package,
-    permKey: 'inventory.view',
+    children: [
+      { label: 'Stock',   href: '/portal/inventory',           permKey: 'inventory.view', exactMatch: true },
+      { label: 'Outlier', href: '/portal/inventory/outlier',   permKey: 'outlier.view'   },
+    ],
   },
   {
     label: 'Partnership',
@@ -126,7 +128,7 @@ const PARTNER_NAV: NavItem[] = [
 
 export default function Sidebar({ isPartner }: { isPartner: boolean }) {
   const pathname = usePathname()
-  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales'])
+  const [openGroups, setOpenGroups] = useState<string[]>(['Purchase', 'Sales', 'Inventory'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 

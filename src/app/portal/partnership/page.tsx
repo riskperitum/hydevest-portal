@@ -10,6 +10,7 @@ import {
 import Modal from '@/components/ui/Modal'
 import PermissionGate from '@/components/ui/PermissionGate'
 import { usePermissions, can } from '@/lib/permissions/hooks'
+import PartnersTab from '@/app/portal/accounts/tabs/PartnersTab'
 
 interface ContainerPartnerRow {
   container_db_id: string
@@ -68,7 +69,7 @@ export default function PartnershipPage() {
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
 
-  const [activeTab, setActiveTab] = useState<'containers' | 'partners'>('containers')
+  const [activeTab, setActiveTab] = useState<'containers' | 'partners' | 'manage'>('containers')
   const [containers, setContainers] = useState<ContainerPartnerRow[]>([])
   const [partnerRows, setPartnerRows] = useState<PartnerSummaryRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -304,8 +305,9 @@ export default function PartnershipPage() {
         {/* Tab bar */}
         <div className="flex border-b border-gray-100">
           {[
-            { key: 'containers', label: 'By Container', count: containers.length },
-            { key: 'partners', label: 'By Partner', count: partnerRows.length },
+            { key: 'containers', label: 'By Container',  count: containers.length  },
+            { key: 'partners',   label: 'By Partner',    count: partnerRows.length },
+            { key: 'manage',     label: 'Manage Partners', count: 0 },
           ].map(tab => (
             <button key={tab.key}
               onClick={() => { setActiveTab(tab.key as typeof activeTab); setSearch(''); setStatusFilter('') }}
@@ -321,6 +323,7 @@ export default function PartnershipPage() {
         </div>
 
         {/* Search + filter bar — inside the panel, below tabs */}
+        {activeTab !== 'manage' && (
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -337,6 +340,7 @@ export default function PartnershipPage() {
             </button>
           )}
         </div>
+        )}
 
         {/* Filter row */}
         {showFilters && activeTab === 'containers' && (
@@ -537,6 +541,12 @@ export default function PartnershipPage() {
                 </tfoot>
               )}
             </table>
+          </div>
+        )}
+
+        {activeTab === 'manage' && (
+          <div className="p-4">
+            <PartnersTab />
           </div>
         )}
       </div>

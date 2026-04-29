@@ -56,7 +56,7 @@ export default function RecoveriesPage() {
   const [orders, setOrders] = useState<RecoverySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [transactions, setTransactions] = useState<RecoveryTransaction[]>([])
-  const [viewMode, setViewMode] = useState<'orders' | 'transactions'>('orders')
+  const [viewMode, setViewMode] = useState<'orders' | 'transactions'>('transactions')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)

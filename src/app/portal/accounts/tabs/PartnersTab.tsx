@@ -267,6 +267,7 @@ export default function PartnersTab() {
         addLabel="Add partner"
         searchPlaceholder="Search partners..."
         emptyMessage="No partners yet."
+        onRowClick={(row) => router.push(`/portal/partnership/partner/${row.id}`)}
         rowActions={row => [
           { label: 'Edit details',       onClick: () => openEdit(row) },
           { label: 'View in partnership', onClick: () => router.push(`/portal/partnership/partner/${row.id}`) },

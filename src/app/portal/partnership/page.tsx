@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Search, Package, TrendingUp, Wallet,
   Users, AlertTriangle, AlertCircle, ChevronRight, Filter
@@ -66,10 +66,11 @@ const CONTAINER_STATUS_COLOR: Record<string, string> = {
 
 export default function PartnershipPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { permissions, isSuperAdmin } = usePermissions()
   const canViewCosts = can(permissions, isSuperAdmin, 'view_costs')
-
-  const [activeTab, setActiveTab] = useState<'containers' | 'partners' | 'manage'>('containers')
+  const initialTab = searchParams.get('tab') === 'manage' ? 'manage' : searchParams.get('tab') === 'partners' ? 'partners' : 'containers'
+  const [activeTab, setActiveTab] = useState<'containers' | 'partners' | 'manage'>(initialTab)
   const [containers, setContainers] = useState<ContainerPartnerRow[]>([])
   const [partnerRows, setPartnerRows] = useState<PartnerSummaryRow[]>([])
   const [loading, setLoading] = useState(true)

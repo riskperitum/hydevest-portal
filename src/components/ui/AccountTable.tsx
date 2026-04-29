@@ -20,6 +20,7 @@ interface AccountTableProps<T> {
   searchPlaceholder?: string
   emptyMessage?: string
   rowActions?: (row: T) => { label: string; onClick: () => void; danger?: boolean; icon?: React.ReactNode }[]
+  onRowClick?: (row: T) => void
 }
 
 interface DropdownState {
@@ -30,7 +31,7 @@ interface DropdownState {
 
 export default function AccountTable<T>({
   columns, data, loading, onAdd, addLabel,
-  searchPlaceholder = 'Search...', emptyMessage = 'No records found.', rowActions,
+  searchPlaceholder = 'Search...', emptyMessage = 'No records found.', rowActions, onRowClick,
 }: AccountTableProps<T>) {
   const [search, setSearch] = useState('')
   const [dropdown, setDropdown] = useState<DropdownState | null>(null)
@@ -119,14 +120,16 @@ export default function AccountTable<T>({
                 </td>
               </tr>
             ) : paginated.map((row, i) => (
-              <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+              <tr key={i}
+                onClick={() => onRowClick?.(row)}
+                className={`border-b border-gray-50 hover:bg-gray-50/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}>
                 {columns.map(col => (
                   <td key={col.key} className="px-4 py-3 text-gray-700">
                     {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '—')}
                   </td>
                 ))}
                 {rowActions && (
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={e => openDropdown(e, i)}
                       className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">

@@ -27,6 +27,9 @@ interface ContainerSalesRow {
   sales_to_date: number
   recovery_to_date: number
   receivables: number
+  effective_landing_cost: number | null
+  net_difference: number
+  is_in_profit: boolean
 
   // Inventory
   pieces_remaining: number
@@ -65,7 +68,7 @@ export default function ContainerSalesReportPage() {
       { data: palletDists },
     ] = await Promise.all([
       supabase.from('presales').select('id, presale_id, container_id, sale_type, status, expected_sale_revenue, price_per_piece, warehouse_confirmed_pieces, total_number_of_pallets'),
-      supabase.from('containers').select('id, container_id, tracking_number, trip_id'),
+      supabase.from('containers').select('id, container_id, tracking_number, trip_id, estimated_landing_cost, effective_landing_cost'),
       supabase.from('sales_orders').select('id, presale_id, container_id, customer_payable, sale_type'),
       supabase.from('recoveries').select('sales_order_id, amount_paid, payment_type'),
       supabase.from('presale_pallet_distributions').select('id, presale_id, pallet_pieces, number_of_pallets, pallets_sold'),
@@ -160,6 +163,9 @@ export default function ContainerSalesReportPage() {
         sales_to_date: salesToDate,
         recovery_to_date: recoveryToDate,
         receivables: Math.max(receivables, 0),
+        effective_landing_cost: container?.effective_landing_cost ?? container?.estimated_landing_cost ?? null,
+        net_difference: recoveryToDate - Number(container?.effective_landing_cost ?? container?.estimated_landing_cost ?? 0),
+        is_in_profit: (recoveryToDate - Number(container?.effective_landing_cost ?? container?.estimated_landing_cost ?? 0)) >= 0,
         pieces_remaining: piecesRemaining,
         pallets_remaining: palletsRemaining,
         unsold_stock_value: unsoldStockValue,
@@ -396,8 +402,8 @@ export default function ContainerSalesReportPage() {
               <tr className="bg-gray-50 border-b border-gray-100">
                 {[
                   'Tracking No.', 'Container', 'Presale', 'Trip', 'Type',
-                  'Expected Revenue', 'Sales to Date', 'Recovery to Date',
-                  'Receivables', 'Unsold Stock Value', 'Sales Status'
+                  'Effective Landing Cost', 'Expected Revenue', 'Sales to Date', 'Recovery to Date',
+                  'Net Difference', 'Profit Status', 'Receivables', 'Unsold Stock Value', 'Sales Status'
                 ].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
@@ -407,14 +413,14 @@ export default function ContainerSalesReportPage() {
               {loading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({ length: 11 }).map((_, j) => (
+                    {Array.from({ length: 14 }).map((_, j) => (
                       <td key={j} className="px-3 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse w-3/4" /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-16 text-center">
+                  <td colSpan={14} className="px-4 py-16 text-center">
                     <p className="text-sm text-gray-400">No presaled containers found.</p>
                   </td>
                 </tr>
@@ -439,9 +445,22 @@ export default function ContainerSalesReportPage() {
                         {row.sale_type === 'box_sale' ? 'Box' : 'Split'}
                       </span>
                     </td>
+                    <td className="px-3 py-3 font-medium text-gray-700 whitespace-nowrap">
+                      {row.effective_landing_cost !== null ? fmt(row.effective_landing_cost) : '—'}
+                    </td>
                     <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{fmt(row.expected_revenue)}</td>
                     <td className="px-3 py-3 text-blue-700 font-medium whitespace-nowrap">{row.sales_to_date > 0 ? fmt(row.sales_to_date) : '—'}</td>
                     <td className="px-3 py-3 text-green-600 font-medium whitespace-nowrap">{row.recovery_to_date > 0 ? fmt(row.recovery_to_date) : '—'}</td>
+                    <td className={`px-3 py-3 font-bold whitespace-nowrap ${row.net_difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {row.effective_landing_cost !== null ? `${row.net_difference >= 0 ? '+' : ''}${fmt(row.net_difference)}` : '—'}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {row.effective_landing_cost !== null ? (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${row.is_in_profit ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {row.is_in_profit ? 'In profit' : 'Not yet in profit'}
+                        </span>
+                      ) : <span className="text-xs text-gray-400">—</span>}
+                    </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className={`font-semibold ${row.receivables > 0 ? 'text-red-500' : 'text-green-600'}`}>
                         {row.receivables > 0 ? fmt(row.receivables) : '—'}

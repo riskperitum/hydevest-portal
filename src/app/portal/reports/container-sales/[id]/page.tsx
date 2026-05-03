@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Loader2, Package, TrendingUp, Wallet, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp, Wallet, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 
 interface ContainerDetail {
@@ -21,6 +21,7 @@ interface ContainerDetail {
   price_per_piece: number | null
   price_per_kilo: number | null
   expected_revenue: number
+  effective_landing_cost: number | null
 }
 
 interface SalesOrderRow {
@@ -74,7 +75,7 @@ export default function ContainerSalesDrilldownPage() {
     // Load container + presale
     const { data: cont } = await supabase
       .from('containers')
-      .select('id, container_id, tracking_number, pieces_purchased, status, trip_id')
+      .select('id, container_id, tracking_number, pieces_purchased, status, trip_id, estimated_landing_cost, effective_landing_cost')
       .eq('id', containerId)
       .single()
 
@@ -94,6 +95,7 @@ export default function ContainerSalesDrilldownPage() {
       pieces_purchased: cont.pieces_purchased ?? 0,
       status: cont.status,
       trip: trip ?? null,
+      effective_landing_cost: (cont as any).effective_landing_cost ?? (cont as any).estimated_landing_cost ?? null,
       presale_id: presale?.presale_id ?? '—',
       presale_db_id: presale?.id ?? '',
       sale_type: presale?.sale_type ?? '—',
@@ -189,6 +191,9 @@ export default function ContainerSalesDrilldownPage() {
   const totalSales = salesOrders.reduce((s, o) => s + o.customer_payable, 0)
   const totalRecovery = recoveries.reduce((s, r) => s + r.amount_paid, 0)
   const totalReceivables = Math.max(totalSales - totalRecovery, 0)
+  const effectiveLandingCost = container?.effective_landing_cost ?? null
+  const netDifference = effectiveLandingCost !== null ? totalRecovery - Number(effectiveLandingCost) : null
+  const isInProfit = netDifference !== null && netDifference >= 0
   const progressPct = container?.expected_revenue
     ? Math.min((totalRecovery / container.expected_revenue) * 100, 100)
     : 0
@@ -224,13 +229,15 @@ export default function ContainerSalesDrilldownPage() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {[
+          { label: 'Effective landing cost', value: effectiveLandingCost !== null ? fmt(Number(effectiveLandingCost)) : '—', icon: <Wallet size={14} className="text-gray-600" />, color: 'text-gray-800', bg: 'bg-gray-50' },
           { label: 'Expected revenue', value: fmt(container.expected_revenue), icon: <Wallet size={14} className="text-brand-600" />, color: 'text-brand-700', bg: 'bg-brand-50' },
           { label: 'Sales to date', value: totalSales > 0 ? fmt(totalSales) : '—', icon: <TrendingUp size={14} className="text-blue-600" />, color: 'text-blue-700', bg: 'bg-blue-50' },
           { label: 'Recovery to date', value: totalRecovery > 0 ? fmt(totalRecovery) : '—', icon: <CheckCircle2 size={14} className="text-green-600" />, color: 'text-green-700', bg: 'bg-green-50' },
+          { label: 'Net difference', value: netDifference !== null ? `${netDifference >= 0 ? '+' : ''}${fmt(netDifference)}` : '—', icon: <TrendingUp size={14} className={isInProfit ? 'text-green-600' : 'text-red-500'} />, color: isInProfit ? 'text-green-700' : 'text-red-600', bg: isInProfit ? 'bg-green-50' : 'bg-red-50' },
+          { label: 'Profit status', value: effectiveLandingCost !== null ? (isInProfit ? 'In profit' : 'Not yet in profit') : '—', icon: <CheckCircle2 size={14} className={isInProfit ? 'text-green-600' : 'text-amber-500'} />, color: isInProfit ? 'text-green-700' : 'text-amber-700', bg: isInProfit ? 'bg-green-50' : 'bg-amber-50' },
           { label: 'Receivables', value: totalReceivables > 0 ? fmt(totalReceivables) : '—', icon: <AlertTriangle size={14} className={totalReceivables > 0 ? 'text-red-500' : 'text-green-500'} />, color: totalReceivables > 0 ? 'text-red-600' : 'text-green-600', bg: totalReceivables > 0 ? 'bg-red-50' : 'bg-green-50' },
-          { label: 'Orders', value: salesOrders.length.toString(), icon: <Package size={14} className="text-gray-500" />, color: 'text-gray-700', bg: 'bg-gray-50' },
         ].map(m => (
           <div key={m.label} className={`${m.bg} rounded-xl border border-white shadow-sm p-4`}>
             <div className="flex items-center gap-2 mb-1.5">

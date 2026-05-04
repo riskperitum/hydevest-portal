@@ -229,7 +229,7 @@ export default function ContainerSalesDrilldownPage() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Effective landing cost', value: effectiveLandingCost !== null ? fmt(Number(effectiveLandingCost)) : '—', icon: <Wallet size={14} className="text-gray-600" />, color: 'text-gray-800', bg: 'bg-gray-50' },
           { label: 'Expected revenue', value: fmt(container.expected_revenue), icon: <Wallet size={14} className="text-brand-600" />, color: 'text-brand-700', bg: 'bg-brand-50' },
